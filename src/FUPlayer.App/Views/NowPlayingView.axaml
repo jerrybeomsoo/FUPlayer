@@ -1,0 +1,221 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:FUPlayer.App.ViewModels"
+             xmlns:controls="using:FUPlayer.App.Controls"
+             x:Class="FUPlayer.App.Views.NowPlayingView"
+             x:DataType="vm:NowPlayingViewModel">
+  <UserControl.Resources>
+    <DataTemplate x:Key="MeterTemplate" x:DataType="vm:MeterChannelViewModel">
+      <Grid RowDefinitions="Auto,*,Auto" Width="20">
+        <TextBlock Text="{Binding PeakText}" FontSize="9" Classes="muted numeric" Classes.danger="{Binding IsOver}" HorizontalAlignment="Center" />
+        <controls:LevelMeterBar Grid.Row="1" Margin="2,4" RangeDb="60"
+                                PeakDb="{Binding PeakDb}" RmsDb="{Binding RmsDb}" HoldDb="{Binding HoldDb}" IsOver="{Binding IsOver}" />
+        <TextBlock Grid.Row="2" Text="{Binding Label}" FontSize="10" Classes="secondary" HorizontalAlignment="Center" />
+      </Grid>
+    </DataTemplate>
+  </UserControl.Resources>
+
+  <Grid RowDefinitions="Auto,*" Margin="28,22,28,20">
+    <Grid ColumnDefinitions="Auto,*,Auto">
+      <Border Width="264" Height="264" CornerRadius="16" BoxShadow="0 16 40 0 #66000000" VerticalAlignment="Top">
+        <Border CornerRadius="16" ClipToBounds="True" Background="{StaticResource SurfaceHighBrush}">
+          <Panel>
+            <controls:LineIcon Data="{x:Static controls:Icons.Music}" Width="72" Height="72" StrokeThickness="1.2" Foreground="{StaticResource TextMutedBrush}" />
+            <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+          </Panel>
+        </Border>
+      </Border>
+
+      <StackPanel Grid.Column="1" Margin="30,4,24,0" Spacing="5" VerticalAlignment="Top">
+        <Panel>
+          <TextBlock Classes="eyebrow" Text="NOW PLAYING" IsVisible="{Binding IsActive}" />
+          <TextBlock Classes="eyebrow" Text="STOPPED" IsVisible="{Binding !IsActive}" />
+        </Panel>
+        <TextBlock Classes="display" Text="{Binding Title}" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
+        <TextBlock Text="{Binding Artist}" FontSize="18" Classes="secondary" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
+        <TextBlock Text="{Binding Album}" FontSize="15" Classes="muted" TextTrimming="CharacterEllipsis" />
+        <TextBlock Text="{Binding Details}" Classes="muted small" Margin="0,2,0,0" />
+
+        <Border Classes="inset" Margin="0,16,0,0" Padding="16,12" IsVisible="{Binding IsActive}" HorizontalAlignment="Left">
+          <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+            <TextBlock Grid.Row="0" Text="SOURCE" Classes="eyebrow" VerticalAlignment="Center" Margin="0,4,20,4" />
+            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SourceFormat}" FontWeight="Medium" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="1" Text="FILTER" Classes="eyebrow" VerticalAlignment="Center" Margin="0,4,20,4" />
+            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding FilterName}" FontWeight="Medium" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="2" Text="{Binding QuantizerLabel}" Classes="eyebrow" VerticalAlignment="Center" Margin="0,4,20,4" />
+            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding QuantizerName}" FontWeight="Medium" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="3" Text="OUTPUT" Classes="eyebrow" VerticalAlignment="Center" Margin="0,4,20,4" />
+            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding OutputFormat}" FontWeight="SemiBold" Classes="accent" Classes.dsd="{Binding IsDsdOutput}" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding OutputNote}" Classes="muted small" TextWrapping="Wrap" MaxWidth="460" HorizontalAlignment="Left"
+                       Margin="0,0,0,4" IsVisible="{Binding HasOutputNote}" />
+            <TextBlock Grid.Row="5" Text="DEVICE" Classes="eyebrow" VerticalAlignment="Center" Margin="0,4,20,4" />
+            <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Device}" Classes="secondary" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+          </Grid>
+        </Border>
+      </StackPanel>
+
+      <Border Grid.Column="2" Classes="card" Padding="16,14" VerticalAlignment="Top">
+        <Grid ColumnDefinitions="Auto,Auto,Auto" RowDefinitions="Auto,236">
+          <TextBlock Classes="eyebrow" Text="SOURCE" HorizontalAlignment="Center" Margin="0,0,0,8" />
+          <TextBlock Grid.Column="2" Classes="eyebrow" Text="OUTPUT" HorizontalAlignment="Center" Margin="0,0,0,8" IsVisible="{Binding HasOutputMeters}" />
+          <ItemsControl Grid.Row="1" ItemsSource="{Binding SourceMeters}" ItemTemplate="{StaticResource MeterTemplate}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" Spacing="4" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+          </ItemsControl>
+          <Grid Grid.Row="1" Grid.Column="1" RowDefinitions="Auto,*,Auto,*,Auto,*,Auto" Margin="8,10,8,13" Width="24">
+            <TextBlock Grid.Row="0" Text="0" FontSize="9" Classes="muted" HorizontalAlignment="Center" />
+            <TextBlock Grid.Row="2" Text="−20" FontSize="9" Classes="muted" HorizontalAlignment="Center" />
+            <TextBlock Grid.Row="4" Text="−40" FontSize="9" Classes="muted" HorizontalAlignment="Center" />
+            <TextBlock Grid.Row="6" Text="−60" FontSize="9" Classes="muted" HorizontalAlignment="Center" />
+          </Grid>
+          <ItemsControl Grid.Row="1" Grid.Column="2" ItemsSource="{Binding OutputMeters}" ItemTemplate="{StaticResource MeterTemplate}" IsVisible="{Binding HasOutputMeters}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" Spacing="4" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+          </ItemsControl>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,20,0,0">
+      <Border Classes="card" Padding="16,12,16,14">
+        <Grid RowDefinitions="Auto,Auto,Auto,*">
+          <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+            <TextBlock Classes="h3" Text="Analyzer" VerticalAlignment="Center" />
+            <ItemsControl Grid.Column="1" ItemsSource="{Binding Analyzer.Legend}" Margin="18,0,12,0" VerticalAlignment="Center" ClipToBounds="True">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Orientation="Horizontal" Spacing="14" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:LegendItem">
+                  <StackPanel Orientation="Horizontal" Spacing="6" ToolTip.Tip="{Binding Name}">
+                    <Border Width="16" Height="4" CornerRadius="2" Background="{Binding Brush}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold" Classes="small" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Name}" Classes="muted small" VerticalAlignment="Center" />
+                  </StackPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <ListBox Grid.Column="2" Classes="segmented" ItemsSource="{Binding Analyzer.ViewChoices}" SelectedItem="{Binding Analyzer.SelectedView}" VerticalAlignment="Center" />
+            <Button Grid.Column="3" Classes="icon" Classes.on="{Binding Analyzer.ShowOptions}" Command="{Binding Analyzer.ToggleOptionsCommand}"
+                    Margin="8,0,0,0" VerticalAlignment="Center" ToolTip.Tip="Analyzer options: signal, channels, window, resolution, range and scale">
+              <controls:LineIcon Data="{x:Static controls:Icons.Settings}" Width="18" Height="18" />
+            </Button>
+          </Grid>
+
+          <TextBlock Grid.Row="1" Text="{Binding Analyzer.Summary}" Classes="muted small" TextTrimming="CharacterEllipsis" Margin="0,6,0,0" />
+
+          <Border Grid.Row="2" Classes="inset" Padding="12,10,12,2" Margin="0,10,0,0" IsVisible="{Binding Analyzer.ShowOptions}">
+            <WrapPanel>
+              <StackPanel Spacing="4" Margin="0,0,14,8">
+                <TextBlock Classes="eyebrow" Text="SIGNAL" />
+                <ComboBox ItemsSource="{Binding Analyzer.SignalChoices}" SelectedItem="{Binding Analyzer.SelectedSignal}" Width="160" MinWidth="160"
+                          ToolTip.Tip="{Binding Analyzer.SelectedSignal.Description}" />
+              </StackPanel>
+              <StackPanel Spacing="4" Margin="0,0,14,8">
+                <TextBlock Classes="eyebrow" Text="CHANNELS" />
+                <ComboBox ItemsSource="{Binding Analyzer.ChannelChoices}" SelectedItem="{Binding Analyzer.SelectedChannels}" Width="190" MinWidth="190" />
+              </StackPanel>
+              <StackPanel Spacing="4" Margin="0,0,14,8">
+                <TextBlock Classes="eyebrow" Text="WINDOW" />
+                <ComboBox ItemsSource="{Binding Analyzer.WindowChoices}" SelectedItem="{Binding Analyzer.SelectedWindow}" Width="160" MinWidth="160"
+                          ToolTip.Tip="{Binding Analyzer.SelectedWindow.Description}" />
+              </StackPanel>
+              <StackPanel Spacing="4" Margin="0,0,14,8">
+                <TextBlock Classes="eyebrow" Text="FFT SIZE" />
+                <ComboBox ItemsSource="{Binding Analyzer.FftSizeChoices}" SelectedItem="{Binding Analyzer.SelectedFftSize}" Width="140" MinWidth="140"
+                          ToolTip.Tip="More points give finer frequency detail but react more slowly." />
+              </StackPanel>
+              <StackPanel Spacing="4" Margin="0,0,14,8">
+                <TextBlock Classes="eyebrow" Text="FREQUENCY RANGE" />
+                <ComboBox ItemsSource="{Binding Analyzer.BandChoices}" SelectedItem="{Binding Analyzer.SelectedBand}" Width="220" MinWidth="220"
+                          ToolTip.Tip="{Binding Analyzer.SelectedBand.Description}" />
+              </StackPanel>
+              <StackPanel Spacing="4" Margin="0,0,14,8">
+                <TextBlock Classes="eyebrow" Text="SCALE" />
+                <ComboBox ItemsSource="{Binding Analyzer.ScaleChoices}" SelectedItem="{Binding Analyzer.SelectedScale}" Width="130" MinWidth="130" />
+              </StackPanel>
+              <StackPanel Spacing="4" Margin="0,0,14,8">
+                <TextBlock Classes="eyebrow" Text="FLOOR" />
+                <ComboBox ItemsSource="{Binding Analyzer.FloorChoices}" SelectedItem="{Binding Analyzer.SelectedFloor}" Width="110" MinWidth="110" />
+              </StackPanel>
+              <StackPanel Spacing="4" Margin="0,0,14,8">
+                <TextBlock Classes="eyebrow" Text="AVERAGING" />
+                <ComboBox ItemsSource="{Binding Analyzer.AveragingChoices}" SelectedItem="{Binding Analyzer.SelectedAveraging}" Width="110" MinWidth="110" />
+              </StackPanel>
+              <StackPanel Spacing="4" Margin="0,0,14,8" IsVisible="{Binding Analyzer.IsSpectrum}">
+                <TextBlock Classes="eyebrow" Text="PEAK HOLD" />
+                <ComboBox ItemsSource="{Binding Analyzer.PeakHoldChoices}" SelectedItem="{Binding Analyzer.SelectedPeakHold}" Width="110" MinWidth="110"
+                          ToolTip.Tip="A second line marking the highest level each frequency has reached" />
+              </StackPanel>
+            </WrapPanel>
+          </Border>
+
+          <Panel Grid.Row="3" Margin="0,12,0,0" MinHeight="120">
+            <controls:SpectrumView x:Name="Spectrum" IsVisible="{Binding Analyzer.IsSpectrum}" />
+            <controls:SpectrogramView x:Name="Spectrogram" IsVisible="{Binding Analyzer.IsSpectrogram}" />
+            <controls:WaterfallView x:Name="Waterfall" IsVisible="{Binding Analyzer.IsWaterfall}" />
+          </Panel>
+        </Grid>
+      </Border>
+
+      <Border Grid.Column="1" Classes="card" Width="270" Margin="16,0,0,0" Padding="16,14">
+        <ScrollViewer>
+          <StackPanel Spacing="9" Margin="0,0,14,0">
+            <TextBlock Classes="h3" Text="Engine" />
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="DSP load" Classes="muted" />
+              <TextBlock Grid.Column="1" Text="{Binding DspLoad}" Classes="numeric" />
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="FIFO fill" Classes="muted" />
+              <TextBlock Grid.Column="1" Text="{Binding Buffer}" Classes="numeric" />
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto" ToolTip.Tip="The filters' own group delay. It is part of what a linear-phase filter does; only a different filter changes it.">
+              <TextBlock Text="Filter delay" Classes="muted" />
+              <TextBlock Grid.Column="1" Text="{Binding Latency}" Classes="numeric" />
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding HasBlockDelay}"
+                  ToolTip.Tip="Extra wait from convolving in blocks. The samples that come out do not depend on it, so a shorter block gives it back at the cost of more arithmetic.">
+              <TextBlock Text="Block delay" Classes="muted" />
+              <TextBlock Grid.Column="1" Text="{Binding BlockDelay}" Classes="numeric" />
+            </Grid>
+            <TextBlock Text="{Binding Processing}" Classes="secondary small" TextWrapping="Wrap" />
+            <Border Classes="divider" Margin="0,2" />
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="Limiter events" Classes="muted" />
+              <TextBlock Grid.Column="1" Text="{Binding LimiterEvents}" Classes="numeric" Classes.warning="{Binding HasLimiterEvents}" />
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="Clipped samples" Classes="muted" />
+              <TextBlock Grid.Column="1" Text="{Binding ClippedSamples}" Classes="numeric" Classes.danger="{Binding HasClipping}" />
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="Modulator resets" Classes="muted" />
+              <TextBlock Grid.Column="1" Text="{Binding ModulatorResets}" Classes="numeric" Classes.danger="{Binding HasModulatorResets}" />
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="Underrun frames" Classes="muted" />
+              <TextBlock Grid.Column="1" Text="{Binding Underruns}" Classes="numeric" Classes.danger="{Binding HasUnderruns}" />
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="Band-edge ringing" Classes="muted" />
+              <TextBlock Grid.Column="1" Text="{Binding ApodizationEvents}" Classes="numeric" Classes.accent="{Binding HasApodization}" />
+            </Grid>
+            <Border Classes="divider" Margin="0,2" />
+            <TextBlock Text="{Binding Resampler}" Classes="muted small" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding Acceleration}" Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding HasAcceleration}" />
+            <TextBlock Text="{Binding Notes}" Classes="warning small" TextWrapping="Wrap" IsVisible="{Binding HasNotes}" />
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+    </Grid>
+  </Grid>
+</UserControl>

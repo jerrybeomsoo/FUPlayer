@@ -1,0 +1,113 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:FUPlayer.App.ViewModels"
+             xmlns:controls="using:FUPlayer.App.Controls"
+             x:Class="FUPlayer.App.Views.QueueView"
+             x:DataType="vm:QueueViewModel">
+  <Grid RowDefinitions="Auto,Auto,*" Margin="28,22,28,16">
+    <Grid ColumnDefinitions="*,Auto">
+      <StackPanel Spacing="4">
+        <TextBlock Classes="h1" Text="Queue" />
+        <TextBlock Classes="secondary" Text="{Binding Summary}" />
+      </StackPanel>
+      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+        <Button Classes="subtle" Command="{Binding AddFilesCommand}">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <controls:LineIcon Data="{x:Static controls:Icons.Music}" Width="16" Height="16" />
+            <TextBlock Text="Add files" />
+          </StackPanel>
+        </Button>
+        <Button Classes="subtle" Command="{Binding AddFolderCommand}">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <controls:LineIcon Data="{x:Static controls:Icons.Folder}" Width="16" Height="16" />
+            <TextBlock Text="Add folder" />
+          </StackPanel>
+        </Button>
+        <Button Classes="subtle" Command="{Binding OpenPlaylistCommand}">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <controls:LineIcon Data="{x:Static controls:Icons.Queue}" Width="16" Height="16" />
+            <TextBlock Text="Open playlist" />
+          </StackPanel>
+        </Button>
+        <Button Classes="subtle" Command="{Binding SavePlaylistCommand}" ToolTip.Tip="Save the queue as an M3U8 playlist">
+          <controls:LineIcon Data="{x:Static controls:Icons.Save}" Width="16" Height="16" />
+        </Button>
+        <Border Width="1" Background="{StaticResource LineBrush}" Margin="4,6" />
+        <Button Classes="subtle" Command="{Binding MoveUpCommand}" ToolTip.Tip="Move selected up  (Alt+Up)">
+          <controls:LineIcon Data="{x:Static controls:Icons.ArrowUp}" Width="16" Height="16" />
+        </Button>
+        <Button Classes="subtle" Command="{Binding MoveDownCommand}" ToolTip.Tip="Move selected down  (Alt+Down)">
+          <controls:LineIcon Data="{x:Static controls:Icons.ArrowDown}" Width="16" Height="16" />
+        </Button>
+        <Button Classes="subtle" Command="{Binding RemoveSelectedCommand}" CommandParameter="{Binding #QueueList.SelectedItems}" ToolTip.Tip="Remove selected  (Delete)">
+          <controls:LineIcon Data="{x:Static controls:Icons.Trash}" Width="16" Height="16" />
+        </Button>
+        <Button Classes="subtle" Command="{Binding ClearCommand}">
+          <TextBlock Text="Clear" />
+        </Button>
+      </StackPanel>
+    </Grid>
+
+    <Grid Grid.Row="1" ColumnDefinitions="52,44,*,*,130,70" Margin="12,20,12,6" IsVisible="{Binding !IsEmpty}">
+      <TextBlock Classes="eyebrow" Text="#" />
+      <TextBlock Grid.Column="2" Classes="eyebrow" Text="TITLE" />
+      <TextBlock Grid.Column="3" Classes="eyebrow" Text="ALBUM" />
+      <TextBlock Grid.Column="4" Classes="eyebrow" Text="FORMAT" />
+      <TextBlock Grid.Column="5" Classes="eyebrow" Text="TIME" HorizontalAlignment="Right" />
+    </Grid>
+
+    <Panel Grid.Row="2">
+      <ListBox x:Name="QueueList" Classes="table" ItemsSource="{Binding Items}" SelectionMode="Multiple" SelectedItem="{Binding SelectedItem}">
+        <ListBox.ContextMenu>
+          <ContextMenu>
+            <MenuItem Header="Play" InputGesture="Enter" Click="OnPlayClick" />
+            <MenuItem Header="Play next" Click="OnPlayNextClick" />
+            <Separator />
+            <MenuItem Header="Show in folder" Click="OnShowInFolderClick" />
+            <Separator />
+            <MenuItem Header="Remove from queue" InputGesture="Delete" Click="OnRemoveClick" />
+          </ContextMenu>
+        </ListBox.ContextMenu>
+        <ListBox.ItemTemplate>
+          <DataTemplate x:DataType="vm:QueueItemViewModel">
+            <Grid ColumnDefinitions="52,44,*,*,130,70" Background="Transparent">
+              <Panel VerticalAlignment="Center">
+                <TextBlock Text="{Binding Number}" Classes="muted numeric" IsVisible="{Binding !IsCurrent}" />
+                <controls:LineIcon Data="{x:Static controls:Icons.Play}" IsFilled="True" Width="14" Height="14" HorizontalAlignment="Left"
+                                   Foreground="{StaticResource AccentBrush}" IsVisible="{Binding IsCurrent}" />
+              </Panel>
+              <Border Grid.Column="1" Width="32" Height="32" CornerRadius="5" ClipToBounds="True" HorizontalAlignment="Left" Margin="0,0,12,0"
+                      Background="{StaticResource SurfaceHighBrush}">
+                <Panel>
+                  <controls:LineIcon Data="{x:Static controls:Icons.Music}" Width="14" Height="14" Foreground="{StaticResource TextMutedBrush}"
+                                     IsVisible="{Binding !HasThumbnail}" />
+                  <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
+                </Panel>
+              </Border>
+              <StackPanel Grid.Column="2" Margin="0,0,16,0" VerticalAlignment="Center">
+                <TextBlock Text="{Binding Title}" FontWeight="Medium" Classes.accent="{Binding IsCurrent}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Artist}" Classes="secondary small" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+              <TextBlock Grid.Column="3" Text="{Binding Album}" Classes="secondary" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,16,0" />
+              <Border Grid.Column="4" Classes="badge" Classes.dsd="{Binding IsDsd}" HorizontalAlignment="Left"
+                      IsVisible="{Binding Format, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                <TextBlock Text="{Binding Format}" />
+              </Border>
+              <TextBlock Grid.Column="5" Text="{Binding Duration}" Classes="secondary numeric" VerticalAlignment="Center" HorizontalAlignment="Right" />
+            </Grid>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <Canvas IsHitTestVisible="False">
+        <Border x:Name="DropIndicator" Height="2" CornerRadius="1" Background="{StaticResource AccentBrush}" IsVisible="False" />
+      </Canvas>
+
+      <StackPanel IsVisible="{Binding IsEmpty}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+        <controls:LineIcon Data="{x:Static controls:Icons.Queue}" Width="52" Height="52" StrokeThickness="1.2" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center" />
+        <TextBlock Classes="h2" Text="Nothing queued" HorizontalAlignment="Center" />
+        <TextBlock Classes="secondary" Text="Drop files, folders or playlists anywhere in the window, or add albums from the library." HorizontalAlignment="Center" />
+      </StackPanel>
+    </Panel>
+  </Grid>
+</UserControl>

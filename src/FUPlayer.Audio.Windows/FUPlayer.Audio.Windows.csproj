@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Windows audio back-ends (WASAPI exclusive/shared, ASIO incl. native DSD and DoP). -->
+  <PropertyGroup>
+    <RootNamespace>FUPlayer.Audio.Windows</RootNamespace>
+    <AssemblyName>FUPlayer.Audio.Windows</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FUPlayer.Core\FUPlayer.Core.csproj" />
+  </ItemGroup>
+
+</Project>

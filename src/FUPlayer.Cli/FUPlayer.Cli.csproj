@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Headless companion tool: device listing, offline rendering, DSP benchmarks. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>FUPlayer.Cli</RootNamespace>
+    <AssemblyName>fuplayer-cli</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FUPlayer.Core\FUPlayer.Core.csproj" />
+    <ProjectReference Include="..\FUPlayer.Audio.Windows\FUPlayer.Audio.Windows.csproj" />
+  </ItemGroup>
+
+</Project>

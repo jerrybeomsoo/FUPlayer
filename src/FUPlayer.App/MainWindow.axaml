@@ -1,0 +1,194 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:FUPlayer.App.ViewModels"
+        xmlns:views="using:FUPlayer.App.Views"
+        xmlns:controls="using:FUPlayer.App.Controls"
+        x:Class="FUPlayer.App.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="FUPlayer"
+        Icon="/Assets/fuplayer.ico"
+        Width="1440" Height="900"
+        MinWidth="1100" MinHeight="700"
+        WindowStartupLocation="CenterScreen">
+  <Grid RowDefinitions="*,Auto" ColumnDefinitions="Auto,*">
+
+    <!-- Navigation rail -->
+    <Border Grid.Row="0" Grid.Column="0" Width="220" Background="{StaticResource RailBrush}"
+            BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0">
+      <Grid RowDefinitions="Auto,*,Auto">
+        <StackPanel Orientation="Horizontal" Spacing="11" Margin="22,24,16,24">
+          <Border Width="34" Height="34" CornerRadius="10" Background="{StaticResource AccentBrush}">
+            <controls:LineIcon Data="{x:Static controls:Icons.Wave}" Width="22" Height="22" StrokeThickness="2.4"
+                               Foreground="{StaticResource OnAccentBrush}" />
+          </Border>
+          <StackPanel VerticalAlignment="Center" Spacing="1">
+            <TextBlock Text="FUPlayer" FontWeight="Bold" FontSize="16" />
+            <TextBlock Text="Free upscaling player" Classes="muted" FontSize="10.5" />
+          </StackPanel>
+        </StackPanel>
+
+        <ListBox Grid.Row="1" Classes="nav" ItemsSource="{Binding Navigation}" SelectedItem="{Binding SelectedNav}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:NavItem">
+              <StackPanel Orientation="Horizontal" Spacing="12" Margin="12,9">
+                <controls:LineIcon Data="{Binding Icon}" Width="19" Height="19" />
+                <TextBlock Text="{Binding Title}" FontSize="13.5" FontWeight="Medium" VerticalAlignment="Center" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+
+        <Border Grid.Row="2" Margin="12,0,12,14" Padding="12,10" CornerRadius="10" Background="{StaticResource SurfaceBrush}">
+          <StackPanel Spacing="7">
+            <TextBlock Classes="eyebrow" Text="ENGINE" />
+            <TextBlock Text="{Binding DeviceText}" Classes="secondary small" TextTrimming="CharacterEllipsis" />
+            <Grid ColumnDefinitions="38,*,44">
+              <TextBlock Text="DSP" Classes="muted small" VerticalAlignment="Center" />
+              <ProgressBar Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding DspLoad}" MinWidth="0" MinHeight="4" Height="4" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="2" Text="{Binding DspLoadText}" Classes="secondary small numeric" Classes.danger="{Binding IsDspOverloaded}" TextAlignment="Right" />
+            </Grid>
+            <Grid ColumnDefinitions="38,*,44">
+              <TextBlock Text="FIFO" Classes="muted small" VerticalAlignment="Center" />
+              <ProgressBar Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding BufferFill}" MinWidth="0" MinHeight="4" Height="4" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="2" Text="{Binding BufferText}" Classes="secondary small numeric" TextAlignment="Right" />
+            </Grid>
+          </StackPanel>
+        </Border>
+      </Grid>
+    </Border>
+
+    <!-- Pages -->
+    <Grid Grid.Row="0" Grid.Column="1" RowDefinitions="Auto,*">
+      <StackPanel Grid.Row="0">
+        <Border IsVisible="{Binding HasError}" Background="{StaticResource DangerSoftBrush}" CornerRadius="10" Margin="24,14,24,0" Padding="14,8">
+          <Grid ColumnDefinitions="Auto,*,Auto">
+            <controls:LineIcon Data="{x:Static controls:Icons.Warning}" Width="18" Height="18" Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="{Binding ErrorMessage}" TextWrapping="Wrap" Margin="12,0" VerticalAlignment="Center" />
+            <Button Grid.Column="2" Classes="icon" Padding="6" Command="{Binding DismissErrorCommand}" ToolTip.Tip="Dismiss">
+              <controls:LineIcon Data="{x:Static controls:Icons.Close}" Width="14" Height="14" />
+            </Button>
+          </Grid>
+        </Border>
+        <Border IsVisible="{Binding HasOverloadWarning}" Background="{StaticResource WarningSoftBrush}" CornerRadius="10" Margin="24,14,24,0" Padding="14,8">
+          <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+            <controls:LineIcon Data="{x:Static controls:Icons.Warning}" Width="18" Height="18" Foreground="{StaticResource WarningBrush}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="{Binding OverloadMessage}" TextWrapping="Wrap" Margin="12,0" VerticalAlignment="Center" />
+            <Button Grid.Column="2" Classes="subtle" Content="Open DSP studio" Command="{Binding OpenDspStudioCommand}" VerticalAlignment="Center" />
+            <Button Grid.Column="3" Classes="icon" Padding="6" Margin="6,0,0,0" Command="{Binding DismissOverloadCommand}" ToolTip.Tip="Dismiss">
+              <controls:LineIcon Data="{x:Static controls:Icons.Close}" Width="14" Height="14" />
+            </Button>
+          </Grid>
+        </Border>
+      </StackPanel>
+
+      <Panel Grid.Row="1">
+        <Panel IsVisible="{Binding NowPlayingNav.IsSelected}">
+          <views:NowPlayingView DataContext="{Binding NowPlaying}" />
+        </Panel>
+        <Panel IsVisible="{Binding QueueNav.IsSelected}">
+          <views:QueueView DataContext="{Binding Queue}" />
+        </Panel>
+        <Panel IsVisible="{Binding LibraryNav.IsSelected}">
+          <views:LibraryView DataContext="{Binding Library}" />
+        </Panel>
+        <Panel IsVisible="{Binding DspNav.IsSelected}">
+          <views:DspStudioView DataContext="{Binding Dsp}" />
+        </Panel>
+        <Panel IsVisible="{Binding OutputNav.IsSelected}">
+          <views:OutputView DataContext="{Binding Output}" />
+        </Panel>
+        <Panel IsVisible="{Binding CalibrationNav.IsSelected}">
+          <views:CalibrationView DataContext="{Binding Calibration}" />
+        </Panel>
+        <Panel IsVisible="{Binding SettingsNav.IsSelected}">
+          <views:SettingsView DataContext="{Binding General}" />
+        </Panel>
+      </Panel>
+    </Grid>
+
+    <!-- Transport bar -->
+    <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Background="{StaticResource SurfaceBrush}"
+            BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="14,10,18,10">
+      <Grid ColumnDefinitions="300,*,Auto,Auto">
+        <Grid ColumnDefinitions="Auto,*" VerticalAlignment="Center">
+          <Border Width="62" Height="62" CornerRadius="8" ClipToBounds="True" Background="{StaticResource SurfaceHighBrush}">
+            <Panel>
+              <controls:LineIcon Data="{x:Static controls:Icons.Music}" Width="24" Height="24" Foreground="{StaticResource TextMutedBrush}" />
+              <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+            </Panel>
+          </Border>
+          <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0" Spacing="3">
+            <TextBlock Text="{Binding TrackTitle}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis" />
+            <TextBlock Text="{Binding TrackSubtitle}" Classes="secondary small" TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+        </Grid>
+
+        <StackPanel Grid.Column="1" MaxWidth="660" VerticalAlignment="Center" Spacing="2">
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10">
+            <Button Classes="icon" Classes.on="{Binding Shuffle}" Command="{Binding ToggleShuffleCommand}" ToolTip.Tip="Shuffle">
+              <controls:LineIcon Data="{x:Static controls:Icons.Shuffle}" Width="18" Height="18" />
+            </Button>
+            <Button Classes="icon" Command="{Binding PreviousCommand}" ToolTip.Tip="Previous  (Ctrl+Left)">
+              <controls:LineIcon Data="{x:Static controls:Icons.Previous}" IsFilled="True" Width="20" Height="20" />
+            </Button>
+            <Button Classes="play" Command="{Binding PlayPauseCommand}" ToolTip.Tip="Play / pause  (Space)">
+              <Panel>
+                <controls:LineIcon Data="{x:Static controls:Icons.Play}" IsFilled="True" Width="24" Height="24" IsVisible="{Binding !IsPlaying}" />
+                <controls:LineIcon Data="{x:Static controls:Icons.Pause}" IsFilled="True" Width="24" Height="24" IsVisible="{Binding IsPlaying}" />
+              </Panel>
+            </Button>
+            <Button Classes="icon" Command="{Binding StopCommand}" IsEnabled="{Binding IsActive}" ToolTip.Tip="Stop and release the output device  (Ctrl+Period)">
+              <controls:LineIcon Data="{x:Static controls:Icons.Stop}" IsFilled="True" Width="18" Height="18" />
+            </Button>
+            <Button Classes="icon" Command="{Binding NextCommand}" ToolTip.Tip="Next  (Ctrl+Right)">
+              <controls:LineIcon Data="{x:Static controls:Icons.Next}" IsFilled="True" Width="20" Height="20" />
+            </Button>
+            <Button Classes="icon" Classes.on="{Binding IsRepeatOn}" Command="{Binding CycleRepeatCommand}" ToolTip.Tip="Repeat: off, all, one">
+              <controls:LineIcon Data="{Binding RepeatIcon}" Width="18" Height="18" />
+            </Button>
+          </StackPanel>
+          <Grid ColumnDefinitions="Auto,*,Auto">
+            <TextBlock Text="{Binding PositionText}" Classes="secondary small numeric" VerticalAlignment="Center" MinWidth="48" TextAlignment="Right" />
+            <controls:SeekBar Grid.Column="1" Margin="8,0" Position="{Binding PositionSeconds}" Duration="{Binding DurationSeconds}"
+                              IsSeekEnabled="{Binding CanSeek}" SeekCommand="{Binding SeekCommand}" />
+            <Button Grid.Column="2" Classes="icon" Padding="4,2" CornerRadius="6" Command="{Binding ToggleTimeDisplayCommand}"
+                    ToolTip.Tip="Total, remaining in track, remaining in queue">
+              <TextBlock Text="{Binding DurationText}" Classes="small numeric" MinWidth="44" />
+            </Button>
+          </Grid>
+        </StackPanel>
+
+        <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="18,0">
+          <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasPlan}">
+            <Border Classes="badge">
+              <TextBlock Text="{Binding SourceText}" />
+            </Border>
+            <TextBlock Text="›" Classes="muted" VerticalAlignment="Center" />
+            <Border Classes="badge">
+              <TextBlock Text="{Binding FilterText}" MaxWidth="180" TextTrimming="CharacterEllipsis" />
+            </Border>
+            <TextBlock Text="›" Classes="muted" VerticalAlignment="Center" />
+            <Border Classes="badge">
+              <TextBlock Text="{Binding QuantizerText}" MaxWidth="160" TextTrimming="CharacterEllipsis" />
+            </Border>
+            <TextBlock Text="›" Classes="muted" VerticalAlignment="Center" />
+            <Border Classes="badge accent" Classes.dsd="{Binding IsDsdOutput}">
+              <TextBlock Text="{Binding OutputText}" />
+            </Border>
+          </StackPanel>
+        </StackPanel>
+
+        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
+          <Border Classes="badge warning" IsVisible="{Binding IsLimiting}" ToolTip.Tip="The soft limiter is catching overs. Lower the volume for a clean signal.">
+            <TextBlock Text="LIMIT" FontSize="10" />
+          </Border>
+          <controls:VolumeKnob Width="64" Height="64"
+                               Minimum="{Binding VolumeMinimum}" Maximum="{Binding VolumeMaximum}"
+                               IsBypassed="{Binding IsVolumeFixed}" IsLimiting="{Binding IsLimiting}"
+                               Value="{Binding VolumeDb}"
+                               ToolTip.Tip="Volume: drag up or down, scroll, or use the arrow keys (Shift for fine steps)" />
+        </StackPanel>
+      </Grid>
+    </Border>
+  </Grid>
+</Window>

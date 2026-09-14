@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>FUPlayer.Core</RootNamespace>
+    <AssemblyName>FUPlayer.Core</AssemblyName>
+  </PropertyGroup>
+
+  <!--
+    The real-time DSP engine cannot keep up with high DSD rates when unoptimised, so Debug builds of this
+    library are optimised too. Build with -p:FuPlayerDebugDsp=true to step through DSP code without optimisation.
+  -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug' and '$(FuPlayerDebugDsp)' != 'true'">
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TagLibSharp" />
+  </ItemGroup>
+
+</Project>

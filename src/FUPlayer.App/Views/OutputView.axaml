@@ -1,0 +1,140 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:FUPlayer.App.ViewModels"
+             xmlns:controls="using:FUPlayer.App.Controls"
+             xmlns:output="using:FUPlayer.Core.Output"
+             x:Class="FUPlayer.App.Views.OutputView"
+             x:DataType="vm:OutputViewModel">
+  <UserControl.Resources>
+    <DataTemplate x:Key="ChipTemplate" x:DataType="x:String">
+      <Border Classes="badge" Margin="0,3,6,3">
+        <TextBlock Text="{Binding}" />
+      </Border>
+    </DataTemplate>
+    <ItemsPanelTemplate x:Key="WrapPanelTemplate">
+      <WrapPanel />
+    </ItemsPanelTemplate>
+  </UserControl.Resources>
+
+  <ScrollViewer Classes="page">
+    <StackPanel Margin="28,22,28,28" Spacing="18" MaxWidth="1000" HorizontalAlignment="Left">
+      <StackPanel Spacing="4">
+        <TextBlock Classes="h1" Text="Output" />
+        <TextBlock Classes="secondary" Text="Where the processed signal goes, and what that device can take." />
+      </StackPanel>
+
+      <Border Classes="card">
+        <StackPanel>
+          <TextBlock Classes="h3" Text="Device" Margin="0,0,0,4" />
+          <controls:SettingRow Title="Output type" Description="{Binding SelectedBackend.Description}">
+            <ComboBox ItemsSource="{Binding Backends}" SelectedItem="{Binding SelectedBackend}" Width="320" MinWidth="320">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:BackendChoice">
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="{Binding Name}" />
+                    <TextBlock Text="{Binding Traits}" Classes="muted" FontSize="11" />
+                  </StackPanel>
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+          </controls:SettingRow>
+          <controls:SettingRow Title="Device">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <ComboBox ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}" Width="272" MinWidth="272">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate x:DataType="output:AudioDevice">
+                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <Button Classes="subtle" Command="{Binding RefreshDevicesCommand}" ToolTip.Tip="Rescan devices and capabilities">
+                <controls:LineIcon Data="{x:Static controls:Icons.Refresh}" Width="16" Height="16" />
+              </Button>
+            </StackPanel>
+          </controls:SettingRow>
+          <controls:SettingRow Title="Driver control panel" Description="Buffer size, clock source and other driver settings." IsVisible="{Binding HasControlPanel}">
+            <Button Classes="subtle" Content="Open control panel" Command="{Binding ShowControlPanelCommand}" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Render folder" Description="{Binding RenderDirectory}" IsVisible="{Binding IsFileBackend}">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Classes="subtle" Content="Change…" Command="{Binding BrowseRenderDirectoryCommand}" />
+              <Button Classes="subtle" Content="Open" Command="{Binding OpenRenderDirectoryCommand}" />
+            </StackPanel>
+          </controls:SettingRow>
+          <TextBlock Text="{Binding Message}" Classes="warning small" TextWrapping="Wrap" Margin="0,6,0,0"
+                     IsVisible="{Binding Message, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="h3" Text="Device capabilities" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsProbing}">
+              <ProgressBar IsIndeterminate="True" Width="80" MinWidth="80" VerticalAlignment="Center" />
+              <TextBlock Text="Probing the device…" Classes="muted small" />
+            </StackPanel>
+          </Grid>
+          <Grid ColumnDefinitions="170,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+            <TextBlock Grid.Row="0" Text="PCM sample rates" Classes="muted" Margin="0,7,0,0" />
+            <ItemsControl Grid.Row="0" Grid.Column="1" ItemsSource="{Binding PcmRates}" ItemTemplate="{StaticResource ChipTemplate}" ItemsPanel="{StaticResource WrapPanelTemplate}" />
+            <TextBlock Grid.Row="1" Text="Sample formats" Classes="muted" Margin="0,7,0,0" />
+            <ItemsControl Grid.Row="1" Grid.Column="1" ItemsSource="{Binding ContainerBits}" ItemTemplate="{StaticResource ChipTemplate}" ItemsPanel="{StaticResource WrapPanelTemplate}" />
+            <TextBlock Grid.Row="2" Text="Native DSD" Classes="muted" Margin="0,7,0,0" />
+            <Panel Grid.Row="2" Grid.Column="1">
+              <ItemsControl ItemsSource="{Binding DsdRates}" ItemTemplate="{StaticResource ChipTemplate}" ItemsPanel="{StaticResource WrapPanelTemplate}" />
+              <TextBlock Text="Not supported" Classes="secondary" Margin="0,7,0,0" IsVisible="{Binding !HasNativeDsd}" />
+            </Panel>
+            <TextBlock Grid.Row="3" Text="DoP (PCM frame rate)" Classes="muted" Margin="0,7,0,0" />
+            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding DopText}" Classes="secondary" Margin="0,7,0,3" TextWrapping="Wrap" />
+            <TextBlock Grid.Row="4" Text="Channels" Classes="muted" Margin="0,7,0,0" />
+            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding MaxChannelsText}" Classes="secondary" Margin="0,7,0,3" />
+            <TextBlock Grid.Row="5" Text="Driver" Classes="muted" Margin="0,7,0,0" IsVisible="{Binding IsAsio}" />
+            <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding DriverStatus}" Classes="secondary" Margin="0,7,0,3" TextWrapping="Wrap"
+                       IsVisible="{Binding IsAsio}" ToolTip.Tip="FUPlayer releases the ASIO driver when playback stops. Set FUPLAYER_ASIO_LOG=1 to record every driver call." />
+          </Grid>
+          <Border Background="{StaticResource WarningSoftBrush}" CornerRadius="8" Padding="12,8" IsVisible="{Binding HasCapabilityNotes}">
+            <TextBlock Text="{Binding CapabilityNotes}" Classes="warning small" TextWrapping="Wrap" />
+          </Border>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel>
+          <TextBlock Classes="h3" Text="Channels and buffering" Margin="0,0,0,4" />
+          <controls:SettingRow Title="Output channels" Description="Number of channels opened on the device.">
+            <NumericUpDown Value="{Binding Channels}" Minimum="1" Maximum="8" Increment="1" FormatString="0" Width="140" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="First output channel" Description="Device channel that receives the first channel of the music (0 = the first output), for interfaces with many outputs.">
+            <NumericUpDown Value="{Binding FirstChannel}" Minimum="0" Maximum="64" Increment="1" FormatString="0" Width="140" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Device buffer" Description="Larger buffers are more robust; smaller ones react faster.">
+            <ComboBox ItemsSource="{Binding BufferChoices}" SelectedItem="{Binding SelectedBuffer}" Width="170" MinWidth="170" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Low-latency FIFO" Description="Halves the audio buffered inside the player: volume and seeking react sooner, with a slightly higher risk of dropouts.">
+            <ToggleSwitch IsChecked="{Binding LowLatencyFifo}" OnContent="" OffContent="" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Instant pause" Description="Pause cuts to silence at once instead of fading out.">
+            <ToggleSwitch IsChecked="{Binding InstantPause}" OnContent="" OffContent="" />
+          </controls:SettingRow>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel>
+          <TextBlock Classes="h3" Text="Volume" Margin="0,0,0,4" />
+          <controls:SettingRow Title="Minimum" Description="Level at the bottom of the volume knob.">
+            <NumericUpDown Value="{Binding MinimumDb}" Minimum="-120" Maximum="0" Increment="1" FormatString="0 dB" Width="140" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Maximum" Description="Level at the top of the knob. Above 0 dB the soft limiter protects against overs.">
+            <NumericUpDown Value="{Binding MaximumDb}" Minimum="-40" Maximum="12" Increment="1" FormatString="0 dB" Width="140" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="PCM level offset" Description="Added to PCM output only, so PCM and DSD playback reach the same loudness on DACs that play DSD quieter or louder.">
+            <NumericUpDown Value="{Binding PcmLevelOffsetDb}" Minimum="-12" Maximum="12" Increment="0.5" FormatString="0.0 dB" Width="140" />
+          </controls:SettingRow>
+          <TextBlock Text="{Binding VolumeSummary}" Classes="muted small" TextWrapping="Wrap" Margin="0,6,0,0" />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

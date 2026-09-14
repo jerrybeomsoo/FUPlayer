@@ -1,0 +1,17 @@
+<Project>
+  <!-- Central package version management. Every dependency must be MIT/BSD/Apache/MS-PL or LGPL. No GPL. -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- UI (MIT) -->
+    <PackageVersion Include="Avalonia" Version="12.1.2" />
+    <PackageVersion Include="Avalonia.Desktop" Version="12.1.2" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.2" />
+    <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.1.2" />
+    <!-- MVVM helpers (MIT) -->
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <!-- Tag reading (LGPL-2.1, dynamically linked assembly) -->
+    <PackageVersion Include="TagLibSharp" Version="2.3.0" />
+  </ItemGroup>
+</Project>

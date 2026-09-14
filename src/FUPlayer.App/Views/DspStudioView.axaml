@@ -1,0 +1,249 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:FUPlayer.App.ViewModels"
+             xmlns:controls="using:FUPlayer.App.Controls"
+             x:Class="FUPlayer.App.Views.DspStudioView"
+             x:DataType="vm:DspStudioViewModel">
+  <ScrollViewer Classes="page">
+    <StackPanel Margin="28,22,28,28" Spacing="18">
+      <StackPanel Spacing="4">
+        <TextBlock Classes="h1" Text="DSP studio" />
+        <TextBlock Classes="secondary" TextWrapping="Wrap"
+                   Text="Decide how every file is converted before it reaches the DAC. Changes reach the playing track within a moment." />
+      </StackPanel>
+
+      <Border Classes="card" Padding="18,14">
+        <Grid ColumnDefinitions="Auto,Auto,*">
+          <TextBlock Classes="h3" Text="Output mode" VerticalAlignment="Center" Margin="0,0,16,0" />
+          <ListBox Grid.Column="1" Classes="segmented" ItemsSource="{Binding ModeChoices}" SelectedItem="{Binding SelectedMode}" VerticalAlignment="Center" />
+          <TextBlock Grid.Column="2" Text="{Binding ModeDescription}" Classes="secondary" TextWrapping="Wrap" VerticalAlignment="Center" Margin="20,0,0,0" />
+        </Grid>
+      </Border>
+
+      <Grid ColumnDefinitions="410,*">
+        <!-- Settings column -->
+        <StackPanel Spacing="16">
+          <Border Classes="card">
+            <StackPanel>
+              <TextBlock Classes="h3" Text="Output rate" Margin="0,0,0,4" />
+              <controls:SettingRow Title="Rate selection" Description="{Binding SelectedRateSelection.Description}">
+                <ComboBox ItemsSource="{Binding RateSelectionChoices}" SelectedItem="{Binding SelectedRateSelection}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Fixed rate" IsVisible="{Binding IsFixedRate}">
+                <ComboBox ItemsSource="{Binding FixedRateChoices}" SelectedItem="{Binding SelectedFixedRate}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Highest PCM rate" Description="Upper bound for PCM output." IsVisible="{Binding IsPcmSettingsVisible}">
+                <ComboBox ItemsSource="{Binding RateLimitChoices}" SelectedItem="{Binding SelectedRateLimit}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Highest DSD rate" Description="The modulator never goes above this multiple." IsVisible="{Binding IsDsdMode}">
+                <ComboBox ItemsSource="{Binding DsdLimitChoices}" SelectedItem="{Binding SelectedDsdLimit}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="DSD delivery" Description="{Binding SelectedTransport.Description}" IsVisible="{Binding IsDsdTransportVisible}">
+                <ComboBox ItemsSource="{Binding TransportChoices}" SelectedItem="{Binding SelectedTransport}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="DSD at 48 kHz multiples" Description="48 kHz family sources modulate to multiples of 48 kHz. Not all DACs accept these rates." IsVisible="{Binding IsDsdMode}">
+                <ToggleSwitch IsChecked="{Binding Use48kDsdRates}" OnContent="" OffContent="" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Pass DSD files through" Description="DSD files matching the output rate are passed through without remodulation." IsVisible="{Binding IsDsdTransportVisible}">
+                <ToggleSwitch IsChecked="{Binding PassThrough}" OnContent="" OffContent="" />
+              </controls:SettingRow>
+            </StackPanel>
+          </Border>
+
+          <Border Classes="card" IsVisible="{Binding IsPcmSettingsVisible}">
+            <StackPanel>
+              <TextBlock Classes="h3" Text="Word length and dither" Margin="0,0,0,4" />
+              <controls:SettingRow Title="DAC resolution" Description="Valid bits sent to the DAC.">
+                <ComboBox ItemsSource="{Binding BitsChoices}" SelectedItem="{Binding SelectedBits}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Dither">
+                <ComboBox ItemsSource="{Binding DitherChoices}" SelectedItem="{Binding SelectedDither}" Width="220" MinWidth="220" />
+              </controls:SettingRow>
+              <TextBlock Text="{Binding SelectedDither.Description}" Classes="muted small" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+
+          <Border Classes="card" IsVisible="{Binding IsDsdMode}">
+            <StackPanel>
+              <TextBlock Classes="h3" Text="Delta-sigma modulation" Margin="0,0,0,4" />
+              <controls:SettingRow Title="Modulator">
+                <ComboBox ItemsSource="{Binding ModulatorChoices}" SelectedItem="{Binding SelectedModulator}" Width="240" MinWidth="240" />
+              </controls:SettingRow>
+              <TextBlock Text="{Binding SelectedModulator.Description}" Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,6" />
+              <controls:SettingRow Title="DSD file low-pass" Description="Used when a DSD file is converted to PCM and modulated again.">
+                <ComboBox ItemsSource="{Binding DsdFilterChoices}" SelectedItem="{Binding SelectedRemodulationFilter}" Width="190" MinWidth="190" />
+              </controls:SettingRow>
+            </StackPanel>
+          </Border>
+
+          <Border Classes="card" IsVisible="{Binding IsPcmSettingsVisible}">
+            <StackPanel>
+              <TextBlock Classes="h3" Text="DSD files played as PCM" Margin="0,0,0,4" />
+              <controls:SettingRow Title="Low-pass">
+                <ComboBox ItemsSource="{Binding DsdFilterChoices}" SelectedItem="{Binding SelectedDsdToPcmFilter}" Width="200" MinWidth="200" />
+              </controls:SettingRow>
+              <TextBlock Text="{Binding SelectedDsdToPcmFilter.Description}" Classes="muted small" TextWrapping="Wrap" />
+              <controls:SettingRow Title="Restore full level" Description="Adds the 6 dB of headroom DSD carries below PCM full scale.">
+                <ToggleSwitch IsChecked="{Binding RestoreDsdLevel}" OnContent="" OffContent="" />
+              </controls:SettingRow>
+            </StackPanel>
+          </Border>
+
+          <Border Classes="card">
+            <StackPanel>
+              <TextBlock Classes="h3" Text="Processing" Margin="0,0,0,4" />
+              <controls:SettingRow Title="Filter length (taps at the output rate)" Description="{Binding SelectedFilterLength.Description}">
+                <ComboBox ItemsSource="{Binding FilterLengthChoices}" SelectedItem="{Binding SelectedFilterLength}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Filter staging" Description="{Binding SelectedStaging.Description}">
+                <ComboBox ItemsSource="{Binding StagingChoices}" SelectedItem="{Binding SelectedStaging}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Convolution" Description="{Binding SelectedConvolution.Description}">
+                <ComboBox ItemsSource="{Binding ConvolutionChoices}" SelectedItem="{Binding SelectedConvolution}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Crossover, in taps a phase" Description="{Binding SelectedConvolutionThreshold.Description}"
+                                   IsVisible="{Binding IsAutomaticConvolution}">
+                <ComboBox ItemsSource="{Binding ConvolutionThresholdChoices}" SelectedItem="{Binding SelectedConvolutionThreshold}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Longest block (FFT window)" Description="{Binding SelectedConvolutionBlock.Description}"
+                                   IsVisible="{Binding IsAutomaticConvolution}">
+                <ComboBox ItemsSource="{Binding ConvolutionBlockChoices}" SelectedItem="{Binding SelectedConvolutionBlock}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Partition layout" Description="{Binding SelectedConvolutionLayout.Description}"
+                                   IsVisible="{Binding IsAutomaticConvolution}">
+                <ComboBox ItemsSource="{Binding ConvolutionLayoutChoices}" SelectedItem="{Binding SelectedConvolutionLayout}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Remove ultrasonics from high-rate files" Description="Low-pass at 20 kHz for sources above 48 kHz, before conversion.">
+                <ToggleSwitch IsChecked="{Binding RemoveUltrasonics}" OnContent="" OffContent="" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Peak limiter" Description="{Binding LimiterDescription}">
+                <ToggleSwitch IsChecked="{Binding Limiter}" OnContent="" OffContent="" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Watch for band-edge ringing" Description="Counts ringing at the source Nyquist frequency, where an apodizing filter helps. Reported in Now playing.">
+                <ToggleSwitch IsChecked="{Binding ApodizationDetection}" OnContent="" OffContent="" />
+              </controls:SettingRow>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <!-- Analysis, filters and preview -->
+        <StackPanel Grid.Column="1" Spacing="16" Margin="16,0,0,0">
+          <Border Classes="card">
+            <StackPanel Spacing="10">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                  <TextBlock Classes="h3" Text="{Binding FocusedFilter.Name}" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Classes="muted small" Text="{Binding ConversionText}" />
+                </StackPanel>
+                <ComboBox Grid.Column="1" ItemsSource="{Binding AnalysisRateChoices}" SelectedItem="{Binding SelectedAnalysisRate}" Width="160" MinWidth="160" Margin="12,0,0,0" VerticalAlignment="Center" ToolTip.Tip="Source rate to analyse" />
+              </Grid>
+              <ListBox Classes="segmented" ItemsSource="{Binding AnalysisViewChoices}" SelectedItem="{Binding SelectedAnalysisView}" HorizontalAlignment="Left" />
+              <TextBlock Text="{Binding FocusedFilter.Description}" Classes="secondary small" TextWrapping="Wrap" />
+              <Panel Height="330">
+                <controls:ResponsePlot Series="{Binding PlotSeries}" Markers="{Binding PlotMarkers}"
+                                       XScale="{Binding PlotXScale}" XFormat="{Binding PlotXFormat}" YFormat="{Binding PlotYFormat}"
+                                       XMinimum="{Binding PlotXMinimum}" XMaximum="{Binding PlotXMaximum}"
+                                       YMinimum="{Binding PlotYMinimum}" YMaximum="{Binding PlotYMaximum}" />
+                <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsAnalyzing}" VerticalAlignment="Top" MinWidth="0" MinHeight="2" Height="2" />
+              </Panel>
+              <TextBlock Text="{Binding AnalysisSummary}" Classes="muted small" TextWrapping="Wrap" />
+              <Grid ColumnDefinitions="*,*,*,*,2*" Margin="0,4,0,0">
+                <StackPanel Spacing="3">
+                  <TextBlock Classes="eyebrow" Text="FILTER LENGTH" />
+                  <TextBlock Text="{Binding TapsText}" FontWeight="SemiBold" Classes="numeric" />
+                  <TextBlock Classes="muted" FontSize="11" Text="taps" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="3" ToolTip.Tip="The filter's own delay. Only a different filter changes it; a minimum-phase design has almost none.">
+                  <TextBlock Classes="eyebrow" Text="GROUP DELAY" />
+                  <TextBlock Text="{Binding LatencyText}" FontWeight="SemiBold" Classes="numeric" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Spacing="3" IsVisible="{Binding HasBlockDelay}"
+                            ToolTip.Tip="Extra wait from convolving in blocks. The samples are the same either way, so the convolution rows can trade it back for arithmetic.">
+                  <TextBlock Classes="eyebrow" Text="BLOCK DELAY" />
+                  <TextBlock Text="{Binding BlockDelayText}" FontWeight="SemiBold" Classes="numeric" />
+                </StackPanel>
+                <StackPanel Grid.Column="3" Spacing="3" Margin="0,0,16,0">
+                  <TextBlock Classes="eyebrow" Text="COST PER CHANNEL" />
+                  <TextBlock Text="{Binding CostText}" FontWeight="SemiBold" Classes="numeric" />
+                  <ProgressBar Minimum="0" Maximum="1" Value="{Binding CostFraction}" MinWidth="0" MinHeight="4" Height="4" />
+                  <TextBlock Text="{Binding DirectCostText}" Classes="muted" FontSize="11" IsVisible="{Binding HasDirectComparison}" TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel Grid.Column="4" Spacing="3">
+                  <TextBlock Classes="eyebrow" Text="STAGES" />
+                  <TextBlock Text="{Binding StagesText}" Classes="secondary small" TextWrapping="Wrap" />
+                </StackPanel>
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <Border Classes="card">
+            <StackPanel Spacing="14">
+              <StackPanel Spacing="3">
+                <TextBlock Classes="h3" Text="{Binding FilterCardTitle}" />
+                <TextBlock Classes="muted small" TextWrapping="Wrap">
+                  <Run Text="{Binding FilterCardDescription}" />
+                  <Run Text="  In use: " />
+                  <Run Text="{Binding SelectedFilterName}" Foreground="{StaticResource AccentBrush}" />
+                </TextBlock>
+              </StackPanel>
+              <ItemsControl ItemsSource="{Binding FilterGroups}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:FilterGroupViewModel">
+                    <StackPanel Spacing="8" Margin="0,0,0,8">
+                      <TextBlock Classes="eyebrow" Text="{Binding Name}" />
+                      <ItemsControl ItemsSource="{Binding Filters}">
+                        <ItemsControl.ItemsPanel>
+                          <ItemsPanelTemplate>
+                            <WrapPanel />
+                          </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:FilterOptionViewModel">
+                            <Button Classes="chip" Classes.on="{Binding IsSelected}" Command="{Binding SelectCommand}" Width="214" Margin="0,0,8,8" ToolTip.Tip="{Binding Description}">
+                              <StackPanel Spacing="3">
+                                <Grid ColumnDefinitions="*,Auto">
+                                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12.5" TextTrimming="CharacterEllipsis" />
+                                  <controls:LineIcon Grid.Column="1" Data="{x:Static controls:Icons.Check}" Width="14" Height="14" StrokeThickness="2.2"
+                                                     Foreground="{StaticResource AccentBrush}" IsVisible="{Binding IsSelected}" />
+                                </Grid>
+                                <TextBlock Text="{Binding Traits}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" />
+                              </StackPanel>
+                            </Button>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+
+          <Border Classes="card">
+            <StackPanel Spacing="6">
+              <TextBlock Classes="h3" Text="What happens to your music" />
+              <TextBlock Classes="muted small" Text="Planned conversions for typical files with the selected output device and the settings above." Margin="0,0,0,6" />
+              <ItemsControl ItemsSource="{Binding PlanPreview}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:PlanPreviewRow">
+                    <StackPanel Margin="0,5">
+                      <Grid ColumnDefinitions="170,190,*,*">
+                        <TextBlock Text="{Binding Source}" VerticalAlignment="Center" />
+                        <Border Grid.Column="1" Classes="badge accent" Classes.dsd="{Binding IsDsdOutput}" HorizontalAlignment="Left">
+                          <TextBlock Text="{Binding Output}" />
+                        </Border>
+                        <TextBlock Grid.Column="2" Text="{Binding Filter}" Classes="secondary" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,12,0" />
+                        <TextBlock Grid.Column="3" Text="{Binding Quantizer}" Classes="secondary" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                      </Grid>
+                      <TextBlock Text="{Binding Notes}" Classes="warning small" TextWrapping="Wrap" IsVisible="{Binding HasNotes}" Margin="170,2,0,0" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </Grid>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

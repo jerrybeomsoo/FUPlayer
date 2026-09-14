@@ -1,0 +1,100 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:FUPlayer.App.ViewModels"
+             xmlns:controls="using:FUPlayer.App.Controls"
+             x:Class="FUPlayer.App.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel">
+  <ScrollViewer Classes="page">
+    <StackPanel Margin="28,22,28,28" Spacing="18" MaxWidth="1000" HorizontalAlignment="Left">
+      <StackPanel Spacing="4">
+        <TextBlock Classes="h1" Text="Settings" />
+        <TextBlock Classes="secondary" Text="Playback behaviour, processing resources and information about this build." />
+      </StackPanel>
+
+      <Border Classes="card">
+        <StackPanel>
+          <TextBlock Classes="h3" Text="Playback" Margin="0,0,0,4" />
+          <controls:SettingRow Title="Gapless playback" Description="Join tracks without a pause when their processing is identical.">
+            <ToggleSwitch IsChecked="{Binding Gapless}" OnContent="" OffContent="" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="ReplayGain" Description="Level normalization from ReplayGain tags.">
+            <ComboBox ItemsSource="{Binding ReplayGainChoices}" SelectedItem="{Binding SelectedReplayGain}" Width="190" MinWidth="190" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Prevent ReplayGain clipping" Description="Limit positive gain so the tagged peak stays below full scale.">
+            <ToggleSwitch IsChecked="{Binding PreventReplayGainClipping}" OnContent="" OffContent="" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Invert polarity" Description="Flip the absolute phase of every channel.">
+            <ToggleSwitch IsChecked="{Binding InvertPolarity}" OnContent="" OffContent="" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Time display">
+            <ComboBox ItemsSource="{Binding TimeDisplayChoices}" SelectedItem="{Binding SelectedTimeDisplay}" Width="190" MinWidth="190" />
+          </controls:SettingRow>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel>
+          <TextBlock Classes="h3" Text="Processing resources" Margin="0,0,0,4" />
+          <controls:SettingRow Title="DSP threads" Description="{Binding SelectedDspThreads.Description}">
+            <ComboBox ItemsSource="{Binding DspThreadChoices}" SelectedItem="{Binding SelectedDspThreads}" Width="190" MinWidth="190" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Engine FIFO" Description="{Binding SelectedFifo.Description}">
+            <ComboBox ItemsSource="{Binding FifoChoices}" SelectedItem="{Binding SelectedFifo}" Width="190" MinWidth="190" />
+          </controls:SettingRow>
+          <TextBlock Text="{Binding FifoSize}" Classes="secondary small" TextWrapping="Wrap" Margin="0,0,0,4" />
+          <controls:SettingRow Title="Meter the adjusted source" Description="Source meters and analyzer show the signal after ReplayGain and ultrasonic filtering.">
+            <ToggleSwitch IsChecked="{Binding MeterAdjustedSource}" OnContent="" OffContent="" />
+          </controls:SettingRow>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel>
+          <TextBlock Classes="h3" Text="Graphics acceleration" Margin="0,0,0,4" />
+          <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,8"
+                     Text="Long filters can be convolved on an OpenCL device, freeing cores for delta-sigma modulation. A device must reproduce the processor's output and beat it in a timed run before it is used; otherwise filtering stays on the processor and Now playing reports why." />
+          <controls:SettingRow Title="Convolve on the graphics device" Description="Runs FFT or direct convolution on an OpenCL device alongside the CPU, both working on the same blocks. Delta-sigma modulation stays on the CPU." IsEnabled="{Binding HasGpuDevices}">
+            <ToggleSwitch IsChecked="{Binding GpuAcceleration}" OnContent="" OffContent="" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Device" Description="{Binding SelectedGpuDevice.Description}" IsVisible="{Binding HasGpuDevices}">
+            <ComboBox ItemsSource="{Binding GpuDeviceChoices}" SelectedItem="{Binding SelectedGpuDevice}" Width="230" MinWidth="230" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Arithmetic precision" Description="{Binding SelectedGpuPrecision.Description}" IsVisible="{Binding HasGpuDevices}">
+            <ComboBox ItemsSource="{Binding GpuPrecisionChoices}" SelectedItem="{Binding SelectedGpuPrecision}" Width="230" MinWidth="230" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Phase division" Description="{Binding SelectedGpuDivision.Description}" IsVisible="{Binding HasGpuDevices}">
+            <ComboBox ItemsSource="{Binding GpuDivisionChoices}" SelectedItem="{Binding SelectedGpuDivision}" Width="230" MinWidth="230" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Override the timed result" Description="Gives the device every phase even when the CPU measured faster, and accepts filters below the round-trip threshold. The output comparison still applies." IsVisible="{Binding HasGpuDevices}">
+            <ToggleSwitch IsChecked="{Binding GpuForce}" OnContent="" OffContent="" />
+          </controls:SettingRow>
+          <TextBlock Text="{Binding GpuStatus}" Classes="secondary small" TextWrapping="Wrap" Margin="0,6,0,0" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h3" Text="About FUPlayer" />
+          <Grid ColumnDefinitions="170,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+            <TextBlock Text="Version" Classes="muted" Margin="0,4" />
+            <TextBlock Grid.Column="1" Text="{Binding Version}" Margin="0,4" />
+            <TextBlock Grid.Row="1" Text="License" Classes="muted" Margin="0,4" />
+            <TextBlock Grid.Row="1" Grid.Column="1" Text="MIT for FUPlayer itself  ·  LGPL-2.1 for TagLib# and the optional FFmpeg libraries" Classes="secondary" TextWrapping="Wrap" Margin="0,4" />
+            <TextBlock Grid.Row="2" Text="Runtime" Classes="muted" Margin="0,4" />
+            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding RuntimeDescription}" Classes="secondary" TextWrapping="Wrap" Margin="0,4" />
+            <TextBlock Grid.Row="3" Text="FFmpeg (LGPL)" Classes="muted" Margin="0,4" />
+            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding FfmpegStatus}" Classes="secondary" Classes.accent="{Binding IsFfmpegAvailable}" TextWrapping="Wrap" Margin="0,4" />
+            <TextBlock Grid.Row="4" Text="Settings folder" Classes="muted" Margin="0,4" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Spacing="10" Margin="0,4">
+              <TextBlock Text="{Binding SettingsFolder}" Classes="secondary" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="520" />
+              <Button Classes="subtle" Content="Open" Command="{Binding OpenSettingsFolderCommand}" />
+            </StackPanel>
+          </Grid>
+          <Border Classes="divider" Margin="0,4" />
+          <TextBlock Classes="muted small" TextWrapping="Wrap"
+                     Text="FUPlayer is free software released under the MIT License. It uses Avalonia (MIT), CommunityToolkit.Mvvm (MIT), TagLib# (LGPL-2.1) and, when present, FFmpeg libraries built under the LGPL; the LGPL parts stay separate, replaceable libraries. See LICENSE and THIRD-PARTY-NOTICES.md for details." />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

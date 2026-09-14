@@ -1,0 +1,22 @@
+# Build output
+bin/
+obj/
+publish/
+artifacts/
+*.user
+*.suo
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.DotSettings.user
+
+# FFmpeg libraries, built with build/ffmpeg/build-ffmpeg-lgpl.sh
+build/ffmpeg/out/
+build/ffmpeg/src/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store

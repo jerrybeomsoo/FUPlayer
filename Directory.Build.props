@@ -1,0 +1,35 @@
+<Project>
+  <!--
+    Shared build settings for every project in the FUPlayer solution.
+
+    Target framework note:
+      Visual Studio 2022 (17.14) resolves the .NET 9 SDK, which cannot target net10.0.
+      Once the solution is only built with Visual Studio 2026 / .NET 10 SDK, change
+      FuPlayerTargetFramework to net10.0 (LTS). Nothing else in the code base depends on it.
+  -->
+  <PropertyGroup>
+    <FuPlayerTargetFramework>net9.0</FuPlayerTargetFramework>
+    <TargetFramework>$(FuPlayerTargetFramework)</TargetFramework>
+    <LangVersion>13.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Deterministic>true</Deterministic>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Audio code uses fixed-size buffers and pointer arithmetic in hot loops. -->
+    <Optimize Condition="'$(Configuration)' == 'Release'">true</Optimize>
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Product>FUPlayer</Product>
+    <Company>FUPlayer contributors</Company>
+    <Authors>FUPlayer contributors</Authors>
+    <Copyright>Copyright (c) 2026 FUPlayer contributors</Copyright>
+    <!-- The project's own code is MIT; TagLib# and the optional FFmpeg libraries remain LGPL (see THIRD-PARTY-NOTICES.md). -->
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Version>0.1.0</Version>
+    <Description>Free Upscaling Player</Description>
+  </PropertyGroup>
+</Project>

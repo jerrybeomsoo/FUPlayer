@@ -1,0 +1,79 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:FUPlayer.App.ViewModels"
+             xmlns:controls="using:FUPlayer.App.Controls"
+             x:Class="FUPlayer.App.Views.CalibrationView"
+             x:DataType="vm:CalibrationViewModel">
+  <ScrollViewer Classes="page">
+    <StackPanel Margin="28,22,28,28" Spacing="18" MaxWidth="1000" HorizontalAlignment="Left">
+      <StackPanel Spacing="4">
+        <TextBlock Classes="h1" Text="Calibration" />
+        <TextBlock Classes="secondary" TextWrapping="Wrap" Text="Match loudspeaker levels and arrival times at the listening position." />
+      </StackPanel>
+
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <TextBlock Classes="h3" Text="Test signal" />
+          <Grid ColumnDefinitions="Auto,*">
+            <controls:LineIcon Data="{x:Static controls:Icons.Warning}" Width="18" Height="18" Foreground="{StaticResource WarningBrush}" VerticalAlignment="Top" Margin="0,1,10,0" />
+            <TextBlock Grid.Column="1" Classes="secondary" TextWrapping="Wrap"
+                       Text="Pink noise at −20 dBFS RMS through the complete processing chain. Turn the volume down before starting, then measure each speaker with an SPL meter at the listening position." />
+          </Grid>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Classes="primary" Command="{Binding PlayAllChannelsCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <controls:LineIcon Data="{x:Static controls:Icons.Play}" IsFilled="True" Width="14" Height="14" />
+                <TextBlock Text="All channels" />
+              </StackPanel>
+            </Button>
+            <Button Classes="subtle" Command="{Binding PlayRotatingCommand}" Content="Cycle through channels" />
+            <Button Classes="subtle" Command="{Binding StopToneCommand}" IsEnabled="{Binding IsTonePlaying}" Content="Stop" />
+            <Border Classes="badge accent" IsVisible="{Binding IsTonePlaying}" Margin="6,0,0,0">
+              <TextBlock Text="TEST SIGNAL PLAYING" />
+            </Border>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="6">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="3">
+              <TextBlock Classes="h3" Text="Speaker levels and distances" />
+              <TextBlock Classes="muted small" Text="Level trims and distance-based delays, applied at the processing rate." />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+              <Button Classes="subtle" Content="Reset" Command="{Binding ResetAllCommand}" />
+              <ToggleSwitch IsChecked="{Binding IsEnabled}" OnContent="Enabled" OffContent="Disabled" />
+            </StackPanel>
+          </Grid>
+
+          <Grid ColumnDefinitions="140,*,80,160,120" Margin="0,14,0,2">
+            <TextBlock Classes="eyebrow" Text="CHANNEL" />
+            <TextBlock Grid.Column="1" Classes="eyebrow" Text="LEVEL TRIM" />
+            <TextBlock Grid.Column="3" Classes="eyebrow" Text="DISTANCE (CM)" />
+            <TextBlock Grid.Column="4" Classes="eyebrow" Text="DELAY" />
+          </Grid>
+          <ItemsControl ItemsSource="{Binding Channels}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ChannelTrimViewModel">
+                <Grid ColumnDefinitions="140,*,80,160,120" Margin="0,5">
+                  <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <Border Classes="badge accent" MinWidth="36">
+                      <TextBlock Text="{Binding Label}" HorizontalAlignment="Center" />
+                    </Border>
+                    <TextBlock Text="{Binding Name}" Classes="secondary small" VerticalAlignment="Center" />
+                  </StackPanel>
+                  <Slider Grid.Column="1" Minimum="-12" Maximum="12" TickFrequency="0.5" IsSnapToTickEnabled="True" Value="{Binding LevelDb}" Margin="0,0,14,0" VerticalAlignment="Center" />
+                  <TextBlock Grid.Column="2" Text="{Binding LevelText}" Classes="numeric" VerticalAlignment="Center" />
+                  <NumericUpDown Grid.Column="3" Value="{Binding DistanceCm}" Minimum="0" Maximum="5000" Increment="1" FormatString="0" Width="140" HorizontalAlignment="Left" />
+                  <TextBlock Grid.Column="4" Text="{Binding DelayText}" Classes="secondary small numeric" VerticalAlignment="Center" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>
