@@ -1,0 +1,370 @@
+using FUPlayer.Core.Dsp.Numerics;
+
+namespace FUPlayer.Core.Dsp.Restoration;
+
+/// <summary>
+/// Turns a pair of signals, one coded and one not, into the frames a network is trained on.
+///
+/// For every frame the coded spectrum is patched exactly the way the player patches it, and the
+/// answer recorded is how far each band of that patch is from the same band of the original. Doing
+/// the patch here rather than leaving it to the network is what keeps the numbers bounded: the
+/// question becomes how much to move a plausible spectrum, not how to conjure one from silence.
+/// </summary>
+public sealed class RepairFrameBuilder
+{
+    /// <summary>Transform size, matching the one the player repairs with.</summary>
+    public const int FftSize = 2048;
+
+    public const int Hop = FftSize / 4;
+
+    private readonly RealFftPlan _plan = new(FftSize);
+    private readonly double[] _window = new double[FftSize];
+    private readonly double[] _frame = new double[FftSize];
+    private readonly double[] _re = new double[FftSize];
+    private readonly double[] _im = new double[FftSize];
+    private readonly double[] _power;
+    private readonly float[] _original;
+
+    public RepairFrameBuilder(BandLayout layout, int context, int sampleRate)
+    {
+        Layout = layout;
+        Context = context;
+        SampleRate = sampleRate;
+        BinHz = (double)sampleRate / FftSize;
+
+        _power = new double[_plan.Bins];
+        _original = new float[layout.Count];
+
+        for (int i = 0; i < FftSize; i++)
+        {
+            _window[i] = 0.5 - (0.5 * Math.Cos(2.0 * Math.PI * i / FftSize));
+        }
+    }
+
+    public BandLayout Layout { get; }
+
+    public int Context { get; }
+
+    public int SampleRate { get; }
+
+    public double BinHz { get; }
+
+    public int InputSize => NeuralRepairModel.ExpectedInputs(Layout.Count, Context);
+
+    public int OutputSize => Layout.Count;
+
+    /// <summary>
+    /// Band levels of one patched frame of the coded signal, and the gains that would take it to the
+    /// original. Returns the coded frame's overall level.
+    /// </summary>
+    public double Describe(
+        ReadOnlySpan<double> coded, ReadOnlySpan<double> original, int start, double cutoffHz, double ceilingHz,
+        long frameIndex, Span<float> codedLevels, Span<float> gainsDb)
+    {
+        int edge = (int)Math.Ceiling(cutoffHz / BinHz) + 1;
+        int ceiling = Math.Min(_plan.Bins - 1, (int)(ceilingHz / BinHz));
+
+        for (int i = 0; i < FftSize; i++)
+        {
+            _frame[i] = coded[start + i] * _window[i];
+        }
+
+        _plan.Forward(_frame, _re, _im);
+        SpectralPatch.Apply(_re.AsSpan(0, _plan.Bins), _im.AsSpan(0, _plan.Bins), edge, ceiling, frameIndex);
+        Power();
+        double level = Layout.Levels(_power, BinHz, codedLevels);
+
+        for (int i = 0; i < FftSize; i++)
+        {
+            _frame[i] = original[start + i] * _window[i];
+        }
+
+        _plan.Forward(_frame, _re, _im);
+        Power();
+        double originalLevel = Layout.Levels(_power, BinHz, _original);
+
+        // Both sets of levels have had their own loudness removed, so the difference of the two
+        // loudnesses goes back in before they are compared.
+        float offset = (float)(originalLevel - level);
+        for (int band = 0; band < Layout.Count; band++)
+        {
+            gainsDb[band] = Math.Clamp(
+                _original[band] + offset - codedLevels[band],
+                NeuralRepairModel.MinGainDb,
+                NeuralRepairModel.MaxGainDb);
+        }
+
+        return level;
+    }
+
+    /// <summary>Lays out the network's input from a run of frames: the bands either side, then two scalars.</summary>
+    public static void Compose(
+        ReadOnlySpan<float> window, int bands, int context, double level, double cutoffFraction, Span<float> input)
+    {
+        window[..(bands * ((2 * context) + 1))].CopyTo(input);
+        int at = bands * ((2 * context) + 1);
+
+        // Loudness in a range the network can work with, and where the codec's wall sits.
+        input[at] = (float)Math.Clamp((level + 60.0) / 40.0, -3.0, 3.0);
+        input[at + 1] = (float)Math.Clamp(cutoffFraction, 0.0, 1.0);
+    }
+
+    private void Power()
+    {
+        for (int bin = 0; bin < _power.Length; bin++)
+        {
+            _power[bin] = (_re[bin] * _re[bin]) + (_im[bin] * _im[bin]);
+        }
+    }
+}
+
+/// <summary>
+/// The training file: a short header and then one record per frame, features followed by answers.
+///
+/// Flat float32 so it can be streamed past the trainer as many times as needed without parsing
+/// anything, and so a few million frames stay a file rather than a memory problem.
+/// </summary>
+public static class RepairDataset
+{
+    public const int Magic = 0x53445546;
+    public const int CurrentVersion = 2;
+
+    /// <summary>
+    /// Version 1 had no group table, so the only split available was the tail of the file, which is
+    /// whichever releases happened to sort last. Version 2 records where each source file's records
+    /// begin, so the held-out set can be spread across the whole corpus instead.
+    /// </summary>
+    public const int FirstVersionWithGroups = 2;
+
+    public sealed class Writer : IDisposable
+    {
+        private readonly BinaryWriter _writer;
+        private readonly List<long> _groups = [];
+        private readonly long _countAt;
+        private long _count;
+
+        public Writer(string path, BandLayout layout, int context, int sampleRate)
+        {
+            string? directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            _writer = new BinaryWriter(File.Create(path));
+            _writer.Write(Magic);
+            _writer.Write(CurrentVersion);
+            _writer.Write(layout.Count);
+            _writer.Write(context);
+            _writer.Write(sampleRate);
+            _writer.Write(layout.LowHz);
+            _writer.Write(layout.HighHz);
+            _countAt = _writer.BaseStream.Position;
+            _writer.Write(0L);
+            _writer.Write(0L);
+        }
+
+        public long Count => _count;
+
+        /// <summary>Marks the start of another source file's records.</summary>
+        public void BeginGroup() => _groups.Add(_count);
+
+        public void Add(ReadOnlySpan<float> input, ReadOnlySpan<float> target)
+        {
+            foreach (float value in input)
+            {
+                _writer.Write(value);
+            }
+
+            foreach (float value in target)
+            {
+                _writer.Write(value);
+            }
+
+            _count++;
+        }
+
+        public void Dispose()
+        {
+            // The table goes after the records, since neither its size nor the record count is known
+            // until everything has been written.
+            long table = _writer.BaseStream.Position;
+            foreach (long start in _groups)
+            {
+                _writer.Write(start);
+            }
+
+            _writer.BaseStream.Position = _countAt;
+            _writer.Write(_count);
+            _writer.Write((long)_groups.Count);
+            _writer.Dispose();
+            _ = table;
+        }
+    }
+
+    public sealed class Reader : IDisposable
+    {
+        private readonly BinaryReader _reader;
+        private long _start;
+        private byte[] _block = [];
+
+        public Reader(string path)
+        {
+            _reader = new BinaryReader(File.OpenRead(path));
+            try
+            {
+                Open();
+            }
+            catch
+            {
+                // A file that is refused must not stay open, or it cannot even be deleted.
+                _reader.Dispose();
+                throw;
+            }
+        }
+
+        private void Open()
+        {
+            if (_reader.ReadInt32() != Magic)
+            {
+                throw new InvalidDataException("That file is not a training set.");
+            }
+
+            Version = _reader.ReadInt32();
+            if (Version != CurrentVersion)
+            {
+                throw new InvalidDataException($"The training set is version {Version}; this build reads version {CurrentVersion}.");
+            }
+
+            Bands = _reader.ReadInt32();
+            Context = _reader.ReadInt32();
+            SampleRate = _reader.ReadInt32();
+            LowHz = _reader.ReadDouble();
+            HighHz = _reader.ReadDouble();
+            Count = _reader.ReadInt64();
+            long groups = Version >= FirstVersionWithGroups ? _reader.ReadInt64() : 0L;
+            _start = _reader.BaseStream.Position;
+
+            InputSize = NeuralRepairModel.ExpectedInputs(Bands, Context);
+            OutputSize = Bands;
+
+            long expected = _start + (Count * (InputSize + OutputSize) * sizeof(float));
+            if (_reader.BaseStream.Length < expected)
+            {
+                // A run that was interrupted leaves a short file; use what is there, and the table
+                // that would have followed it is gone too.
+                Count = (_reader.BaseStream.Length - _start) / ((InputSize + OutputSize) * sizeof(float));
+                groups = 0;
+            }
+
+            if (groups > 0)
+            {
+                _reader.BaseStream.Position = expected;
+                long[] starts = new long[groups];
+                for (int i = 0; i < groups; i++)
+                {
+                    starts[i] = _reader.ReadInt64();
+                }
+
+                Groups = starts;
+            }
+        }
+
+        public int Version { get; private set; }
+
+        public int Bands { get; private set; }
+
+        public int Context { get; private set; }
+
+        public int SampleRate { get; private set; }
+
+        public double LowHz { get; private set; }
+
+        public double HighHz { get; private set; }
+
+        public long Count { get; private set; }
+
+        public int InputSize { get; private set; }
+
+        public int OutputSize { get; private set; }
+
+        /// <summary>Where each source file's records begin. Empty for a set built before this was recorded.</summary>
+        public IReadOnlyList<long> Groups { get; private set; } = [];
+
+        public BandLayout Layout => new(LowHz, HighHz, Bands);
+
+        /// <summary>
+        /// Splits the set into what to train on and what to keep back, one group in
+        /// <paramref name="everyNth"/> held out so that the held-out material comes from across the
+        /// whole corpus rather than from whichever files happened to sort last.
+        /// </summary>
+        public (List<(long Start, long End)> Training, List<(long Start, long End)> Held) Split(int everyNth = 8)
+        {
+            var training = new List<(long, long)>();
+            var held = new List<(long, long)>();
+
+            if (Groups.Count < everyNth)
+            {
+                // Too few groups to spread the split over, so fall back to the tail.
+                long boundary = Count - Math.Max(2_000, Count / 10);
+                training.Add((0, boundary));
+                held.Add((boundary, Count));
+                return (training, held);
+            }
+
+            for (int group = 0; group < Groups.Count; group++)
+            {
+                long start = Groups[group];
+                long end = group + 1 < Groups.Count ? Groups[group + 1] : Count;
+                if (end <= start)
+                {
+                    continue;
+                }
+
+                (group % everyNth == everyNth - 1 ? held : training).Add((start, end));
+            }
+
+            return (training, held);
+        }
+
+        /// <summary>
+        /// Reads a run of records into flat buffers. Returns how many were read.
+        ///
+        /// The records are contiguous, so the whole run comes off the disk in one read and is then
+        /// split up in memory. Reading it a number at a time costs forty thousand calls per batch and
+        /// makes the disk, rather than the arithmetic, the thing training waits for.
+        /// </summary>
+        public int Read(long index, int count, Span<float> inputs, Span<float> targets)
+        {
+            long available = Math.Min(count, Count - index);
+            if (available <= 0)
+            {
+                return 0;
+            }
+
+            int record = (InputSize + OutputSize) * sizeof(float);
+            int wanted = (int)available * record;
+            if (_block.Length < wanted)
+            {
+                _block = new byte[wanted];
+            }
+
+            _reader.BaseStream.Position = _start + (index * record);
+            _reader.BaseStream.ReadExactly(_block, 0, wanted);
+
+            ReadOnlySpan<float> values = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(
+                _block.AsSpan(0, wanted));
+
+            for (int i = 0; i < available; i++)
+            {
+                int at = i * (InputSize + OutputSize);
+                values.Slice(at, InputSize).CopyTo(inputs[(i * InputSize)..]);
+                values.Slice(at + InputSize, OutputSize).CopyTo(targets[(i * OutputSize)..]);
+            }
+
+            return (int)available;
+        }
+
+        public void Dispose() => _reader.Dispose();
+    }
+}

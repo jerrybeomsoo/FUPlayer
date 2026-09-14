@@ -122,7 +122,7 @@
                          Text="For material that has been through a perceptual codec. Everything here adds signal that was not in the source, so all of it is off until asked for, and none of it recovers what the encoder discarded." />
 
               <controls:SettingRow Title="Artifact reduction"
-                                   Description="Limits how far a high bin may move between transforms, so a band the encoder keeps switching on and off is held steady. A real onset moves every bin at once and is let through.">
+                                   Description="Limits how far a high bin may move between transforms, so a band the encoder keeps switching on and off is held steady. Measurement does not support this one: AAC leaves the band it keeps within 0.4 dB of the original, so there is little there to repair.">
                 <ToggleSwitch IsChecked="{Binding ReduceArtifacts}" OnContent="" OffContent="" />
               </controls:SettingRow>
               <controls:SettingRow Title="Reduction strength" Description="{Binding SelectedArtifactStrength.Description}"
@@ -131,7 +131,7 @@
               </controls:SettingRow>
 
               <controls:SettingRow Title="Harmonic rebuilding"
-                                   Description="Copies the top octave below the measured cutoff upwards in patches and levels it to continue the spectrum. Synthesis, not recovery: the fine structure comes from an octave down.">
+                                   Description="Copies the top octave below the measured cutoff upwards in patches and levels it to continue the spectrum. Closes 71 percent of the distance to the lossless original above the cutoff. Synthesis, not recovery: the fine structure comes from an octave down.">
                 <ToggleSwitch IsChecked="{Binding RebuildHarmonics}" OnContent="" OffContent="" />
               </controls:SettingRow>
               <controls:SettingRow Title="Rebuilt level" Description="{Binding SelectedRebuildAmount.Description}"
@@ -139,8 +139,7 @@
                 <ComboBox ItemsSource="{Binding RebuildAmountChoices}" SelectedItem="{Binding SelectedRebuildAmount}" Width="170" MinWidth="170" />
               </controls:SettingRow>
               <controls:SettingRow Title="Generative prediction"
-                                   Description="Sets the rebuilt levels from a model fitted to lossless music, instead of a fixed slope. A linear fit over sixteen bands: it predicts a level, never a detail."
-                                   IsVisible="{Binding IsRebuilding}">
+                                   Description="Levels the rebuilt band from a model fitted to real coded music, instead of a fixed slope. Worth a further 23 percent above the cutoff. It predicts a level for every band, never a detail.">
                 <ToggleSwitch IsChecked="{Binding Predict}" OnContent="" OffContent="" />
               </controls:SettingRow>
               <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,4"

@@ -53,11 +53,14 @@ public sealed class CodecBandwidthDetector
     private const double ReferenceLowHz = 300.0;
     private const double ReferenceHighHz = 5_000.0;
 
-    /// <summary>Energy this far under the reference band counts as nothing.</summary>
-    private const double PresenceDb = -75.0;
+    /// <summary>A codec edge falls at least this far across a kilohertz; a natural roll-off does not.</summary>
+    private const double EdgeDropDb = 20.0;
 
-    /// <summary>A codec edge falls at least this far within a kilohertz; a natural roll-off does not.</summary>
-    private const double EdgeDropDb = 24.0;
+    /// <summary>Width either side of a candidate edge that the drop is measured over.</summary>
+    private const double EdgeSpanHz = 1_000.0;
+
+    /// <summary>No point looking for a codec wall below this.</summary>
+    private const double LowestCutoffHz = 5_000.0;
 
     /// <summary>Below this fraction of Nyquist a cutoff is worth reporting at all.</summary>
     private const double CutoffFraction = 0.92;
@@ -136,31 +139,62 @@ public sealed class CodecBandwidthDetector
             return new BandwidthEstimate(BandwidthVerdict.Unknown, 0.0, 0.0, Seconds);
         }
 
-        double floor = reference * Math.Pow(10.0, PresenceDb / 10.0);
+        // Look for the edge itself rather than for silence above it. A real encoder does not zero the
+        // band it discards, it leaves its own quantisation noise there, so a level threshold either
+        // misses the wall or has to be set so high that quiet music trips it. The steepest fall over
+        // a kilohertz is the wall, wherever the noise under it happens to sit.
+        double highest = nyquist * CutoffFraction;
+        double best = 0.0;
+        double at = 0.0;
 
-        // Walk down from Nyquist to the highest bin that still carries something.
-        int top = bins - 1;
-        while (top > 0 && _sum[top] / _frames < floor)
+        for (double hz = LowestCutoffHz; hz <= highest; hz += binHz)
         {
-            top--;
+            double below = Average(hz - EdgeSpanHz, hz, binHz, bins);
+            double above = Average(hz, hz + EdgeSpanHz, binHz, bins);
+            if (below <= 0.0)
+            {
+                continue;
+            }
+
+            double drop = above <= 0.0 ? 200.0 : 10.0 * Math.Log10(below / above);
+            if (drop > best)
+            {
+                best = drop;
+                at = hz;
+            }
         }
 
-        double cutoff = top * binHz;
-        if (cutoff >= nyquist * CutoffFraction)
+        return best >= EdgeDropDb
+            ? new BandwidthEstimate(BandwidthVerdict.BandLimited, Refine(at, binHz, bins), best, Seconds)
+            : new BandwidthEstimate(BandwidthVerdict.FullBand, nyquist, best, Seconds);
+    }
+
+    /// <summary>
+    /// The steepest point sits a little above the wall, because the window's own skirt carries the
+    /// band past where it really ends. The cutoff is defined instead as the frequency where the level
+    /// has fallen 6 dB from the plateau just below the edge, which is both closer to the truth and a
+    /// definition that means something on a codec whose edge is not vertical.
+    /// </summary>
+    private double Refine(double edgeHz, double binHz, int bins)
+    {
+        double plateau = Average(edgeHz - EdgeSpanHz, edgeHz - (EdgeSpanHz / 2.0), binHz, bins);
+        if (plateau <= 0.0)
         {
-            return new BandwidthEstimate(BandwidthVerdict.FullBand, nyquist, 0.0, Seconds);
+            return edgeHz;
         }
 
-        // How hard the edge falls: the kilohertz below the cutoff against the kilohertz above it.
-        double below = Average(Math.Max(0.0, cutoff - 1000.0), cutoff, binHz, bins);
-        double above = Average(cutoff, Math.Min(nyquist, cutoff + 1000.0), binHz, bins);
-        double drop = above <= 0.0 ? 200.0 : 10.0 * Math.Log10(below / above);
+        double target = plateau * Math.Pow(10.0, -6.0 / 10.0);
+        double step = binHz * 2.0;
 
-        return new BandwidthEstimate(
-            drop >= EdgeDropDb ? BandwidthVerdict.BandLimited : BandwidthVerdict.FullBand,
-            drop >= EdgeDropDb ? cutoff : nyquist,
-            drop,
-            Seconds);
+        for (double hz = edgeHz - EdgeSpanHz; hz <= edgeHz + EdgeSpanHz; hz += step)
+        {
+            if (Average(hz, hz + step, binHz, bins) <= target)
+            {
+                return hz;
+            }
+        }
+
+        return edgeHz;
     }
 
     public void Reset()

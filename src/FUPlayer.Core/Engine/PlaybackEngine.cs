@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Threading.Channels;
 using FUPlayer.Core.Audio;
 using FUPlayer.Core.Capture;
+using FUPlayer.Core.Dsp.Analysis;
 using FUPlayer.Core.Decoding;
 using FUPlayer.Core.Dsp.Dsd;
 using FUPlayer.Core.Metadata;
@@ -195,6 +196,18 @@ public sealed class PlaybackEngine : IDisposable
     /// <summary>Why capture is unavailable, or null when it works.</summary>
     public string? CaptureUnavailable => _capture is null ? "This build cannot capture an application." : _capture.UnsupportedReason;
 
+    /// <summary>The bandwidth verdict as a line for the interface, or null while it is still measuring.</summary>
+    private static string? Describe(DspPipeline? pipeline)
+    {
+        if (pipeline is null)
+        {
+            return null;
+        }
+
+        BandwidthEstimate estimate = pipeline.Bandwidth;
+        return estimate.Verdict == BandwidthVerdict.Unknown ? null : estimate.Describe();
+    }
+
     public PlaybackStatus GetStatus()
     {
         (Marker? marker, TimeSpan position) = ComputePlayback();
@@ -215,6 +228,8 @@ public sealed class PlaybackEngine : IDisposable
             CurrentItem = marker is not null ? marker.Item : index >= 0 ? Queue.Get(index) : null,
             IsTestTone = marker?.IsTestTone ?? false,
             IsCapture = marker?.IsCapture ?? false,
+            Bandwidth = Describe(pipeline),
+            IsNeuralRepair = pipeline?.IsNeural ?? false,
             Position = position,
             Duration = marker is { Length: > 0 } ? TimeSpan.FromSeconds((double)marker.Length / marker.SampleRate) : TimeSpan.Zero,
             Plan = pipeline?.Plan,

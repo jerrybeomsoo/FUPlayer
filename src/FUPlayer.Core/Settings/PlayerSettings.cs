@@ -279,6 +279,12 @@ public sealed class RestorationSettings
     /// <summary>Model file, or null for the newest one in the models folder.</summary>
     public string? ModelPath { get; set; }
 
+    /// <summary>Network file, or null for the newest one in the models folder.</summary>
+    public string? NetworkPath { get; set; }
+
+    /// <summary>How much of the network's correction to apply, from 0 to 1.</summary>
+    public double NetworkAmount { get; set; } = 1.0;
+
     /// <summary>Where the rebuilt band starts. 0 measures it from the signal.</summary>
     public double ManualCutoffHz { get; set; }
 

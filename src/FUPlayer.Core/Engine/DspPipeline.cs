@@ -33,7 +33,15 @@ internal sealed class DspPipeline : IDisposable
     private readonly ChannelChain[] _chains;
     private RestorationSettings? _restoration;
     private CodecBandwidthDetector? _detector;
+
+    /// <summary>
+    /// The one output channel allowed to feed the detector. Channels are processed in parallel and
+    /// the detector keeps a single fill counter, so letting every channel push into it corrupts that
+    /// counter and eventually walks off the end of its buffer.
+    /// </summary>
+    private int _detectorChannel = -1;
     private HighBandModel? _model;
+    private NeuralRepairModel? _network;
     private double _cutoffHz;
     private BandwidthEstimate _bandwidth;
     private readonly byte[][] _dsdOutputs;
@@ -163,8 +171,17 @@ internal sealed class DspPipeline : IDisposable
         {
             _restoration = restore;
             _detector = restore.ManualCutoffHz > 0.0 ? null : new CodecBandwidthDetector(plan.ConversionRate);
+
+            for (int c = 0; c < _outputChannels && _detectorChannel < 0; c++)
+            {
+                if (SourceChannel(c) >= 0)
+                {
+                    _detectorChannel = c;
+                }
+            }
             _cutoffHz = restore.ManualCutoffHz;
             _model = LoadModel(restore);
+            _network = restore.Predict ? ModelLibrary.TryLoadNetwork(restore.NetworkPath, out _) : null;
         }
 
         _chains = new ChannelChain[_outputChannels];
@@ -188,20 +205,36 @@ internal sealed class DspPipeline : IDisposable
 
             if (canRestore)
             {
-                if (restore.ReduceArtifacts)
+                if (_network is not null)
                 {
-                    chain.Reducer = new ArtifactReducer(plan.ConversionRate) { Strength = restore.ArtifactStrength };
-                }
-
-                if (restore.RebuildHarmonics)
-                {
-                    chain.Rebuilder = new HarmonicRebuilder(plan.ConversionRate)
+                    // One network does both jobs, so the two switches decide which half of its
+                    // answer is used rather than which stages exist.
+                    chain.Network = new NeuralRepair(_network, plan.ConversionRate)
                     {
-                        AmountDb = restore.RebuildAmountDb,
-                        CeilingHz = Math.Min(restore.CeilingHz, plan.ConversionRate / 2.0 * 0.98),
                         CutoffHz = _cutoffHz,
-                        Model = restore.Predict ? _model : null,
+                        CeilingHz = Math.Min(restore.CeilingHz, plan.ConversionRate / 2.0 * 0.98),
+                        Rebuild = restore.RebuildHarmonics,
+                        Reduce = restore.ReduceArtifacts,
+                        Amount = restore.NetworkAmount,
                     };
+                }
+                else
+                {
+                    if (restore.ReduceArtifacts)
+                    {
+                        chain.Reducer = new ArtifactReducer(plan.ConversionRate) { Strength = restore.ArtifactStrength };
+                    }
+
+                    if (restore.RebuildHarmonics)
+                    {
+                        chain.Rebuilder = new HarmonicRebuilder(plan.ConversionRate)
+                        {
+                            AmountDb = restore.RebuildAmountDb,
+                            CeilingHz = Math.Min(restore.CeilingHz, plan.ConversionRate / 2.0 * 0.98),
+                            CutoffHz = _cutoffHz,
+                            Model = restore.Predict ? _model : null,
+                        };
+                    }
                 }
             }
 
@@ -340,8 +373,11 @@ internal sealed class DspPipeline : IDisposable
     /// <summary>What the source's spectrum says about how it was coded, once enough has gone by.</summary>
     public BandwidthEstimate Bandwidth => _bandwidth;
 
-    /// <summary>True when a trained model is setting the rebuilt levels.</summary>
-    public bool IsPredicting => _model is not null;
+    /// <summary>True when a trained model or network is deciding the repair.</summary>
+    public bool IsPredicting => _model is not null || _network is not null;
+
+    /// <summary>True when a network is doing the repair rather than the fixed stages.</summary>
+    public bool IsNeural => _network is not null;
 
     private static HighBandModel? LoadModel(RestorationSettings restore) =>
         restore.Predict ? ModelLibrary.TryLoad(restore.ModelPath, out _) : null;
@@ -598,11 +634,21 @@ internal sealed class DspPipeline : IDisposable
             MeterSource(source, signal);
         }
 
-        if (chain.Reducer is not null || chain.Rebuilder is not null)
+        if (chain.Network is not null)
+        {
+            if (c == _detectorChannel && _detector is not null)
+            {
+                _detector.Push(signal);
+            }
+
+            chain.Network.CutoffHz = _cutoffHz;
+            chain.Network.Process(signal);
+        }
+        else if (chain.Reducer is not null || chain.Rebuilder is not null)
         {
             // Both work in place. Artefacts are damped first so the rebuilder copies a band that has
             // stopped flapping, rather than carrying the flapping upwards with it.
-            if (meter && _detector is not null)
+            if (c == _detectorChannel && _detector is not null)
             {
                 _detector.Push(signal);
             }
@@ -772,6 +818,7 @@ internal sealed class DspPipeline : IDisposable
         public ResamplerChainState? Ultrasonic;
         public ArtifactReducer? Reducer;
         public HarmonicRebuilder? Rebuilder;
+        public NeuralRepair? Network;
         public ApodizationDetector? Apodization;
         public ResamplerChainState? Resampler;
         public readonly SmoothedGain Volume = new(1.0);

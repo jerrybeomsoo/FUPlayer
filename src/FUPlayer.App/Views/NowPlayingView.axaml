@@ -37,19 +37,21 @@
         <TextBlock Text="{Binding Details}" Classes="muted small" Margin="0,2,0,0" />
 
         <Border Classes="inset" Margin="0,16,0,0" Padding="16,12" IsVisible="{Binding IsActive}" HorizontalAlignment="Left">
-          <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+          <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
             <TextBlock Grid.Row="0" Text="SOURCE" Classes="eyebrow" VerticalAlignment="Center" Margin="0,4,20,4" />
             <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SourceFormat}" FontWeight="Medium" VerticalAlignment="Center" />
             <TextBlock Grid.Row="1" Text="FILTER" Classes="eyebrow" VerticalAlignment="Center" Margin="0,4,20,4" />
             <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding FilterName}" FontWeight="Medium" VerticalAlignment="Center" />
             <TextBlock Grid.Row="2" Text="{Binding QuantizerLabel}" Classes="eyebrow" VerticalAlignment="Center" Margin="0,4,20,4" />
             <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding QuantizerName}" FontWeight="Medium" VerticalAlignment="Center" />
-            <TextBlock Grid.Row="3" Text="OUTPUT" Classes="eyebrow" VerticalAlignment="Center" Margin="0,4,20,4" />
-            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding OutputFormat}" FontWeight="SemiBold" Classes="accent" Classes.dsd="{Binding IsDsdOutput}" VerticalAlignment="Center" />
-            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding OutputNote}" Classes="muted small" TextWrapping="Wrap" MaxWidth="460" HorizontalAlignment="Left"
+            <TextBlock Grid.Row="3" Text="SOURCE BAND" Classes="eyebrow" VerticalAlignment="Center" Margin="0,4,20,4" IsVisible="{Binding HasBandwidth}" />
+            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Bandwidth}" FontWeight="Medium" VerticalAlignment="Center" IsVisible="{Binding HasBandwidth}" />
+            <TextBlock Grid.Row="4" Text="OUTPUT" Classes="eyebrow" VerticalAlignment="Center" Margin="0,4,20,4" />
+            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding OutputFormat}" FontWeight="SemiBold" Classes="accent" Classes.dsd="{Binding IsDsdOutput}" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding OutputNote}" Classes="muted small" TextWrapping="Wrap" MaxWidth="460" HorizontalAlignment="Left"
                        Margin="0,0,0,4" IsVisible="{Binding HasOutputNote}" />
-            <TextBlock Grid.Row="5" Text="DEVICE" Classes="eyebrow" VerticalAlignment="Center" Margin="0,4,20,4" />
-            <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Device}" Classes="secondary" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Row="6" Text="DEVICE" Classes="eyebrow" VerticalAlignment="Center" Margin="0,4,20,4" />
+            <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding Device}" Classes="secondary" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
           </Grid>
         </Border>
       </StackPanel>

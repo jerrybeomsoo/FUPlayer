@@ -6,6 +6,7 @@ using FUPlayer.Core.Audio;
 using FUPlayer.Core.Decoding;
 using FUPlayer.Core.Decoding.FFmpeg;
 using FUPlayer.Core.Dsp.Acceleration;
+using FUPlayer.Core.Dsp.Analysis;
 using FUPlayer.Core.Dsp.Dsd;
 using FUPlayer.Core.Dsp.Modulation;
 using FUPlayer.Core.Dsp.Numerics;
@@ -43,6 +44,11 @@ internal static class Program
                 "apps" => ListApps(),
                 "capture" => Capture(options),
                 "models" => ListModels(),
+                "bandwidth" => Bandwidth(options),
+                "roundtrip" => RoundTrip(options),
+                "dataset" => Dataset(options),
+                "train-repair" => TrainRepair(options),
+                "evaluate" => Evaluate(options),
                 "train" => Train(options),
                 "info" => ShowInfo(options),
                 "render" => Render(options, benchmark: false),
@@ -69,6 +75,13 @@ internal static class Program
               apps                         List applications whose audio can be captured
               capture --app <name|pid>     Record one application's output to a WAV file
                       --seconds <n> --out <file>
+              bandwidth <files…>           Report where each file's spectrum ends
+              roundtrip <file> --rate <B/s>  Code a file with the system AAC encoder and measure it
+                      [--out <wav>]          Keep the coded copy, to play or render through the repair
+              dataset <files…> --out <file>  Build training pairs by coding lossless music
+              evaluate <files…>              Measure how much closer the repair gets to the original
+              train-repair <dataset>         Fit the repair network to a training set
+                      --out <name> [--hidden 96,64] [--epochs 8] [--decay <n>]
               models                       List the installed high-band models
               train <files|folders…>       Fit a high-band model from lossless music
                       --cutoff <Hz> --out <name> [--bands <n>] [--ridge <r>]
@@ -89,6 +102,9 @@ internal static class Program
               --convolution auto|tap       Frequency domain for long filters, or one multiply-add per tap
               --convolution-from <taps>    Taps per phase from which the frequency domain takes over (default 1024)
               --convolution-block <ms>     Longest a frequency-domain stage may hold input (0 = choose)
+              --repair-artifacts           Damp the warbling a low bit rate leaves behind
+              --repair-rebuild             Synthesise a band above the codec's cutoff
+              --repair-predict             Let a trained network set the levels for both
               --convolution-layered        Divide the taps between short blocks for the early ones and
                                            longer blocks behind them, instead of one length for every tap.
                                            Far less arithmetic at a short block, and no graphics device
@@ -371,15 +387,390 @@ internal static class Program
         writer.Write((uint)data);
     }
 
+    private static int Evaluate(Options options)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return Fail("Measuring the repair needs the system AAC encoder, which is a Windows feature.");
+        }
+
+        return EvaluateWindows(options);
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static int EvaluateWindows(Options options)
+    {
+        List<string> files = MediaScanner.Expand(options.Positional).ToList();
+        if (files.Count == 0)
+        {
+            throw new ArgumentException("Give lossless files the model was not trained on.");
+        }
+
+        int[] rates = options.Get("rates") is string list
+            ? [.. list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(t => int.TryParse(t, NumberStyles.None, CultureInfo.InvariantCulture, out int value) ? value : 0)
+                .Where(value => value > 0)]
+            : AacRoundTrip.BytesPerSecond;
+
+        double seconds = Math.Clamp(options.GetInt("seconds") ?? 60, 5, 600);
+        double amount = Math.Clamp((options.GetInt("amount") ?? 100) / 100.0, 0.0, 1.0);
+
+        return RepairEvaluator.Run(files, rates, seconds, options.Get("network"), amount);
+    }
+
+    private static int TrainRepair(Options options)
+    {
+        string? dataset = options.Positional.FirstOrDefault();
+        if (dataset is null)
+        {
+            throw new ArgumentException("Give the training set built by 'dataset'.");
+        }
+
+        int[] hidden = options.Get("hidden") is string list
+            ? [.. list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(t => int.TryParse(t, NumberStyles.None, CultureInfo.InvariantCulture, out int value) ? value : 0)
+                .Where(value => value > 0)]
+            : [96, 64];
+
+        if (hidden.Length == 0)
+        {
+            throw new ArgumentException("No usable hidden layer sizes were given.");
+        }
+
+        int epochs = Math.Clamp(options.GetInt("epochs") ?? 8, 1, 200);
+        int batch = Math.Clamp(options.GetInt("batch") ?? 256, 8, 4096);
+        float rate = (options.GetInt("rate") ?? 300) / 100_000f;
+        float decay = (options.GetInt("decay") ?? 100) / 100_000f;
+
+        return RepairTrainer.Run(dataset, options.Get("out") ?? "repair", hidden, epochs, rate, batch, decay, options.Get("note"));
+    }
+
+    private static int Dataset(Options options)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return Fail("Building a training set needs the system AAC encoder, which is a Windows feature.");
+        }
+
+        return DatasetWindows(options);
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static int DatasetWindows(Options options)
+    {
+        List<string> files = MediaScanner.Expand(options.Positional).ToList();
+        if (files.Count == 0)
+        {
+            throw new ArgumentException("Give some lossless files or folders to code.");
+        }
+
+        string output = options.Get("out") ?? "repair-dataset.fudata";
+        double seconds = Math.Clamp(options.GetInt("seconds") ?? 240, 10, 36_000);
+        int bands = Math.Clamp(options.GetInt("bands") ?? 40, 8, 96);
+        int context = Math.Clamp(options.GetInt("context") ?? 1, 0, 4);
+        int stride = Math.Clamp(options.GetInt("stride") ?? 2, 1, 8);
+
+        int[] rates = options.Get("rates") is string list
+            ? [.. list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(t => int.TryParse(t, NumberStyles.None, CultureInfo.InvariantCulture, out int value) ? value : 0)
+                .Where(value => value > 0)]
+            : AacRoundTrip.BytesPerSecond;
+
+        if (rates.Length == 0)
+        {
+            throw new ArgumentException("No usable bit rates were given.");
+        }
+
+        Console.WriteLine($"Coding {files.Count} files at {string.Join(", ", rates.Select(r => $"{r * 8 / 1000} kbit/s"))}, "
+            + $"up to {seconds / 60.0:0.#} min each.");
+
+        return DatasetBuilder.Run(files, output, rates, seconds, bands, context, stride);
+    }
+
+    /// <summary>
+    /// Codes a file with the system encoder and reports what that did to it. This is the check that
+    /// the training pairs are worth anything: the coded copy has to be band-limited where a codec
+    /// would band-limit it, and it has to line up with the original.
+    /// </summary>
+    private static int RoundTrip(Options options)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return Fail("The system AAC encoder is a Windows feature.");
+        }
+
+        return RoundTripWindows(options);
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static int RoundTripWindows(Options options)
+    {
+        string? path = options.Positional.FirstOrDefault();
+        if (path is null)
+        {
+            throw new ArgumentException("Give a lossless file to code.");
+        }
+
+        int bytesPerSecond = options.GetInt("rate") ?? 16_000;
+        int seconds = Math.Clamp(options.GetInt("seconds") ?? 30, 2, 600);
+
+        using IAudioDecoder decoder = DecoderFactory.Open(path);
+        int rate = decoder.Format.SampleRate;
+        int channels = decoder.Format.Channels;
+        if (!AacRoundTrip.Supports(rate, channels))
+        {
+            return Fail($"The system encoder does not take {rate} Hz with {channels} channels.");
+        }
+
+        int frames = seconds * rate;
+        double[][] original = new double[channels][];
+        for (int c = 0; c < channels; c++)
+        {
+            original[c] = new double[frames];
+        }
+
+        int read = decoder.ReadPcm(original, 0, frames);
+        if (read < rate)
+        {
+            return Fail("The file is too short to measure.");
+        }
+
+        var clock = Stopwatch.StartNew();
+        double[][]? coded = AacRoundTrip.Process(original, rate, channels, bytesPerSecond);
+        if (coded is null)
+        {
+            return Fail("The system encoder refused the format.");
+        }
+
+        Console.WriteLine($"{path}: {rate} Hz, {channels} ch, {read / (double)rate:0.#} s, "
+            + $"coded at {bytesPerSecond * 8 / 1000} kbit/s in {clock.Elapsed.TotalSeconds:0.0} s");
+
+        Console.WriteLine($"  original: {Verdict(original, rate, read)}");
+        Console.WriteLine($"  coded   : {Verdict(coded, rate, read)}");
+
+        // How far apart the two are, which is what the model is being asked to shrink.
+        double error = 0.0;
+        double signal = 0.0;
+        for (int c = 0; c < channels; c++)
+        {
+            for (int i = 0; i < read; i++)
+            {
+                double difference = original[c][i] - coded[c][i];
+                error += difference * difference;
+                signal += original[c][i] * original[c][i];
+            }
+        }
+
+        Console.WriteLine($"  difference: {10.0 * Math.Log10(error / Math.Max(1e-30, signal)):0.0} dB relative to the original");
+
+        // A coded copy on disk, so the repair can be run over it the way a listener would.
+        if (options.Get("out") is string codedPath)
+        {
+            using var file = new FileStream(codedPath, FileMode.Create, FileAccess.Write);
+            using var writer = new BinaryWriter(file);
+            WriteWavHeader(writer, rate, channels, read);
+            for (int i = 0; i < read; i++)
+            {
+                for (int c = 0; c < channels; c++)
+                {
+                    writer.Write((float)coded[c][i]);
+                }
+            }
+
+            Console.WriteLine($"  wrote {codedPath}");
+        }
+
+        // Where the codec actually spent its bits, which the verdict alone does not show.
+        Console.WriteLine($"  {"BAND",-14} {"ORIGINAL",9} {"CODED",9} {"CHANGE",8}");
+        double[] edges = [1_000, 4_000, 8_000, 11_000, 13_000, 15_000, 16_500, 18_000, 20_000, 22_050];
+        for (int band = 0; band < edges.Length - 1; band++)
+        {
+            double a = BandDb(original, rate, read, edges[band], edges[band + 1]);
+            double b = BandDb(coded, rate, read, edges[band], edges[band + 1]);
+            Console.WriteLine($"  {edges[band] / 1000.0,5:0.#}-{edges[band + 1] / 1000.0,-8:0.#} {a,9:0.0} {b,9:0.0} {b - a,8:+0.0;-0.0}");
+        }
+
+        return 0;
+    }
+
+    /// <summary>Mean power in one band, in decibels, across the whole signal.</summary>
+    private static double BandDb(double[][] planar, int rate, int frames, double lowHz, double highHz)
+    {
+        const int size = 8192;
+        var plan = new RealFftPlan(size);
+        double[] re = new double[size];
+        double[] im = new double[size];
+        double[] frame = new double[size];
+        double binHz = (double)rate / size;
+        int low = (int)(lowHz / binHz);
+        int high = Math.Min(plan.Bins, (int)Math.Ceiling(highHz / binHz));
+
+        double total = 0.0;
+        int blocks = 0;
+        for (int start = 0; start + size <= frames; start += size)
+        {
+            for (int i = 0; i < size; i++)
+            {
+                double sum = 0.0;
+                for (int c = 0; c < planar.Length; c++)
+                {
+                    sum += planar[c][start + i];
+                }
+
+                frame[i] = sum / planar.Length * (0.5 - (0.5 * Math.Cos(2.0 * Math.PI * i / size)));
+            }
+
+            plan.Forward(frame, re, im);
+            for (int bin = low; bin < high; bin++)
+            {
+                total += (re[bin] * re[bin]) + (im[bin] * im[bin]);
+            }
+
+            blocks++;
+        }
+
+        double mean = total / Math.Max(1, blocks * Math.Max(1, high - low));
+        return mean <= 0.0 ? -400.0 : 10.0 * Math.Log10(mean);
+    }
+
+    private static string Verdict(double[][] planar, int rate, int frames)
+    {
+        var detector = new CodecBandwidthDetector(rate);
+        double[] mid = new double[frames];
+        for (int i = 0; i < frames; i++)
+        {
+            double sum = 0.0;
+            for (int c = 0; c < planar.Length; c++)
+            {
+                sum += planar[c][i];
+            }
+
+            mid[i] = sum / planar.Length;
+        }
+
+        detector.Push(mid);
+        return detector.Estimate().Describe();
+    }
+
+    /// <summary>Reports what the long-term spectrum says about how each file was coded.</summary>
+    private static int Bandwidth(Options options)
+    {
+        List<string> files = MediaScanner.Expand(options.Positional).ToList();
+        if (files.Count == 0)
+        {
+            throw new ArgumentException("Give some audio files or folders.");
+        }
+
+        double seconds = Math.Clamp(options.GetInt("seconds") ?? 60, 2, 3600);
+
+        Console.WriteLine($"{"VERDICT",-14} {"CUTOFF",9} {"EDGE",7}  FILE");
+        foreach (string file in files)
+        {
+            IAudioDecoder decoder;
+            try
+            {
+                decoder = DecoderFactory.Open(file);
+            }
+            catch (Exception ex) when (ex is AudioDecoderException or IOException or NotSupportedException)
+            {
+                Console.WriteLine($"{"unreadable",-14} {string.Empty,9} {string.Empty,7}  {Path.GetFileName(file)}: {ex.Message}");
+                continue;
+            }
+
+            using (decoder)
+            {
+                BandwidthEstimate estimate = Measure(decoder, seconds);
+                string cutoff = estimate.Verdict == BandwidthVerdict.Unknown
+                    ? string.Empty
+                    : $"{estimate.CutoffHz / 1000.0:0.0} kHz";
+                string edge = estimate.Verdict == BandwidthVerdict.BandLimited ? $"{estimate.EdgeDropDb:0} dB" : string.Empty;
+                Console.WriteLine($"{estimate.Verdict,-14} {cutoff,9} {edge,7}  {Path.GetFileName(file)}");
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>Pushes the mid of the first few seconds through the detector.</summary>
+    private static BandwidthEstimate Measure(IAudioDecoder decoder, double seconds)
+    {
+        if (decoder.Format.IsDsd)
+        {
+            return default;
+        }
+
+        int rate = decoder.Format.SampleRate;
+        int channels = decoder.Format.Channels;
+        var detector = new CodecBandwidthDetector(rate);
+
+        const int block = 4096;
+        double[][] planar = new double[channels][];
+        for (int c = 0; c < channels; c++)
+        {
+            planar[c] = new double[block];
+        }
+
+        double[] mid = new double[block];
+        long limit = (long)(seconds * rate);
+        long done = 0;
+
+        while (done < limit)
+        {
+            int frames = decoder.ReadPcm(planar, 0, block);
+            if (frames <= 0)
+            {
+                break;
+            }
+
+            for (int i = 0; i < frames; i++)
+            {
+                double sum = 0.0;
+                for (int c = 0; c < channels; c++)
+                {
+                    sum += planar[c][i];
+                }
+
+                mid[i] = sum / channels;
+            }
+
+            detector.Push(mid.AsSpan(0, frames));
+            done += frames;
+        }
+
+        return detector.Estimate();
+    }
+
     private static int ListModels()
     {
         Console.WriteLine($"Models folder: {ModelLibrary.Directory}");
+        IReadOnlyList<string> networks = ModelLibrary.ListNetworks();
         IReadOnlyList<string> files = ModelLibrary.List();
-        if (files.Count == 0)
+
+        if (networks.Count == 0 && files.Count == 0)
         {
-            Console.WriteLine("No model is installed. Train one with 'fuplayer-cli train', or copy a");
-            Console.WriteLine($"*{ModelLibrary.Extension} file into that folder.");
+            Console.WriteLine("Nothing is installed. Build a training set with 'dataset' and fit one with");
+            Console.WriteLine($"'train-repair', or copy a *{ModelLibrary.NeuralExtension} file into that folder.");
             return 0;
+        }
+
+        foreach (string network in networks)
+        {
+            NeuralRepairModel? model = ModelLibrary.TryLoadNetwork(network, out string? broken);
+            if (model is null)
+            {
+                Console.WriteLine($"  {Path.GetFileName(network)}: unreadable ({broken})");
+                continue;
+            }
+
+            // A network whose weights are all zero answers with its output biases and nothing else,
+            // which is a constant curve however it is stored.
+            bool curve = IsConstant(model);
+            Console.WriteLine($"  {Path.GetFileName(network)}   {(curve ? "constant curve" : "network")}");
+            Console.WriteLine($"      {string.Join("-", model.Layers)} over {model.Bands} bands, "
+                + $"{model.Context} frames of context, {model.LowHz / 1000.0:0.#} to {model.HighHz / 1000.0:0.#} kHz");
+            Console.WriteLine($"      fitted to {model.FramesSeen:N0} frames"
+                + (model.TrainedOn is null ? string.Empty : $" from {model.TrainedOn}")
+                + $", held-out error {model.Loss:F3}");
         }
 
         foreach (string file in files)
@@ -399,6 +790,31 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    /// <summary>True when every weight is zero, so the model answers the same thing for every frame.</summary>
+    private static bool IsConstant(NeuralRepairModel model)
+    {
+        byte[] bytes = Convert.FromBase64String(model.Weights);
+        float[] flat = new float[bytes.Length / sizeof(float)];
+        Buffer.BlockCopy(bytes, 0, flat, 0, bytes.Length);
+
+        int at = 0;
+        for (int layer = 1; layer < model.Layers.Length; layer++)
+        {
+            int weights = model.Layers[layer - 1] * model.Layers[layer];
+            for (int i = 0; i < weights; i++)
+            {
+                if (flat[at + i] != 0.0f)
+                {
+                    return false;
+                }
+            }
+
+            at += weights + model.Layers[layer];
+        }
+
+        return true;
     }
 
     private static int Train(Options options)
@@ -725,7 +1141,7 @@ internal static class Program
                     bool hasValue = i + 1 < list.Length && !list[i + 1].StartsWith("--", StringComparison.Ordinal)
                         && name is not ("dop" or "pass-through" or "remove-ultrasonics" or "no-limiter"
                             or "gpu" or "gpu-fast" or "gpu-force" or "probe" or "convolution-layered"
-                            or "gpu-hold");
+                            or "gpu-hold" or "repair-artifacts" or "repair-rebuild" or "repair-predict");
                     options._named[name] = hasValue ? list[++i] : null;
                 }
                 else
@@ -810,6 +1226,10 @@ internal static class Program
             settings.Processing.ConvolutionMaxBlockMs =
                 double.TryParse(Get("convolution-block"), NumberStyles.Float, CultureInfo.InvariantCulture, out double blockMs) ? blockMs : 0.0;
             settings.Processing.ConvolutionUniformBlocks = !Has("convolution-layered");
+
+            settings.Restoration.ReduceArtifacts = Has("repair-artifacts");
+            settings.Restoration.RebuildHarmonics = Has("repair-rebuild");
+            settings.Restoration.Predict = Has("repair-predict");
             settings.Processing.GpuAcceleration = Has("gpu") || Has("gpu-force");
             settings.Processing.GpuDeviceId = Get("gpu-device") ?? string.Empty;
             settings.Processing.GpuHighPrecision = !Has("gpu-fast");

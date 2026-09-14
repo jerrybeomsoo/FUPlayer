@@ -95,6 +95,19 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 - 16 to 32 bit PCM with eleven dither and noise-shaping options.
 - Six delta-sigma modulators from 5th to 9th order, and five low-pass filters for DSD to PCM conversion.
 
+**Live input and lossy repair**
+
+- Take audio from any running application, Firefox or a music client, and send it through the whole chain
+  to your DAC. Windows process loopback, so nothing has to be routed by hand.
+- Measures where a file's spectrum actually ends, which is the only way to tell a coded stream from a
+  lossless one when nothing in the container says so.
+- Synthesises a band above a codec's cutoff, and damps the warbling a low bit rate leaves behind.
+- Optionally levels both from a model fitted to real coded music. Fetch freely licensed lossless releases,
+  code them with a real encoder, and fit the model on your own machine; nothing ships pre-trained.
+- Everything is judged on releases the model has never heard, against two baselines, and the tooling refuses to
+  save a model that does not beat them. It is synthesis, not recovery, and
+  [the documentation says exactly how much it is worth](docs/restoration.md).
+
 **Analysis**
 
 - Filter magnitude, passband, impulse, step and noise-shaping plots, computed from the filter that will actually

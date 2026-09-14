@@ -20,6 +20,23 @@ or, after building, `src/FUPlayer.Cli/bin/Release/net9.0/fuplayer-cli.exe`.
 | `render <files> --out <dir>` | Process to WAV or DSF faster than real time |
 | `bench <file>` | Report how many times faster than real time the chain runs |
 | `play <files>` | Play through an audio device. Ctrl+C stops |
+| `apps` | Applications whose audio can be captured |
+| `capture --app <name\|pid>` | Record one application's output to a float WAV |
+| `bandwidth <files>` | Where each file's spectrum ends, and whether that looks like a codec |
+| `models` | Installed repair models and networks |
+
+### Training a repair model
+
+These four build and check a model for the lossy repair stages. See
+[restoration.md](restoration.md) for what they are for.
+
+| Command | Does |
+| --- | --- |
+| `roundtrip <file> --rate <B/s>` | Code a file with the system AAC encoder and report what it did to each band |
+| `dataset <files> --out <file>` | Build coded-against-original training pairs |
+| `train-repair <dataset> --out <name>` | Fit the network, reporting against the do-nothing baseline |
+| `evaluate <files>` | Measure how much closer the repair gets to the original, on files it never saw |
+| `train <files> --cutoff <Hz>` | Fit the simpler linear model, straight from lossless music |
 
 ## Processing options
 
@@ -45,6 +62,9 @@ or, after building, `src/FUPlayer.Cli/bin/Release/net9.0/fuplayer-cli.exe`.
 | `--pass-through` | Send DSD files unchanged when the output rate matches |
 | `--remove-ultrasonics` | Low-pass sources above 48 kHz at 20 kHz |
 | `--no-limiter` | Leave peaks above full scale alone |
+| `--repair-artifacts` | Damp the warbling a low bit rate leaves behind |
+| `--repair-rebuild` | Synthesise a band above the codec's cutoff |
+| `--repair-predict` | Let a trained network set the levels for both |
 
 ## Graphics acceleration
 

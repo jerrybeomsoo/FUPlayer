@@ -99,6 +99,12 @@ public sealed partial class NowPlayingViewModel : ObservableObject
     private string _quantizerName = "-";
 
     [ObservableProperty]
+    private string _bandwidth = string.Empty;
+
+    [ObservableProperty]
+    private bool _hasBandwidth;
+
+    [ObservableProperty]
     private string _resampler = string.Empty;
 
     [ObservableProperty]
@@ -246,6 +252,13 @@ public sealed partial class NowPlayingViewModel : ObservableObject
             Processing = Notes = OutputNote = string.Empty;
             HasNotes = HasOutputNote = false;
         }
+
+        // What the source's own spectrum says, which is the only way to tell a coded file from a
+        // lossless one when the container does not say.
+        Bandwidth = IsActive && status.Bandwidth is { } verdict
+            ? verdict + (status.IsNeuralRepair ? "  ·  repaired by a trained network" : string.Empty)
+            : string.Empty;
+        HasBandwidth = Bandwidth.Length > 0;
 
         Resampler = IsActive ? status.ResamplerSummary ?? string.Empty : string.Empty;
         Acceleration = IsActive ? status.Acceleration ?? string.Empty : string.Empty;

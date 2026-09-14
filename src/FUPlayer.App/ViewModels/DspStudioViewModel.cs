@@ -456,19 +456,33 @@ public sealed partial class DspStudioViewModel : ObservableObject
     {
         get
         {
+            // A network does both jobs and is preferred when one is installed.
+            string? network = ModelLibrary.NewestNetwork();
+            if (network is not null)
+            {
+                NeuralRepairModel? trained = ModelLibrary.TryLoadNetwork(network, out string? broken);
+                return trained is null
+                    ? $"The installed network could not be read: {broken}"
+                    : $"Using {Path.GetFileName(network)}: {string.Join("-", trained.Layers)} network over "
+                        + $"{trained.Bands} bands, fitted to {trained.FramesSeen:N0} frames of coded music"
+                        + (trained.TrainedOn is null ? string.Empty : $" from {trained.TrainedOn}")
+                        + $". It sets both the rebuilt levels and the correction below the cutoff.";
+            }
+
             string? path = ModelLibrary.Newest();
             if (path is null)
             {
-                return "No model installed. Train one with 'fuplayer-cli train', or copy a .fumodel.json file into "
-                    + $"{ModelLibrary.Directory}. Without one the rebuilt band follows a fixed slope.";
+                return "Nothing installed. Train a network with 'fuplayer-cli dataset' and 'train-repair', or copy a "
+                    + $".funet.json file into {ModelLibrary.Directory}. Without one the rebuilt band follows a fixed "
+                    + "slope and the artefact damping is a fixed rate limit.";
             }
 
             HighBandModel? model = ModelLibrary.TryLoad(path, out string? failure);
             return model is null
                 ? $"The installed model could not be read: {failure}"
-                : $"Using {Path.GetFileName(path)}: cutoff {model.CutoffHz / 1000.0:0.#} kHz, predicting to "
-                    + $"{model.TopHz / 1000.0:0.#} kHz, fitted to {model.FramesSeen:N0} frames"
-                    + (model.TrainedOn is null ? "." : $" from {model.TrainedOn}.");
+                : $"Using {Path.GetFileName(path)}: a linear fit, cutoff {model.CutoffHz / 1000.0:0.#} kHz, predicting "
+                    + $"to {model.TopHz / 1000.0:0.#} kHz, from {model.FramesSeen:N0} frames. It sets the rebuilt "
+                    + "levels only.";
         }
     }
 

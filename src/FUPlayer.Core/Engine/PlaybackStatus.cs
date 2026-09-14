@@ -44,6 +44,12 @@ public sealed record PlaybackStatus
     /// <summary>DSP time relative to real time (1.0 = just keeping up).</summary>
     public double DspLoad { get; init; }
 
+    /// <summary>What the source's spectrum says about how it was coded, once enough has played.</summary>
+    public string? Bandwidth { get; init; }
+
+    /// <summary>True while a trained network is doing the repair.</summary>
+    public bool IsNeuralRepair { get; init; }
+
     /// <summary>FIFO fill level 0..1.</summary>
     public double BufferFill { get; init; }
 
