@@ -1,14 +1,17 @@
 using System.Diagnostics;
 using System.Globalization;
 using FUPlayer.Audio.Windows;
+using FUPlayer.Core.Capture;
 using FUPlayer.Core.Audio;
 using FUPlayer.Core.Decoding;
 using FUPlayer.Core.Decoding.FFmpeg;
 using FUPlayer.Core.Dsp.Acceleration;
 using FUPlayer.Core.Dsp.Dsd;
 using FUPlayer.Core.Dsp.Modulation;
+using FUPlayer.Core.Dsp.Numerics;
 using FUPlayer.Core.Dsp.Quantization;
 using FUPlayer.Core.Dsp.Resampling;
+using FUPlayer.Core.Dsp.Restoration;
 using FUPlayer.Core.Engine;
 using FUPlayer.Core.Output;
 using FUPlayer.Core.Playlists;
@@ -37,6 +40,10 @@ internal static class Program
                 "dithers" => ListDithers(),
                 "modulators" => ListModulators(),
                 "gpus" => ListGpus(),
+                "apps" => ListApps(),
+                "capture" => Capture(options),
+                "models" => ListModels(),
+                "train" => Train(options),
                 "info" => ShowInfo(options),
                 "render" => Render(options, benchmark: false),
                 "bench" => Render(options, benchmark: true),
@@ -59,6 +66,12 @@ internal static class Program
               devices                      List output back-ends, devices and their capabilities
               filters | dithers | modulators  List processing presets
               gpus                         List the OpenCL devices that can convolve long filters
+              apps                         List applications whose audio can be captured
+              capture --app <name|pid>     Record one application's output to a WAV file
+                      --seconds <n> --out <file>
+              models                       List the installed high-band models
+              train <files|folders…>       Fit a high-band model from lossless music
+                      --cutoff <Hz> --out <name> [--bands <n>] [--ridge <r>]
               info <file>                  Show format, tags and the processing plan for a file
               render <files…> --out <dir>  Process files faster than real time into WAV/DSF
               bench <file>                 Measure how many times faster than real time processing runs
@@ -101,6 +114,9 @@ internal static class Program
               --buffer <ms>                Device buffer length
             """);
     }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static ICaptureProvider CreateCaptureProvider() => new ProcessLoopbackProvider();
 
     private static int Fail(string message)
     {
@@ -189,6 +205,324 @@ internal static class Program
             Console.WriteLine($"  {preset.Id,-16} {preset.Name}");
         }
 
+        return 0;
+    }
+
+    private static int ListApps()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return Fail("Capturing an application's audio is a Windows feature.");
+        }
+
+        return ListWindowsApps();
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static int ListWindowsApps()
+    {
+        var provider = new ProcessLoopbackProvider();
+        if (!provider.IsSupported)
+        {
+            return Fail(provider.UnsupportedReason ?? "Capture is not available.");
+        }
+
+        IReadOnlyList<CaptureTarget> targets = provider.List();
+        if (targets.Count == 0)
+        {
+            Console.WriteLine("No application holds an audio session right now.");
+            return 0;
+        }
+
+        (int rate, int channels) = ProcessLoopbackProvider.MixFormat();
+        Console.WriteLine($"Windows mixes at {rate} Hz, {channels} channels. Capture runs at that rate.");
+        Console.WriteLine();
+        Console.WriteLine($"{"PID",8}  {"STATE",-8}  APPLICATION");
+        foreach (CaptureTarget target in targets)
+        {
+            Console.WriteLine($"{target.ProcessId,8}  {(target.IsPlaying ? "playing" : "idle"),-8}  {target.Label}");
+        }
+
+        return 0;
+    }
+
+    private static int Capture(Options options)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return Fail("Capturing an application's audio is a Windows feature.");
+        }
+
+        return CaptureWindows(options);
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static int CaptureWindows(Options options)
+    {
+        var provider = new ProcessLoopbackProvider();
+        if (!provider.IsSupported)
+        {
+            return Fail(provider.UnsupportedReason ?? "Capture is not available.");
+        }
+
+        string? wanted = options.Get("app");
+        if (string.IsNullOrWhiteSpace(wanted))
+        {
+            return Fail("Pass --app with a process name or id. Run 'fuplayer-cli apps' to see them.");
+        }
+
+        IReadOnlyList<CaptureTarget> targets = provider.List();
+        CaptureTarget? target = int.TryParse(wanted, NumberStyles.None, CultureInfo.InvariantCulture, out int pid)
+            ? targets.FirstOrDefault(t => t.ProcessId == pid)
+            : targets.FirstOrDefault(t => t.ProcessName.Equals(wanted, StringComparison.OrdinalIgnoreCase) && t.IsPlaying)
+              ?? targets.FirstOrDefault(t => t.ProcessName.Equals(wanted, StringComparison.OrdinalIgnoreCase));
+
+        if (target is null)
+        {
+            return Fail($"No audio session for '{wanted}'. Run 'fuplayer-cli apps' to see them.");
+        }
+
+        int seconds = Math.Clamp(options.GetInt("seconds") ?? 10, 1, 3600);
+        string output = options.Get("out") ?? $"capture-{target.ProcessName}.wav";
+
+        using IAudioDecoder decoder = provider.Open(target.ProcessId, channels: 0);
+        int rate = decoder.Format.SampleRate;
+        int channels = decoder.Format.Channels;
+        long total = (long)(seconds * rate);
+        int block = Math.Min(4096, (int)total);
+
+        Console.WriteLine($"Capturing {target.Label} (pid {target.ProcessId}) at {rate} Hz, {channels} channels, for {seconds} s.");
+
+        double[][] planar = new double[channels][];
+        for (int channel = 0; channel < channels; channel++)
+        {
+            planar[channel] = new double[block];
+        }
+
+        using var file = new FileStream(output, FileMode.Create, FileAccess.Write);
+        using var writer = new BinaryWriter(file);
+        WriteWavHeader(writer, rate, channels, total);
+
+        double peak = 0.0;
+        double sum = 0.0;
+        long written = 0;
+        var clock = Stopwatch.StartNew();
+        while (written < total)
+        {
+            int frames = (int)Math.Min(block, total - written);
+            decoder.ReadPcm(planar, 0, frames);
+
+            for (int frame = 0; frame < frames; frame++)
+            {
+                for (int channel = 0; channel < channels; channel++)
+                {
+                    double sample = planar[channel][frame];
+                    peak = Math.Max(peak, Math.Abs(sample));
+                    sum += sample * sample;
+                    writer.Write((float)sample);
+                }
+            }
+
+            written += frames;
+
+            // The capture arrives in real time, so the reader must not spin ahead of it.
+            double due = (double)written / rate;
+            double ahead = due - clock.Elapsed.TotalSeconds;
+            if (ahead > 0.002)
+            {
+                Thread.Sleep(TimeSpan.FromSeconds(Math.Min(ahead, 0.25)));
+            }
+        }
+
+        double rms = Math.Sqrt(sum / Math.Max(1, written * channels));
+        Console.WriteLine($"Wrote {output}: {written} frames, peak {Db(peak)}, RMS {Db(rms)}.");
+        if (decoder is IDiagnosticCapture diagnostics)
+        {
+            Console.WriteLine($"Device delivered {diagnostics.CapturedFrames} frames; {diagnostics.SilentFrames} were filled in by the reader.");
+        }
+        if (peak <= 0.0)
+        {
+            Console.WriteLine("Every sample was zero. The application was silent, or it renders through a process the tree does not cover.");
+        }
+
+        return 0;
+    }
+
+    private static string Db(double amplitude) =>
+        amplitude <= 0.0 ? "silence" : $"{20.0 * Math.Log10(amplitude):0.0} dBFS";
+
+    /// <summary>32-bit float WAV, which is what the capture delivers.</summary>
+    private static void WriteWavHeader(BinaryWriter writer, int rate, int channels, long frames)
+    {
+        int blockAlign = channels * sizeof(float);
+        long data = frames * blockAlign;
+        writer.Write("RIFF"u8);
+        writer.Write((uint)(36 + data));
+        writer.Write("WAVE"u8);
+        writer.Write("fmt "u8);
+        writer.Write(16u);
+        writer.Write((ushort)3);
+        writer.Write((ushort)channels);
+        writer.Write((uint)rate);
+        writer.Write((uint)(rate * blockAlign));
+        writer.Write((ushort)blockAlign);
+        writer.Write((ushort)32);
+        writer.Write("data"u8);
+        writer.Write((uint)data);
+    }
+
+    private static int ListModels()
+    {
+        Console.WriteLine($"Models folder: {ModelLibrary.Directory}");
+        IReadOnlyList<string> files = ModelLibrary.List();
+        if (files.Count == 0)
+        {
+            Console.WriteLine("No model is installed. Train one with 'fuplayer-cli train', or copy a");
+            Console.WriteLine($"*{ModelLibrary.Extension} file into that folder.");
+            return 0;
+        }
+
+        foreach (string file in files)
+        {
+            HighBandModel? model = ModelLibrary.TryLoad(file, out string? failure);
+            if (model is null)
+            {
+                Console.WriteLine($"  {Path.GetFileName(file)}: unreadable ({failure})");
+                continue;
+            }
+
+            Console.WriteLine($"  {Path.GetFileName(file)}");
+            Console.WriteLine($"      cutoff {model.CutoffHz / 1000.0:0.#} kHz, predicts to {model.TopHz / 1000.0:0.#} kHz, "
+                + $"{model.InputBands} in, {model.OutputBands} out");
+            Console.WriteLine($"      trained at {model.SampleRate} Hz on {model.FramesSeen} frames"
+                + (model.TrainedOn is null ? string.Empty : $" from {model.TrainedOn}"));
+        }
+
+        return 0;
+    }
+
+    private static int Train(Options options)
+    {
+        List<string> files = MediaScanner.Expand(options.Positional).ToList();
+        if (files.Count == 0)
+        {
+            throw new ArgumentException("Give some lossless files or folders to learn from.");
+        }
+
+        double cutoff = options.GetInt("cutoff") ?? 16_000;
+        int bands = Math.Clamp(options.GetInt("bands") ?? 16, 4, 48);
+        string name = options.Get("out") ?? $"cutoff-{cutoff / 1000.0:0.#}k";
+        double ridge = options.GetInt("ridge") is int r ? r / 1000.0 : 1e-3;
+
+        const int size = 2048;
+        var plan = new RealFftPlan(size);
+        double[] window = new double[size];
+        for (int i = 0; i < size; i++)
+        {
+            window[i] = 0.5 - (0.5 * Math.Cos(2.0 * Math.PI * i / size));
+        }
+
+        HighBandTrainer? trainer = null;
+        int used = 0;
+        int skipped = 0;
+        double[] re = new double[size];
+        double[] im = new double[size];
+        double[] frame = new double[size];
+        double[] power = new double[(size / 2) + 1];
+
+        foreach (string file in files)
+        {
+            IAudioDecoder decoder;
+            try
+            {
+                decoder = DecoderFactory.Open(file);
+            }
+            catch (Exception ex) when (ex is AudioDecoderException or IOException or NotSupportedException)
+            {
+                skipped++;
+                continue;
+            }
+
+            using (decoder)
+            {
+                // Only material that still has the band being learned is any use as an answer.
+                if (decoder.Format.IsDsd || decoder.Format.SampleRate < cutoff * 2.2)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                trainer ??= new HighBandTrainer(decoder.Format.SampleRate, cutoff, inputBands: bands);
+                if (trainer.SampleRate != decoder.Format.SampleRate)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                int channels = decoder.Format.Channels;
+                double[][] block = new double[channels][];
+                for (int c = 0; c < channels; c++)
+                {
+                    block[c] = new double[size];
+                }
+
+                double binHz = (double)decoder.Format.SampleRate / size;
+                while (decoder.ReadPcm(block, 0, size) == size)
+                {
+                    // The mid of the pair, which is where most of the music is.
+                    for (int i = 0; i < size; i++)
+                    {
+                        double sum = 0.0;
+                        for (int c = 0; c < channels; c++)
+                        {
+                            sum += block[c][i];
+                        }
+
+                        frame[i] = sum / channels * window[i];
+                    }
+
+                    double energy = 0.0;
+                    for (int i = 0; i < size; i++)
+                    {
+                        energy += frame[i] * frame[i];
+                    }
+
+                    // Quiet frames teach nothing except what the noise floor looks like.
+                    if (Math.Sqrt(energy / size) < 1e-3)
+                    {
+                        continue;
+                    }
+
+                    plan.Forward(frame, re, im);
+                    for (int bin = 0; bin < power.Length; bin++)
+                    {
+                        power[bin] = (re[bin] * re[bin]) + (im[bin] * im[bin]);
+                    }
+
+                    trainer.Add(power, binHz);
+                }
+
+                used++;
+                Console.Write($"\r{used} files, {trainer.Frames} frames   ");
+            }
+        }
+
+        Console.WriteLine();
+        if (trainer is null || trainer.Frames < 1000)
+        {
+            throw new InvalidOperationException(
+                $"Only {trainer?.Frames ?? 0} usable frames were found. Point this at lossless music whose rate is at "
+                + $"least {cutoff * 2.2 / 1000.0:0.#} kHz, and give it a few albums.");
+        }
+
+        HighBandModel model = trainer.Solve(ridge, trainedOn: $"{used} files");
+        string path = Path.Combine(ModelLibrary.Directory, name + ModelLibrary.Extension);
+        model.Save(path);
+
+        Console.WriteLine($"Wrote {path}");
+        Console.WriteLine($"  {trainer.Frames} frames from {used} files at {trainer.SampleRate} Hz"
+            + (skipped > 0 ? $", {skipped} skipped" : string.Empty));
+        Console.WriteLine($"  cutoff {trainer.CutoffHz / 1000.0:0.#} kHz, predicts {trainer.OutputBands} bands to {trainer.TopHz / 1000.0:0.#} kHz");
         return 0;
     }
 
@@ -281,7 +615,10 @@ internal static class Program
 
     private static int Play(Options options)
     {
-        List<string> files = MediaScanner.Expand(options.Positional).ToList();
+        // A capture is not a file, so it goes straight through rather than past the media scanner.
+        List<string> files = options.Positional.Any(p => CaptureUri.TryParse(p, out _))
+            ? [.. options.Positional.Where(p => CaptureUri.TryParse(p, out _))]
+            : MediaScanner.Expand(options.Positional).ToList();
         if (files.Count == 0)
         {
             throw new ArgumentException("No playable input files were given.");
@@ -297,7 +634,8 @@ internal static class Program
 
     private static void RunToCompletion(PlayerSettings settings, AudioBackendRegistry backends, List<string> files, bool showProgress)
     {
-        using var engine = new PlaybackEngine(settings, backends);
+        ICaptureProvider? capture = OperatingSystem.IsWindows() ? CreateCaptureProvider() : null;
+        using var engine = new PlaybackEngine(settings, backends, capture);
         using var finished = new ManualResetEventSlim(false);
         bool started = false;
         engine.ErrorOccurred += (_, message) => Console.Error.WriteLine($"\nerror: {message}");

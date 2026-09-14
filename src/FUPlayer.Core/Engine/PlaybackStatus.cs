@@ -23,6 +23,9 @@ public sealed record PlaybackStatus
 
     public bool IsTestTone { get; init; }
 
+    /// <summary>True while the source is another application rather than a file.</summary>
+    public bool IsCapture { get; init; }
+
     public TimeSpan Position { get; init; }
 
     public TimeSpan Duration { get; init; }

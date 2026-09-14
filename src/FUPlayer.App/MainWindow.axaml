@@ -91,6 +91,9 @@
         <Panel IsVisible="{Binding LibraryNav.IsSelected}">
           <views:LibraryView DataContext="{Binding Library}" />
         </Panel>
+        <Panel IsVisible="{Binding LiveInputNav.IsSelected}">
+          <views:LiveInputView DataContext="{Binding LiveInput}" />
+        </Panel>
         <Panel IsVisible="{Binding DspNav.IsSelected}">
           <views:DspStudioView DataContext="{Binding Dsp}" />
         </Panel>

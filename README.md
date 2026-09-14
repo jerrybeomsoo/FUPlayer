@@ -340,6 +340,7 @@ build/ffmpeg/                 script that builds LGPL FFmpeg libraries
 | [docs/dsp.md](docs/dsp.md) | The signal processing in detail, with the arithmetic |
 | [docs/cli.md](docs/cli.md) | Every `fuplayer-cli` command and option |
 | [docs/settings.md](docs/settings.md) | Every setting, what it changes, and what it costs |
+| [docs/restoration.md](docs/restoration.md) | The lossy repair stages, and how to train or install a model |
 | [docs/building-ffmpeg.md](docs/building-ffmpeg.md) | Building the LGPL FFmpeg DLLs from source |
 
 ## Contributing

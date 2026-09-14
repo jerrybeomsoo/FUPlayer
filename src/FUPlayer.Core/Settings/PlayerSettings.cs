@@ -139,6 +139,8 @@ public sealed class PlayerSettings
 
     public ProcessingSettings Processing { get; set; } = new();
 
+    public RestorationSettings Restoration { get; set; } = new();
+
     public SpeakerSettings Speakers { get; set; } = new();
 
     public PlaybackSettings Playback { get; set; } = new();
@@ -251,6 +253,37 @@ public sealed class VolumeSettings
     /// <summary>Volume control is bypassed when minimum and maximum are both 0 dB.</summary>
     [JsonIgnore]
     public bool IsBypassed => MinimumDb == 0.0 && MaximumDb == 0.0;
+}
+
+/// <summary>
+/// What to do about material a perceptual codec has been through. Every one of these invents signal
+/// that was not in the source, so all of them are off unless asked for.
+/// </summary>
+public sealed class RestorationSettings
+{
+    /// <summary>Hold a high band steady when the encoder keeps switching it on and off.</summary>
+    public bool ReduceArtifacts { get; set; }
+
+    /// <summary>0 leaves the signal alone, 1 holds a lone bin almost still.</summary>
+    public double ArtifactStrength { get; set; } = 0.5;
+
+    /// <summary>Synthesise a band above the cutoff from the one below it.</summary>
+    public bool RebuildHarmonics { get; set; }
+
+    /// <summary>Trim on the rebuilt band.</summary>
+    public double RebuildAmountDb { get; set; } = -3.0;
+
+    /// <summary>Use a trained model for the rebuilt levels rather than a fixed slope.</summary>
+    public bool Predict { get; set; }
+
+    /// <summary>Model file, or null for the newest one in the models folder.</summary>
+    public string? ModelPath { get; set; }
+
+    /// <summary>Where the rebuilt band starts. 0 measures it from the signal.</summary>
+    public double ManualCutoffHz { get; set; }
+
+    /// <summary>Nothing is rebuilt above this.</summary>
+    public double CeilingHz { get; set; } = 22_000.0;
 }
 
 public sealed class ProcessingSettings

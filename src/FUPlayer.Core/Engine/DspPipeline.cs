@@ -10,6 +10,7 @@ using FUPlayer.Core.Dsp.Numerics;
 using FUPlayer.Core.Dsp.Processing;
 using FUPlayer.Core.Dsp.Quantization;
 using FUPlayer.Core.Dsp.Resampling;
+using FUPlayer.Core.Dsp.Restoration;
 using FUPlayer.Core.Output;
 using FUPlayer.Core.Settings;
 
@@ -30,6 +31,11 @@ internal sealed class DspPipeline : IDisposable
     private readonly PlaybackPlan _plan;
     private readonly ParallelWorkers _workers;
     private readonly ChannelChain[] _chains;
+    private RestorationSettings? _restoration;
+    private CodecBandwidthDetector? _detector;
+    private HighBandModel? _model;
+    private double _cutoffHz;
+    private BandwidthEstimate _bandwidth;
     private readonly byte[][] _dsdOutputs;
     private readonly int _sourceChannels;
     private readonly int _outputChannels;
@@ -151,6 +157,16 @@ internal sealed class DspPipeline : IDisposable
         (double[] gains, int[] delays) = ComputeSpeakerTrims(settings.Speakers, plan, _outputChannels);
         bool detectApodization = settings.Processing.ApodizationDetection && !plan.Source.IsDsd && plan.ConversionRate <= ApodizationDetector.MaximumSampleRate;
 
+        RestorationSettings restore = settings.Restoration;
+        bool canRestore = !plan.Source.IsDsd && (restore.ReduceArtifacts || restore.RebuildHarmonics);
+        if (canRestore)
+        {
+            _restoration = restore;
+            _detector = restore.ManualCutoffHz > 0.0 ? null : new CodecBandwidthDetector(plan.ConversionRate);
+            _cutoffHz = restore.ManualCutoffHz;
+            _model = LoadModel(restore);
+        }
+
         _chains = new ChannelChain[_outputChannels];
         for (int c = 0; c < _outputChannels; c++)
         {
@@ -169,6 +185,25 @@ internal sealed class DspPipeline : IDisposable
             }
 
             chain.Conversion = new double[conversionCapacity];
+
+            if (canRestore)
+            {
+                if (restore.ReduceArtifacts)
+                {
+                    chain.Reducer = new ArtifactReducer(plan.ConversionRate) { Strength = restore.ArtifactStrength };
+                }
+
+                if (restore.RebuildHarmonics)
+                {
+                    chain.Rebuilder = new HarmonicRebuilder(plan.ConversionRate)
+                    {
+                        AmountDb = restore.RebuildAmountDb,
+                        CeilingHz = Math.Min(restore.CeilingHz, plan.ConversionRate / 2.0 * 0.98),
+                        CutoffHz = _cutoffHz,
+                        Model = restore.Predict ? _model : null,
+                    };
+                }
+            }
 
             if (plan.PassThrough)
             {
@@ -302,6 +337,36 @@ internal sealed class DspPipeline : IDisposable
     /// <summary>Wall-clock DSP time of the most recent block, excluding FIFO waits.</summary>
     public double LastProcessingSeconds { get; private set; }
 
+    /// <summary>What the source's spectrum says about how it was coded, once enough has gone by.</summary>
+    public BandwidthEstimate Bandwidth => _bandwidth;
+
+    /// <summary>True when a trained model is setting the rebuilt levels.</summary>
+    public bool IsPredicting => _model is not null;
+
+    private static HighBandModel? LoadModel(RestorationSettings restore) =>
+        restore.Predict ? ModelLibrary.TryLoad(restore.ModelPath, out _) : null;
+
+    /// <summary>
+    /// Re-reads where the spectrum ends. The estimate only firms up as audio goes by, so the rebuilt
+    /// band starts wherever it was told to and moves to the measured cutoff within a second or two.
+    /// </summary>
+    private void UpdateBandwidth()
+    {
+        if (_detector is null)
+        {
+            return;
+        }
+
+        _bandwidth = _detector.Estimate();
+        _cutoffHz = _bandwidth.Verdict switch
+        {
+            // Nothing was cut, so there is nothing to rebuild.
+            BandwidthVerdict.FullBand => 0.0,
+            BandwidthVerdict.BandLimited => _bandwidth.CutoffHz,
+            _ => _cutoffHz,
+        };
+    }
+
     public long LimiterEvents => _chains.Sum(chain => chain.Limiter?.Events ?? 0);
 
     public long ApodizationEvents => _chains.Sum(chain => chain.Apodization?.Events ?? 0);
@@ -348,6 +413,7 @@ internal sealed class DspPipeline : IDisposable
         // Measured before the write, which can block on a device that is not ready and has nothing to do with
         // how the filtering was divided.
         _accelerator?.ReportBlock(LastProcessingSeconds, frames);
+        UpdateBandwidth();
         return WritePending(writer);
     }
 
@@ -532,6 +598,24 @@ internal sealed class DspPipeline : IDisposable
             MeterSource(source, signal);
         }
 
+        if (chain.Reducer is not null || chain.Rebuilder is not null)
+        {
+            // Both work in place. Artefacts are damped first so the rebuilder copies a band that has
+            // stopped flapping, rather than carrying the flapping upwards with it.
+            if (meter && _detector is not null)
+            {
+                _detector.Push(signal);
+            }
+
+            chain.Reducer?.Process(signal);
+
+            if (chain.Rebuilder is not null)
+            {
+                chain.Rebuilder.CutoffHz = _cutoffHz;
+                chain.Rebuilder.Process(signal);
+            }
+        }
+
         chain.Apodization?.Process(signal);
         ProcessConverted(c, chain, signal, volume);
     }
@@ -686,6 +770,8 @@ internal sealed class DspPipeline : IDisposable
     {
         public DsdToPcmState? DsdConverter;
         public ResamplerChainState? Ultrasonic;
+        public ArtifactReducer? Reducer;
+        public HarmonicRebuilder? Rebuilder;
         public ApodizationDetector? Apodization;
         public ResamplerChainState? Resampler;
         public readonly SmoothedGain Volume = new(1.0);

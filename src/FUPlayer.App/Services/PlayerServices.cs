@@ -1,5 +1,6 @@
 using Avalonia.Threading;
 using FUPlayer.Audio.Windows;
+using FUPlayer.Core.Capture;
 using FUPlayer.Core.Engine;
 using FUPlayer.Core.Library;
 using FUPlayer.Core.Metadata;
@@ -29,13 +30,14 @@ public sealed class PlayerServices : IDisposable
         if (OperatingSystem.IsWindows())
         {
             backends.AddRange(WindowsAudioBackends.Create());
+            Capture = new ProcessLoopbackProvider();
         }
 
         backends.Add(new FileAudioBackend(() => RenderDirectory));
         backends.Add(new NullAudioBackend());
         Backends = new AudioBackendRegistry(backends);
 
-        Engine = new PlaybackEngine(Settings, Backends);
+        Engine = new PlaybackEngine(Settings, Backends, Capture);
         Library = new MusicLibrary(Path.Combine(Store.SettingsDirectory, "library.json"));
         Covers = new CoverArtCache(Path.Combine(Store.SettingsDirectory, "thumbnails"));
 
@@ -59,6 +61,9 @@ public sealed class PlayerServices : IDisposable
     public PlayerSettings Settings { get; }
 
     public AudioBackendRegistry Backends { get; }
+
+    /// <summary>Application capture, on the platforms that have it.</summary>
+    public ICaptureProvider? Capture { get; }
 
     public PlaybackEngine Engine { get; }
 

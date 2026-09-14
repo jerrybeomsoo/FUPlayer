@@ -86,6 +86,7 @@ public sealed class SettingsStore
         settings.DsdToPcm ??= new DsdToPcmSettings();
         settings.Volume ??= new VolumeSettings();
         settings.Processing ??= new ProcessingSettings();
+        settings.Restoration ??= new RestorationSettings();
         settings.Speakers ??= new SpeakerSettings();
         settings.Playback ??= new PlaybackSettings();
         settings.Library ??= new LibrarySettings();

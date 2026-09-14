@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Threading.Channels;
 using FUPlayer.Core.Audio;
+using FUPlayer.Core.Capture;
 using FUPlayer.Core.Decoding;
 using FUPlayer.Core.Dsp.Dsd;
 using FUPlayer.Core.Metadata;
@@ -21,6 +22,7 @@ public sealed class PlaybackEngine : IDisposable
     private const int MaxMarkers = 16;
 
     private readonly AudioBackendRegistry _backends;
+    private readonly ICaptureProvider? _capture;
     private readonly Channel<Command> _commands = Channel.CreateUnbounded<Command>(new UnboundedChannelOptions { SingleReader = true });
     private readonly Thread _thread;
     private readonly AutoResetEvent _spaceAvailable = new(false);
@@ -48,6 +50,7 @@ public sealed class PlaybackEngine : IDisposable
     private bool _drainFlushed;
     private long _drainedTimestamp;
     private TestToneMode _testToneMode;
+    private int _captureProcessId;
     private double[][] _pcmBlock = [];
     private byte[][] _dsdBlock = [];
 
@@ -69,12 +72,13 @@ public sealed class PlaybackEngine : IDisposable
     private int _reportedIndex = -1;
     private CounterBaseline _baseline;
 
-    public PlaybackEngine(PlayerSettings settings, AudioBackendRegistry backends)
+    public PlaybackEngine(PlayerSettings settings, AudioBackendRegistry backends, ICaptureProvider? capture = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(backends);
         _settings = settings.Clone();
         _backends = backends;
+        _capture = capture;
         _volumeDb = ClampVolume(_settings.Volume, _settings.Volume.VolumeDb);
         _invert = _settings.Playback.InvertPolarity;
         _workerThreads = DesiredWorkerThreads(_settings);
@@ -178,6 +182,19 @@ public sealed class PlaybackEngine : IDisposable
 
     public void PlayTestTone(TestToneMode mode) => Post(new TestToneCommand(mode), interrupt: true);
 
+    /// <summary>
+    /// Plays another application's output. Like the test tone this does not touch the queue: a live
+    /// source has no place in a list of tracks and nothing follows it.
+    /// </summary>
+    public void PlayCapture(int processId) => Post(new CaptureCommand(processId), interrupt: true);
+
+    /// <summary>Applications whose audio can be captured, or an empty list where that is not possible.</summary>
+    public IReadOnlyList<CaptureTarget> CaptureTargets =>
+        _capture is { IsSupported: true } ? _capture.List() : [];
+
+    /// <summary>Why capture is unavailable, or null when it works.</summary>
+    public string? CaptureUnavailable => _capture is null ? "This build cannot capture an application." : _capture.UnsupportedReason;
+
     public PlaybackStatus GetStatus()
     {
         (Marker? marker, TimeSpan position) = ComputePlayback();
@@ -197,6 +214,7 @@ public sealed class PlaybackEngine : IDisposable
             CurrentIndex = index,
             CurrentItem = marker is not null ? marker.Item : index >= 0 ? Queue.Get(index) : null,
             IsTestTone = marker?.IsTestTone ?? false,
+            IsCapture = marker?.IsCapture ?? false,
             Position = position,
             Duration = marker is { Length: > 0 } ? TimeSpan.FromSeconds((double)marker.Length / marker.SampleRate) : TimeSpan.Zero,
             Plan = pipeline?.Plan,
@@ -350,6 +368,9 @@ public sealed class PlaybackEngine : IDisposable
             case TestToneCommand tone:
                 StartTestTone(tone.Mode);
                 break;
+            case CaptureCommand capture:
+                StartCapture(capture.ProcessId);
+                break;
         }
     }
 
@@ -483,11 +504,37 @@ public sealed class PlaybackEngine : IDisposable
         StopInternal();
     }
 
+    /// <summary>Re-opens a live capture, which is what a device or format change needs.</summary>
+    private void StartCapture(int processId)
+    {
+        if (_capture is null || !_capture.IsSupported)
+        {
+            ReportError(CaptureUnavailable ?? "This build cannot capture an application.");
+            return;
+        }
+
+        DisposeTransition();
+        _draining = false;
+        CloseDecoder();
+        try
+        {
+            IAudioDecoder decoder = _capture.Open(processId, _settings.Output.Channels);
+            _captureProcessId = processId;
+            StartPipeline(_decoderIndex, decoder, null, PlanFor(decoder.Format), TimeSpan.Zero, keepPaused: false);
+        }
+        catch (Exception ex) when (IsRecoverable(ex))
+        {
+            ReportError($"The capture could not restart: {ex.Message}");
+            StopInternal();
+        }
+    }
+
     private void StartTestTone(TestToneMode mode)
     {
         DisposeTransition();
         _draining = false;
         CloseDecoder();
+        _captureProcessId = 0;
         _testToneMode = mode;
         var decoder = new TestToneDecoder(_settings.Output.Channels, mode);
         try
@@ -560,7 +607,8 @@ public sealed class PlaybackEngine : IDisposable
             decoder.Position,
             decoder.Format.SampleRate,
             decoder.Length,
-            decoder is TestToneDecoder);
+            decoder is TestToneDecoder,
+            _captureProcessId > 0);
 
         lock (_statusGate)
         {
@@ -590,7 +638,7 @@ public sealed class PlaybackEngine : IDisposable
     private void BeginNextTrack()
     {
         int finished = ResolveIndex(_decoderIndex, _decoderItem);
-        bool wasTestTone = _decoder is TestToneDecoder;
+        bool wasTestTone = _decoder is TestToneDecoder || _captureProcessId > 0;
         CloseDecoder();
 
         if (!wasTestTone)
@@ -719,7 +767,7 @@ public sealed class PlaybackEngine : IDisposable
         (Marker? marker, _) = ComputePlayback();
         bool paused = _render is { Paused: true };
         int audible = marker?.Index ?? _decoderIndex;
-        if (marker?.IsTestTone == true)
+        if (marker?.IsTestTone == true || marker?.IsCapture == true)
         {
             return;
         }
@@ -829,6 +877,10 @@ public sealed class PlaybackEngine : IDisposable
         {
             StartTestTone(_testToneMode);
         }
+        else if (marker?.IsCapture == true && _captureProcessId > 0)
+        {
+            StartCapture(_captureProcessId);
+        }
         else if ((marker is not null ? ResolveIndex(marker.Index, marker.Item) : ResolveIndex(_decoderIndex, _decoderItem)) is int index and >= 0)
         {
             StartPlayback(index, position, paused);
@@ -916,9 +968,22 @@ public sealed class PlaybackEngine : IDisposable
 
         try
         {
+            _captureProcessId = 0;
             if (TestToneDecoder.TryParse(item.Path, out TestToneMode mode))
             {
                 decoder = new TestToneDecoder(_settings.Output.Channels, mode);
+                return true;
+            }
+
+            if (CaptureUri.TryParse(item.Path, out int processId))
+            {
+                if (_capture is null || !_capture.IsSupported)
+                {
+                    throw new NotSupportedException(_capture?.UnsupportedReason ?? "This build cannot capture an application.");
+                }
+
+                decoder = _capture.Open(processId, _settings.Output.Channels);
+                _captureProcessId = processId;
                 return true;
             }
 
@@ -1244,7 +1309,7 @@ public sealed class PlaybackEngine : IDisposable
         ErrorOccurred?.Invoke(this, message);
     }
 
-    private sealed record Marker(long WriteBytes, int Index, QueueItem? Item, long SourcePosition, int SampleRate, long Length, bool IsTestTone);
+    private sealed record Marker(long WriteBytes, int Index, QueueItem? Item, long SourcePosition, int SampleRate, long Length, bool IsTestTone, bool IsCapture);
 
     private readonly record struct CounterBaseline(long Limiter, long Apodization, long Clipped, long Resets);
 
@@ -1276,6 +1341,8 @@ public sealed class PlaybackEngine : IDisposable
     private sealed record QueueOptionsCommand(RepeatMode Repeat, bool Shuffle) : Command;
 
     private sealed record TestToneCommand(TestToneMode Mode) : Command;
+
+    private sealed record CaptureCommand(int ProcessId) : Command;
 
     private sealed record ShutdownCommand : Command;
 }

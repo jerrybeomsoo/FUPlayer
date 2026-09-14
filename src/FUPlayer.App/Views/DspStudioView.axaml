@@ -116,6 +116,37 @@
               <controls:SettingRow Title="Remove ultrasonics from high-rate files" Description="Low-pass at 20 kHz for sources above 48 kHz, before conversion.">
                 <ToggleSwitch IsChecked="{Binding RemoveUltrasonics}" OnContent="" OffContent="" />
               </controls:SettingRow>
+              <Border Classes="divider" Margin="0,10" />
+              <TextBlock Classes="h3" Text="Lossy repair" />
+              <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,6"
+                         Text="For material that has been through a perceptual codec. Everything here adds signal that was not in the source, so all of it is off until asked for, and none of it recovers what the encoder discarded." />
+
+              <controls:SettingRow Title="Artifact reduction"
+                                   Description="Limits how far a high bin may move between transforms, so a band the encoder keeps switching on and off is held steady. A real onset moves every bin at once and is let through.">
+                <ToggleSwitch IsChecked="{Binding ReduceArtifacts}" OnContent="" OffContent="" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Reduction strength" Description="{Binding SelectedArtifactStrength.Description}"
+                                   IsVisible="{Binding ReduceArtifacts}">
+                <ComboBox ItemsSource="{Binding ArtifactStrengthChoices}" SelectedItem="{Binding SelectedArtifactStrength}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+
+              <controls:SettingRow Title="Harmonic rebuilding"
+                                   Description="Copies the top octave below the measured cutoff upwards in patches and levels it to continue the spectrum. Synthesis, not recovery: the fine structure comes from an octave down.">
+                <ToggleSwitch IsChecked="{Binding RebuildHarmonics}" OnContent="" OffContent="" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Rebuilt level" Description="{Binding SelectedRebuildAmount.Description}"
+                                   IsVisible="{Binding IsRebuilding}">
+                <ComboBox ItemsSource="{Binding RebuildAmountChoices}" SelectedItem="{Binding SelectedRebuildAmount}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Generative prediction"
+                                   Description="Sets the rebuilt levels from a model fitted to lossless music, instead of a fixed slope. A linear fit over sixteen bands: it predicts a level, never a detail."
+                                   IsVisible="{Binding IsRebuilding}">
+                <ToggleSwitch IsChecked="{Binding Predict}" OnContent="" OffContent="" />
+              </controls:SettingRow>
+              <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,4"
+                         IsVisible="{Binding Predict}" Text="{Binding ModelStatus}" />
+
+              <Border Classes="divider" Margin="0,10" />
               <controls:SettingRow Title="Peak limiter" Description="{Binding LimiterDescription}">
                 <ToggleSwitch IsChecked="{Binding Limiter}" OnContent="" OffContent="" />
               </controls:SettingRow>

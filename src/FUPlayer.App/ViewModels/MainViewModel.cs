@@ -156,6 +156,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Dsp = new DspStudioViewModel(services);
         Output = new OutputViewModel(services, dialogs);
         Calibration = new CalibrationViewModel(services);
+        LiveInput = new LiveInputViewModel(services);
         General = new SettingsViewModel(services);
 
         NowPlayingNav = new NavItem("NowPlaying", "Now playing", Icons.NowPlaying, NowPlaying);
@@ -163,9 +164,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         LibraryNav = new NavItem("Library", "Library", Icons.Library, Library);
         DspNav = new NavItem("Dsp", "DSP studio", Icons.Dsp, Dsp);
         OutputNav = new NavItem("Output", "Output", Icons.Output, Output);
+        LiveInputNav = new NavItem("LiveInput", "Live input", Icons.LiveInput, LiveInput);
         CalibrationNav = new NavItem("Calibration", "Calibration", Icons.Calibration, Calibration);
         SettingsNav = new NavItem("Settings", "Settings", Icons.Settings, General);
-        Navigation = [NowPlayingNav, QueueNav, LibraryNav, DspNav, OutputNav, CalibrationNav, SettingsNav];
+        Navigation = [NowPlayingNav, QueueNav, LibraryNav, LiveInputNav, DspNav, OutputNav, CalibrationNav, SettingsNav];
         SelectedNav = Navigation.FirstOrDefault(n => n.Key == services.Settings.Ui.LastPage) ?? NowPlayingNav;
 
         PlaybackSettings playback = services.Settings.Playback;
@@ -196,6 +198,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public CalibrationViewModel Calibration { get; }
 
+    public LiveInputViewModel LiveInput { get; }
+
     public SettingsViewModel General { get; }
 
     public NavItem NowPlayingNav { get; }
@@ -207,6 +211,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public NavItem DspNav { get; }
 
     public NavItem OutputNav { get; }
+
+    public NavItem LiveInputNav { get; }
 
     public NavItem CalibrationNav { get; }
 
@@ -253,6 +259,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             // Probing a device opens it, so it waits until the page is on screen.
             Output.EnsureCapabilities();
         }
+
+        // Enumerating audio sessions is cheap but not free, so it only runs while the page is shown.
+        LiveInput.SetActive(newValue == LiveInputNav);
 
         if (_ready)
         {
@@ -424,6 +433,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         Queue.SetCurrent(status.CurrentItem?.Id);
         Calibration.IsTonePlaying = active && status.IsTestTone;
+        LiveInput.Update(status);
         NowPlaying.UpdateStatus(status);
         UpdateMeters(engine, status);
     }

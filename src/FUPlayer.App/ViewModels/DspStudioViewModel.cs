@@ -10,6 +10,7 @@ using FUPlayer.Core.Dsp.Dsd;
 using FUPlayer.Core.Dsp.Modulation;
 using FUPlayer.Core.Dsp.Quantization;
 using FUPlayer.Core.Dsp.Resampling;
+using FUPlayer.Core.Dsp.Restoration;
 using FUPlayer.Core.Engine;
 using FUPlayer.Core.Output;
 using FUPlayer.Core.Settings;
@@ -170,6 +171,21 @@ public sealed partial class DspStudioViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _removeUltrasonics;
+
+    [ObservableProperty]
+    private bool _reduceArtifacts;
+
+    [ObservableProperty]
+    private bool _rebuildHarmonics;
+
+    [ObservableProperty]
+    private bool _predict;
+
+    [ObservableProperty]
+    private Choice? _selectedArtifactStrength;
+
+    [ObservableProperty]
+    private Choice? _selectedRebuildAmount;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(LimiterDescription))]
@@ -420,6 +436,45 @@ public sealed partial class DspStudioViewModel : ObservableObject
     ];
 
     /// <summary>Who pays for a short window: every tap, or only the early ones.</summary>
+    public IReadOnlyList<Choice> ArtifactStrengthChoices { get; } =
+    [
+        new("Light", 0.25, "A high bin may move 18 dB between transforms. Damps the worst chirping only."),
+        new("Moderate", 0.5, "12 dB between transforms. The usual setting."),
+        new("Firm", 0.75, "7 dB between transforms. Audibly smooths cymbals as well as artefacts."),
+        new("Heavy", 1.0, "3 dB between transforms. For material that warbles badly, at the cost of the top octave's life."),
+    ];
+
+    public IReadOnlyList<Choice> RebuildAmountChoices { get; } =
+    [
+        new("Quiet", -9.0, "9 dB under the level the slope or the model asks for."),
+        new("Normal", -3.0, "3 dB under, which keeps the invented band behind the real one."),
+        new("Full", 0.0, "Exactly what the slope or the model asks for."),
+    ];
+
+    /// <summary>What the prediction has to work with, or why it has nothing.</summary>
+    public string ModelStatus
+    {
+        get
+        {
+            string? path = ModelLibrary.Newest();
+            if (path is null)
+            {
+                return "No model installed. Train one with 'fuplayer-cli train', or copy a .fumodel.json file into "
+                    + $"{ModelLibrary.Directory}. Without one the rebuilt band follows a fixed slope.";
+            }
+
+            HighBandModel? model = ModelLibrary.TryLoad(path, out string? failure);
+            return model is null
+                ? $"The installed model could not be read: {failure}"
+                : $"Using {Path.GetFileName(path)}: cutoff {model.CutoffHz / 1000.0:0.#} kHz, predicting to "
+                    + $"{model.TopHz / 1000.0:0.#} kHz, fitted to {model.FramesSeen:N0} frames"
+                    + (model.TrainedOn is null ? "." : $" from {model.TrainedOn}.");
+        }
+    }
+
+    /// <summary>True while anything above the cutoff is being synthesised.</summary>
+    public bool IsRebuilding => RebuildHarmonics;
+
     public IReadOnlyList<Choice> ConvolutionLayoutChoices { get; } =
     [
         new("One block length", true,
@@ -601,6 +656,22 @@ public sealed partial class DspStudioViewModel : ObservableObject
 
     partial void OnRemoveUltrasonicsChanged(bool value) => Update(value, (bool v) => Settings.Processing.RemoveUltrasonics = v);
 
+    partial void OnReduceArtifactsChanged(bool value) => Update(value, (bool v) => Settings.Restoration.ReduceArtifacts = v);
+
+    partial void OnRebuildHarmonicsChanged(bool value)
+    {
+        Update(value, (bool v) => Settings.Restoration.RebuildHarmonics = v);
+        OnPropertyChanged(nameof(IsRebuilding));
+    }
+
+    partial void OnPredictChanged(bool value) => Update(value, (bool v) => Settings.Restoration.Predict = v);
+
+    partial void OnSelectedArtifactStrengthChanged(Choice? value) =>
+        Update(value, (double strength) => Settings.Restoration.ArtifactStrength = strength);
+
+    partial void OnSelectedRebuildAmountChanged(Choice? value) =>
+        Update(value, (double amountDb) => Settings.Restoration.RebuildAmountDb = amountDb);
+
     partial void OnLimiterChanged(bool value) => Update(value, (bool v) => Settings.Processing.Limiter = v);
 
     partial void OnSelectedConvolutionChanged(Choice? value) =>
@@ -682,6 +753,13 @@ public sealed partial class DspStudioViewModel : ObservableObject
             SelectedConvolutionLayout =
                 Choice.Find(ConvolutionLayoutChoices, s.Processing.ConvolutionUniformBlocks) ?? ConvolutionLayoutChoices[0];
             RemoveUltrasonics = s.Processing.RemoveUltrasonics;
+            ReduceArtifacts = s.Restoration.ReduceArtifacts;
+            RebuildHarmonics = s.Restoration.RebuildHarmonics;
+            Predict = s.Restoration.Predict;
+            SelectedArtifactStrength =
+                Choice.Find(ArtifactStrengthChoices, s.Restoration.ArtifactStrength) ?? ArtifactStrengthChoices[1];
+            SelectedRebuildAmount =
+                Choice.Find(RebuildAmountChoices, s.Restoration.RebuildAmountDb) ?? RebuildAmountChoices[1];
             Limiter = s.Processing.Limiter;
             ApodizationDetection = s.Processing.ApodizationDetection;
         }
