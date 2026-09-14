@@ -7,7 +7,7 @@ Thanks for taking a look. Issues and pull requests are both welcome.
 - **Bugs**: say what you did, what happened, and what you expected. For playback problems, include the output
   of `fuplayer-cli devices` and the "Now playing" panel contents, which report where the filtering ran and what the
   chain looks like.
-- **Features**: open an issue first if it is large. The roadmap in the README says what is already planned.
+- **Features**: open an issue first if it is large, so the shape of the change can be settled before the work.
 - **DSP changes**: see [Changing the DSP](#changing-the-dsp) below. Anything that touches the signal path needs
   a measurement, not an argument.
 

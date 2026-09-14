@@ -6,7 +6,7 @@
 
 **Free Upscaling Player**
 
-A Windows audio player that resamples with very long FIR filters and can modulate everything to DSD,
+An audio player that resamples with very long FIR filters and can modulate everything to DSD,
 so your DAC's own oversampling filter and modulator never run.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg?style=flat-square)](LICENSE)
@@ -46,7 +46,6 @@ so your DAC's own oversampling filter and modulator never run.
 - [Command line](#command-line)
 - [Repository layout](#repository-layout)
 - [Documentation](#documentation)
-- [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [License](#license)
 - [Acknowledgements](#acknowledgements)
@@ -342,14 +341,6 @@ build/ffmpeg/                 script that builds LGPL FFmpeg libraries
 | [docs/cli.md](docs/cli.md) | Every `fuplayer-cli` command and option |
 | [docs/settings.md](docs/settings.md) | Every setting, what it changes, and what it costs |
 | [docs/building-ffmpeg.md](docs/building-ffmpeg.md) | Building the LGPL FFmpeg DLLs from source |
-
-## Roadmap
-
-- [ ] More DSD1024 headroom. It runs at 1.5x real time; the modulator loop is the floor
-- [ ] Non-uniform partitioning on the GPU, which today means choosing between a short block and the device
-- [ ] A single-work-group FFT kernel, to cut the log2(n) trips through global memory
-- [ ] macOS and Linux back-ends. Nothing outside `FUPlayer.Audio.Windows` is Windows-specific
-- [ ] Convolution with user impulse responses, and channel matrixing
 
 ## Contributing
 
