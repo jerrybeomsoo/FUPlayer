@@ -32,6 +32,7 @@ so your DAC's own oversampling filter and modulator never run.
 - [Screenshots](#screenshots)
 - [Getting started](#getting-started)
   - [Requirements](#requirements)
+  - [Download](#download)
   - [Build from source](#build-from-source)
   - [First run](#first-run)
 - [How it works](#how-it-works)
@@ -138,15 +139,22 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 | | |
 | --- | --- |
 | **OS** | Windows 10 or 11, x64 |
-| **Runtime** | [.NET 9 runtime](https://dotnet.microsoft.com/download/dotnet/9.0) to run, .NET 9 SDK to build |
+| **Runtime** | None for the release zip, which bundles .NET 9. Building from source needs the [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) |
 | **CPU** | Any x64 with AVX2 for comfortable use. A 4-core laptop plays 1M taps to 705.6 kHz in real time |
 | **DAC** | Anything with a WASAPI or ASIO driver. ASIO is required for native DSD |
 | **Optional** | An OpenCL 1.2 device for GPU offload; FFmpeg LGPL builds for formats beyond FLAC, WAV, AIFF, DSF and DFF |
 
+### Download
+
+Grab the latest `FUPlayer-x.y.z-win-x64.zip` from the
+[releases page](https://github.com/jerrybeomsoo/FUPlayer/releases), unpack it anywhere and run
+`FUPlayer.exe`. The archive carries its own copy of .NET, so nothing has to be installed first, and
+`fuplayer-cli.exe` sits next to it.
+
 ### Build from source
 
 ```bash
-git clone https://github.com/YOUR-NAME/FUPlayer.git
+git clone https://github.com/jerrybeomsoo/FUPlayer.git
 cd FUPlayer
 dotnet build -c Release
 ```

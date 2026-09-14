@@ -17,7 +17,7 @@ Nothing else is required. All package dependencies restore from NuGet.
 ## Build and run
 
 ```bash
-git clone https://github.com/YOUR-NAME/FUPlayer.git
+git clone https://github.com/jerrybeomsoo/FUPlayer.git
 cd FUPlayer
 dotnet build -c Release
 ```
@@ -35,11 +35,23 @@ Build output lands in `src/FUPlayer.App/bin/Release/net9.0/FUPlayer.exe` and
 
 ## Publishing a self-contained build
 
-This produces a folder that runs on a machine with no .NET runtime installed:
+`build/package.ps1` publishes the player and the command line tool into `publish/FUPlayer`, drops the native
+debug symbols that SkiaSharp and HarfBuzzSharp ship (about 100 MB of them), adds the licence files and writes
+`artifacts/FUPlayer-<version>-win-x64.zip`:
 
 ```bash
-dotnet publish src/FUPlayer.App -c Release -r win-x64 --self-contained true ^
-  -p:PublishSingleFile=false -o publish/FUPlayer
+pwsh build/package.ps1 -Version 0.1.0
+```
+
+The result runs on a machine with no .NET runtime installed and comes to roughly 47 MB zipped. Pass
+`-FrameworkDependent` for a build that uses an installed .NET 9 Desktop Runtime instead, which is about a third
+of the size. The same script runs in CI: pushing a tag such as `v0.1.0` makes `.github/workflows/release.yml`
+build the package and attach it to a GitHub release.
+
+For a single project without the packaging around it:
+
+```bash
+dotnet publish src/FUPlayer.App -c Release -r win-x64 --self-contained true -o publish/FUPlayer
 ```
 
 Trimming is not supported: the settings layer uses reflection-based JSON serialization, and Avalonia's compiled

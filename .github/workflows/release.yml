@@ -1,0 +1,55 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds the Windows package and publishes it as a
+# GitHub release. Running the workflow by hand builds the same package and
+# leaves it as a build artifact without publishing anything.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows x64 package
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Work out the version
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME -replace '^v', '' } else { "0.0.0-dev" }
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build the package
+        shell: pwsh
+        run: ./build/package.ps1 -Version $env:VERSION
+
+      - name: Keep the package as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FUPlayer-${{ env.VERSION }}-win-x64
+          path: artifacts/*.zip
+          if-no-files-found: error
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME `
+            "artifacts/FUPlayer-$env:VERSION-win-x64.zip" `
+            --title "FUPlayer $env:GITHUB_REF_NAME" `
+            --generate-notes
