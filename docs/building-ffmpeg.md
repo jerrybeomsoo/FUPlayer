@@ -2,7 +2,7 @@
 
 FUPlayer decodes WAV, AIFF, FLAC, DSF and DSDIFF with its own managed code. Everything else
 (MP3, AAC/ALAC in M4A, WavPack, Monkey's Audio, Ogg Vorbis, Opus, TTA, TAK, WMA, DST-compressed
-DSDIFF) is decoded through FFmpeg when its shared libraries are present. Without them the app still
+DSDIFF …) is decoded through FFmpeg when its shared libraries are present. Without them the app still
 runs; those formats are simply reported as unsupported.
 
 FUPlayer's bindings match **FFmpeg 9.0.x** exactly (libavformat 63, libavcodec 63, libavutil 61).
@@ -52,6 +52,6 @@ environment variable, and finally on the system library path.
 ## Licensing checklist when redistributing
 
 - Never add `--enable-gpl`, `--enable-nonfree` or `--enable-version3`.
-- Ship `COPYING.LGPLv2.1` from the FFmpeg source and `THIRD-PARTY-NOTICES.md` with the binaries.
-- Provide the exact FFmpeg source used (the release tarball from ffmpeg.org) or a written offer.
+- Ship `ffmpeg-9.0.1/COPYING.LGPLv2.1` and `THIRD-PARTY-NOTICES.md` with the binaries.
+- Provide the exact FFmpeg source used (this repository's `ffmpeg-9.0.1` folder or tarball) or a written offer.
 - Keep the libraries as separate DLL / shared-object files so users can replace them.

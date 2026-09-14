@@ -207,6 +207,7 @@ public static class RepairDataset
         private readonly BinaryReader _reader;
         private long _start;
         private byte[] _block = [];
+        private float[]? _cache;
 
         public Reader(string path)
         {
@@ -288,7 +289,51 @@ public static class RepairDataset
 
         public int OutputSize { get; private set; }
 
-        /// <summary>Where each source file's records begin. Empty for a set built before this was recorded.</summary>
+        /// <summary>True once the whole set is in memory.</summary>
+        public bool IsCached => _cache is not null;
+
+        /// <summary>
+        /// Reads the whole set into memory when it will fit, which turns training from something the
+        /// disk paces into something the arithmetic paces. An epoch reads the entire training portion,
+        /// so a set read from disk is read once per epoch and again for every evaluation.
+        /// Returns false, harmlessly, when there is not the room.
+        /// </summary>
+        public bool TryCache(long budgetBytes = 3L << 30)
+        {
+            long needed = Count * (InputSize + OutputSize) * sizeof(float);
+            if (_cache is not null || needed > budgetBytes || needed > int.MaxValue)
+            {
+                return _cache is not null;
+            }
+
+            try
+            {
+                float[] cache = new float[Count * (InputSize + OutputSize)];
+                byte[] buffer = new byte[1 << 20];
+                _reader.BaseStream.Position = _start;
+
+                int at = 0;
+                long remaining = needed;
+                while (remaining > 0)
+                {
+                    int want = (int)Math.Min(buffer.Length, remaining);
+                    _reader.BaseStream.ReadExactly(buffer, 0, want);
+                    Buffer.BlockCopy(buffer, 0, cache, at, want);
+                    at += want;
+                    remaining -= want;
+                }
+
+                _cache = cache;
+                return true;
+            }
+            catch (Exception ex) when (ex is OutOfMemoryException or IOException)
+            {
+                _cache = null;
+                return false;
+            }
+        }
+
+        /// <summary>Where each source file's begin. Empty for a set built before this was recorded.</summary>
         public IReadOnlyList<long> Groups { get; private set; } = [];
 
         public BandLayout Layout => new(LowHz, HighHz, Bands);
@@ -342,22 +387,30 @@ public static class RepairDataset
                 return 0;
             }
 
-            int record = (InputSize + OutputSize) * sizeof(float);
-            int wanted = (int)available * record;
-            if (_block.Length < wanted)
+            int stride = InputSize + OutputSize;
+            ReadOnlySpan<float> values;
+
+            if (_cache is not null)
             {
-                _block = new byte[wanted];
+                values = _cache.AsSpan((int)(index * stride), (int)available * stride);
             }
+            else
+            {
+                int record = stride * sizeof(float);
+                int wanted = (int)available * record;
+                if (_block.Length < wanted)
+                {
+                    _block = new byte[wanted];
+                }
 
-            _reader.BaseStream.Position = _start + (index * record);
-            _reader.BaseStream.ReadExactly(_block, 0, wanted);
-
-            ReadOnlySpan<float> values = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(
-                _block.AsSpan(0, wanted));
+                _reader.BaseStream.Position = _start + (index * record);
+                _reader.BaseStream.ReadExactly(_block, 0, wanted);
+                values = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(_block.AsSpan(0, wanted));
+            }
 
             for (int i = 0; i < available; i++)
             {
-                int at = i * (InputSize + OutputSize);
+                int at = i * stride;
                 values.Slice(at, InputSize).CopyTo(inputs[(i * InputSize)..]);
                 values.Slice(at + InputSize, OutputSize).CopyTo(targets[(i * OutputSize)..]);
             }
