@@ -102,8 +102,18 @@ public sealed class NeuralRepair : SpectralProcessor
         }
     }
 
-    /// <summary>Where the rebuilt band starts. Zero leaves the signal alone.</summary>
+    /// <summary>Where the codec's band ends. Zero leaves the signal alone.</summary>
     public double CutoffHz { get; set; }
+
+    /// <summary>
+    /// Where the codec's roll-off begins, which is where the rebuild actually starts. Zero means the
+    /// same as <see cref="CutoffHz"/>.
+    ///
+    /// Filling from the cutoff leaves an encoder's roll-off standing at its coded level with the
+    /// rebuilt band at full level just above it, which reads as a trough between the two rather than
+    /// as an ending.
+    /// </summary>
+    public double TransitionHz { get; set; }
 
     /// <summary>Nothing is written above this.</summary>
     public double CeilingHz { get; set; } = 21_000.0;
@@ -173,7 +183,8 @@ public sealed class NeuralRepair : SpectralProcessor
             return;
         }
 
-        int edge = (int)Math.Ceiling(CutoffHz / BinHz) + 1;
+        double startHz = TransitionHz > 0.0 ? Math.Min(TransitionHz, CutoffHz) : CutoffHz;
+        int edge = (int)Math.Ceiling(startHz / BinHz) + 1;
         int ceiling = Math.Min(Bins - 1, (int)(CeilingHz / BinHz));
         if (!SpectralPatch.CanPatch(edge, ceiling))
         {

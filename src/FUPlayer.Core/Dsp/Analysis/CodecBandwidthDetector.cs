@@ -19,11 +19,31 @@ public enum BandwidthVerdict
 /// <param name="CutoffHz">Highest frequency still carrying energy, or the Nyquist rate when nothing was cut.</param>
 /// <param name="EdgeDropDb">How far the spectrum falls across the kilohertz above the cutoff.</param>
 /// <param name="Seconds">Loud audio measured so far.</param>
-public readonly record struct BandwidthEstimate(BandwidthVerdict Verdict, double CutoffHz, double EdgeDropDb, double Seconds)
+/// <param name="TransitionHz">
+/// Where the fall begins, rather than where it ends: the frequency at which the spectrum has dropped
+/// 3 dB from its level well below the edge.
+///
+/// Not every encoder stops dead. Vorbis rolls off over about a fifth of an octave, and a rebuild that
+/// starts at the cutoff leaves that roll-off standing at its coded level while everything above it is
+/// lifted to where the music should be, which puts a trough between the two. Measured on a 128 kbit/s
+/// Vorbis file: full level to 14.4 kHz, minus 14 dB at 15.4, and the rebuilt band at full level again
+/// from 15.8. Filling from here instead closes that.
+/// </param>
+public readonly record struct BandwidthEstimate(
+    BandwidthVerdict Verdict, double CutoffHz, double EdgeDropDb, double Seconds, double TransitionHz = 0.0)
 {
+    /// <summary>
+    /// What was measured, not what it implies.
+    ///
+    /// "Full band" used to be reported as the whole story, and it reads as "this is lossless", which
+    /// is a conclusion the measurement does not support: AAC at 256 kbit/s throws nothing away that
+    /// this test can see. Every band of it is within 0.6 dB of the master, top octave included. So the
+    /// verdict says where the spectrum runs and that no codec edge was found, and leaves the inference
+    /// to whoever is reading it.
+    /// </summary>
     public string Describe() => Verdict switch
     {
-        BandwidthVerdict.FullBand => $"full band to {CutoffHz / 1000.0:0.#} kHz",
+        BandwidthVerdict.FullBand => $"no codec edge; spectrum runs to {CutoffHz / 1000.0:0.#} kHz",
         BandwidthVerdict.BandLimited => $"band-limited at {CutoffHz / 1000.0:0.#} kHz, {EdgeDropDb:0} dB edge",
         _ => "measuring",
     };
@@ -164,9 +184,13 @@ public sealed class CodecBandwidthDetector
             }
         }
 
-        return best >= EdgeDropDb
-            ? new BandwidthEstimate(BandwidthVerdict.BandLimited, Refine(at, binHz, bins), best, Seconds)
-            : new BandwidthEstimate(BandwidthVerdict.FullBand, nyquist, best, Seconds);
+        if (best < EdgeDropDb)
+        {
+            return new BandwidthEstimate(BandwidthVerdict.FullBand, nyquist, best, Seconds, nyquist);
+        }
+
+        double cutoff = Refine(at, binHz, bins);
+        return new BandwidthEstimate(BandwidthVerdict.BandLimited, cutoff, best, Seconds, Transition(at, cutoff, binHz, bins));
     }
 
     /// <summary>
@@ -195,6 +219,42 @@ public sealed class CodecBandwidthDetector
         }
 
         return edgeHz;
+    }
+
+    /// <summary>
+    /// Where the roll-off starts, measured from a plateau taken two to three kilohertz below the edge
+    /// rather than from the last half kilohertz before it, which is already inside the roll-off and so
+    /// reads as a plateau several decibels too low.
+    ///
+    /// A brick wall answers almost exactly the cutoff, because the level is still full a bin below it.
+    /// A gentle roll-off answers lower, which is the point. The result is held within a third of an
+    /// octave of the cutoff so that music which is simply quiet at the top cannot drag it down.
+    /// </summary>
+    private double Transition(double edgeHz, double cutoffHz, double binHz, int bins)
+    {
+        const double PlateauLowHz = 3_000.0;
+        const double PlateauHighHz = 2_000.0;
+        const double DropDb = 3.0;
+
+        double plateau = Average(edgeHz - PlateauLowHz, edgeHz - PlateauHighHz, binHz, bins);
+        if (plateau <= 0.0)
+        {
+            return cutoffHz;
+        }
+
+        double target = plateau * Math.Pow(10.0, -DropDb / 10.0);
+        double step = binHz * 2.0;
+        double lowest = cutoffHz / 1.26;
+
+        for (double hz = edgeHz - PlateauHighHz; hz <= cutoffHz; hz += step)
+        {
+            if (Average(hz, hz + step, binHz, bins) <= target)
+            {
+                return Math.Clamp(hz, lowest, cutoffHz);
+            }
+        }
+
+        return cutoffHz;
     }
 
     public void Reset()

@@ -263,6 +263,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         // Enumerating audio sessions is cheap but not free, so it only runs while the page is shown.
         LiveInput.SetActive(newValue == LiveInputNav);
 
+        if (newValue == DspNav)
+        {
+            // A model can be installed while the player is open, so the folder is read again on the
+            // way in rather than only when a switch is touched.
+            Dsp.RefreshModelStatus();
+        }
+
         if (_ready)
         {
             _services.Settings.Ui.LastPage = newValue.Key;

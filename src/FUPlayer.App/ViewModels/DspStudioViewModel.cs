@@ -463,12 +463,18 @@ public sealed partial class DspStudioViewModel : ObservableObject
     {
         get
         {
+            // What is installed comes first. Leading with the caveat produced a sentence that began
+            // "Nothing to apply it to yet" while a model was sitting in the folder, which reads as
+            // nothing being installed when something is.
             string installed = ModelLibrary.DescribeInstalled();
             return RebuildHarmonics || ReduceArtifacts
                 ? installed
-                : "Nothing to apply it to yet: turn on artefact reduction or harmonic rebuilding as well. " + installed;
+                : installed + " Nothing is using it yet, though: turn on harmonic rebuilding or artefact reduction too.";
         }
     }
+
+    /// <summary>Reads the models folder again. Called when the page is opened and when a switch changes.</summary>
+    public void RefreshModelStatus() => OnPropertyChanged(nameof(ModelStatus));
 
     /// <summary>True while anything above the cutoff is being synthesised.</summary>
     public bool IsRebuilding => RebuildHarmonics;

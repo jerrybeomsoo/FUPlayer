@@ -34,8 +34,11 @@ public sealed class HarmonicRebuilder : SpectralProcessor
     {
     }
 
-    /// <summary>Where the rebuilt band starts. Zero leaves the signal alone.</summary>
+    /// <summary>Where the codec's band ends. Zero leaves the signal alone.</summary>
     public double CutoffHz { get; set; }
+
+    /// <summary>Where the roll-off begins, which is where the rebuild starts. Zero means the cutoff.</summary>
+    public double TransitionHz { get; set; }
 
     /// <summary>Trim on the rebuilt band, wherever its level came from.</summary>
     public double AmountDb { get; set; } = -3.0;
@@ -84,7 +87,8 @@ public sealed class HarmonicRebuilder : SpectralProcessor
 
         // Rounded up, and then one bin of guard: truncating puts the first rebuilt bin below the
         // cutoff, which overwrites the top of the very band this stage promises not to touch.
-        int edge = (int)Math.Ceiling(CutoffHz / BinHz) + 1;
+        double startHz = TransitionHz > 0.0 ? Math.Min(TransitionHz, CutoffHz) : CutoffHz;
+        int edge = (int)Math.Ceiling(startHz / BinHz) + 1;
         int ceiling = Math.Min(Bins - 1, (int)(CeilingHz / BinHz));
 
         // The source needs a full octave below the cutoff, and there has to be somewhere to put it.

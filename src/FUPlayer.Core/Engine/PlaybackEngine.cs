@@ -229,7 +229,7 @@ public sealed class PlaybackEngine : IDisposable
             IsTestTone = marker?.IsTestTone ?? false,
             IsCapture = marker?.IsCapture ?? false,
             Bandwidth = Describe(pipeline),
-            IsNeuralRepair = pipeline?.IsNeural ?? false,
+            IsNeuralRepair = pipeline?.IsRepairing ?? false,
             Position = position,
             Duration = marker is { Length: > 0 } ? TimeSpan.FromSeconds((double)marker.Length / marker.SampleRate) : TimeSpan.Zero,
             Plan = pipeline?.Plan,
@@ -919,8 +919,22 @@ public sealed class PlaybackEngine : IDisposable
         || a.Processing.GpuPhaseShare != b.Processing.GpuPhaseShare
         || a.Processing.GpuRetimeWhilePlaying != b.Processing.GpuRetimeWhilePlaying;
 
-    private static bool ProcessingOptionsChanged(PlayerSettings a, PlayerSettings b)
+    /// <summary>
+    /// Whether anything changed that the running pipeline cannot be told about, and so needs it built
+    /// again.
+    ///
+    /// The lossy repair belongs here and was missing from it. Those settings decide which stages the
+    /// pipeline creates, and they are read once when it is built, so toggling artefact reduction,
+    /// harmonic rebuilding or generative prediction while a track played changed the setting, saved
+    /// it, and did nothing to the sound until the next track or the next run of the program.
+    /// </summary>
+    internal static bool ProcessingOptionsChanged(PlayerSettings a, PlayerSettings b)
     {
+        if (RestorationChanged(a.Restoration, b.Restoration))
+        {
+            return true;
+        }
+
         if (a.Processing.MeterAdjustedSource != b.Processing.MeterAdjustedSource
             || a.Processing.ApodizationDetection != b.Processing.ApodizationDetection
             || a.Processing.DspThreads != b.Processing.DspThreads
@@ -941,6 +955,18 @@ public sealed class PlaybackEngine : IDisposable
         return !a.Speakers.Channels.Select(t => (t.LevelDb, t.DistanceCm))
             .SequenceEqual(b.Speakers.Channels.Select(t => (t.LevelDb, t.DistanceCm)));
     }
+
+    internal static bool RestorationChanged(RestorationSettings a, RestorationSettings b) =>
+        a.ReduceArtifacts != b.ReduceArtifacts
+        || a.RebuildHarmonics != b.RebuildHarmonics
+        || a.Predict != b.Predict
+        || a.ArtifactStrength != b.ArtifactStrength
+        || a.RebuildAmountDb != b.RebuildAmountDb
+        || a.NetworkAmount != b.NetworkAmount
+        || a.ManualCutoffHz != b.ManualCutoffHz
+        || a.CeilingHz != b.CeilingHz
+        || a.ModelPath != b.ModelPath
+        || a.NetworkPath != b.NetworkPath;
 
     /// <summary>
     /// Swaps the live pipeline and releases the old one's accelerator. Only the engine thread calls this; the

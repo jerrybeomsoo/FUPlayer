@@ -34,6 +34,16 @@ internal static class Program
         try
         {
             var options = Options.Parse(args.Skip(1));
+
+            // Where models are kept, for a run that wants them somewhere other than the settings
+            // folder. Worth having because the settings folder is not the same folder for every
+            // process: one running inside an application container has %APPDATA% redirected into the
+            // container, so a model written there cannot be seen by a player started normally.
+            if (options.Get("models") is string modelsFolder && modelsFolder.Length > 0)
+            {
+                ModelLibrary.Directory = Path.GetFullPath(modelsFolder);
+            }
+
             return args[0] switch
             {
                 "devices" => ListDevices(options),
@@ -85,6 +95,7 @@ internal static class Program
               train-repair <dataset>         Fit the repair network to a training set
                       --out <name> [--hidden 96,64] [--epochs 8] [--decay <n>]
               models                       List the installed high-band models
+              --models <folder>            Keep models somewhere other than the settings folder
               train <files|folders…>       Fit a high-band model from lossless music
                       --cutoff <Hz> --out <name> [--bands <n>] [--ridge <r>]
               info <file>                  Show format, tags and the processing plan for a file
@@ -684,7 +695,9 @@ internal static class Program
 
         double seconds = Math.Clamp(options.GetInt("seconds") ?? 60, 2, 3600);
 
-        Console.WriteLine($"{"VERDICT",-14} {"CUTOFF",9} {"EDGE",7}  FILE");
+        // "FILLS FROM" is where a rebuild would start, which is the beginning of the encoder's
+        // roll-off rather than its end. On a brick wall the two are the same frequency.
+        Console.WriteLine($"{"VERDICT",-14} {"CUTOFF",9} {"FILLS FROM",11} {"EDGE",7}  FILE");
         foreach (string file in files)
         {
             IAudioDecoder decoder;
@@ -694,7 +707,7 @@ internal static class Program
             }
             catch (Exception ex) when (ex is AudioDecoderException or IOException or NotSupportedException)
             {
-                Console.WriteLine($"{"unreadable",-14} {string.Empty,9} {string.Empty,7}  {Path.GetFileName(file)}: {ex.Message}");
+                Console.WriteLine($"{"unreadable",-14} {string.Empty,9} {string.Empty,11} {string.Empty,7}  {Path.GetFileName(file)}: {ex.Message}");
                 continue;
             }
 
@@ -705,7 +718,10 @@ internal static class Program
                     ? string.Empty
                     : $"{estimate.CutoffHz / 1000.0:0.0} kHz";
                 string edge = estimate.Verdict == BandwidthVerdict.BandLimited ? $"{estimate.EdgeDropDb:0} dB" : string.Empty;
-                Console.WriteLine($"{estimate.Verdict,-14} {cutoff,9} {edge,7}  {Path.GetFileName(file)}");
+                string from = estimate.Verdict == BandwidthVerdict.BandLimited
+                    ? $"{estimate.TransitionHz / 1000.0:0.0} kHz"
+                    : string.Empty;
+                Console.WriteLine($"{estimate.Verdict,-14} {cutoff,9} {from,11} {edge,7}  {Path.GetFileName(file)}");
             }
         }
 

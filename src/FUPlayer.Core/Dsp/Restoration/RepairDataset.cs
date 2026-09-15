@@ -59,9 +59,13 @@ public sealed class RepairFrameBuilder
     /// </summary>
     public double Describe(
         ReadOnlySpan<double> coded, ReadOnlySpan<double> original, int start, double cutoffHz, double ceilingHz,
-        long frameIndex, Span<float> codedLevels, Span<float> gainsDb)
+        long frameIndex, Span<float> codedLevels, Span<float> gainsDb, double transitionHz = 0.0)
     {
-        int edge = (int)Math.Ceiling(cutoffHz / BinHz) + 1;
+        // The patch starts where the encoder's roll-off starts, not where it ends, and the player does
+        // the same. These two have to agree exactly: the network is asked how far a patched spectrum is
+        // from the original, so a patch made differently at playback is a question it was never asked.
+        double patchFromHz = transitionHz > 0.0 ? Math.Min(transitionHz, cutoffHz) : cutoffHz;
+        int edge = (int)Math.Ceiling(patchFromHz / BinHz) + 1;
         int ceiling = Math.Min(_plan.Bins - 1, (int)(ceilingHz / BinHz));
 
         for (int i = 0; i < FftSize; i++)

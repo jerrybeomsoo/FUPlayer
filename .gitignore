@@ -24,3 +24,6 @@ ffmpeg-*.tar.*
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Trained models are fitted to whatever music you fed them; they are not source.
+models/

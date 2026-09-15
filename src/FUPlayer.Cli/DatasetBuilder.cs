@@ -215,7 +215,7 @@ internal sealed class DatasetBuilder
                 int start = first + (index * RepairFrameBuilder.Hop);
                 frameLevels[index] = builder.Describe(
                     coded[c], original[c], start, estimate.CutoffHz, ceiling, index,
-                    levels.AsSpan(index * bands, bands), gains.AsSpan(index * bands, bands));
+                    levels.AsSpan(index * bands, bands), gains.AsSpan(index * bands, bands), estimate.TransitionHz);
 
                 double energy = 0.0;
                 for (int i = 0; i < RepairFrameBuilder.FftSize; i += 4)

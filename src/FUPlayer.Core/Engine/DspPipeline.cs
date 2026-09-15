@@ -40,6 +40,7 @@ internal sealed class DspPipeline : IDisposable
     /// counter and eventually walks off the end of its buffer.
     /// </summary>
     private int _detectorChannel = -1;
+    private double _transitionHz;
     private HighBandModel? _model;
     private NeuralRepairModel? _network;
     private double _cutoffHz;
@@ -380,6 +381,19 @@ internal sealed class DspPipeline : IDisposable
     /// <summary>True when a network is doing the repair rather than the fixed stages.</summary>
     public bool IsNeural => _network is not null;
 
+    /// <summary>
+    /// True when the repair is writing to the signal, rather than merely switched on.
+    ///
+    /// A network can be loaded, a switch can be on, and nothing can be happening: with a full-band
+    /// verdict the cutoff is zero and every repair stage returns without touching a sample. Reporting
+    /// "repaired by a trained network" on that is a claim to work that was not done, and it is what a
+    /// listener sees when they play a 256 kbit/s stream that has no band missing to rebuild.
+    /// </summary>
+    public bool IsRepairing =>
+        _network is not null
+        && _cutoffHz > 0.0
+        && (_restoration?.RebuildHarmonics == true || _restoration?.ReduceArtifacts == true);
+
     private static HighBandModel? LoadModel(RestorationSettings restore) =>
         restore.Predict ? ModelLibrary.TryLoad(restore.ModelPath, out _) : null;
 
@@ -402,6 +416,8 @@ internal sealed class DspPipeline : IDisposable
             BandwidthVerdict.BandLimited => _bandwidth.CutoffHz,
             _ => _cutoffHz,
         };
+
+        _transitionHz = _bandwidth.Verdict == BandwidthVerdict.BandLimited ? _bandwidth.TransitionHz : 0.0;
     }
 
     public long LimiterEvents => _chains.Sum(chain => chain.Limiter?.Events ?? 0);
@@ -643,6 +659,7 @@ internal sealed class DspPipeline : IDisposable
             }
 
             chain.Network.CutoffHz = _cutoffHz;
+            chain.Network.TransitionHz = _transitionHz;
             chain.Network.Process(signal);
         }
         else if (chain.Reducer is not null || chain.Rebuilder is not null)
@@ -659,6 +676,7 @@ internal sealed class DspPipeline : IDisposable
             if (chain.Rebuilder is not null)
             {
                 chain.Rebuilder.CutoffHz = _cutoffHz;
+                chain.Rebuilder.TransitionHz = _transitionHz;
                 chain.Rebuilder.Process(signal);
             }
         }

@@ -17,13 +17,24 @@ internal static class ExternalCodec
     private static bool _looked;
     private static string? _path;
 
-    /// <summary>Codecs worth training on, with the bit rates each is usually met at.</summary>
+    /// <summary>
+    /// Codecs worth training on, with the bit rates each is usually met at.
+    ///
+    /// One rate per distinct edge, not every rate on offer. Measured on this corpus, MP3 at 192, 256
+    /// and 320 all leave the wall within a kilohertz of 19 to 20 kHz, and Opus at 96, 128 and 160 all
+    /// leave it at 20; coding the same music three times to learn the same edge costs three times the
+    /// hours and teaches nothing the first pass did not. What matters is that the edges span the range
+    /// and that they come from different encoders, since each one rolls off in its own shape.
+    ///
+    /// AAC at 256 and above is left out for a different reason: it does not band-limit at all. Every
+    /// band of it measures within 0.6 dB of the master, so the frames it would contribute carry a
+    /// target of zero, and the player never invokes a model on material that reads as full band.
+    /// </summary>
     public static readonly (string Name, string Encoder, string Extension, int[] Kbps)[] Codecs =
     [
-        ("mp3", "libmp3lame", ".mp3", [128, 192, 256, 320]),
-        ("opus", "libopus", ".opus", [96, 128, 160]),
-        ("vorbis", "libvorbis", ".ogg", [128, 192, 256]),
-        ("aac", "aac", ".m4a", [256, 320]),
+        ("mp3", "libmp3lame", ".mp3", [128, 192]),
+        ("opus", "libopus", ".opus", [128]),
+        ("vorbis", "libvorbis", ".ogg", [128, 192]),
     ];
 
     /// <summary>The ffmpeg executable, or null when there is not one.</summary>

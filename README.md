@@ -146,7 +146,23 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 
 ## Getting started
 
-### Requirements
+### When something is not where you expect it
+
+```powershell
+FUPlayer.exe --diagnostics
+```
+
+Writes what the player can see, from the player's own process, and stops: which folders it resolved
+for settings and models, what is in each of them, whether the FFmpeg libraries loaded, and which
+formats it will open. A window program cannot answer a question on a console, so when the interface
+says a model is not installed there is otherwise no way to ask it which folder it looked in.
+
+Models are searched for in a `models` folder beside the executable, then the folder named by
+`FUPLAYER_MODELS_PATH`, then beside the settings file. The folder next to the executable is the same
+folder for every process on the machine, which the settings folder is not: a program running inside
+an application container has its `%APPDATA%` redirected into the container.
+
+## Requirements
 
 | | |
 | --- | --- |
