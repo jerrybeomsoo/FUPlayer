@@ -139,7 +139,7 @@
                 <ComboBox ItemsSource="{Binding RebuildAmountChoices}" SelectedItem="{Binding SelectedRebuildAmount}" Width="170" MinWidth="170" />
               </controls:SettingRow>
               <controls:SettingRow Title="Generative prediction"
-                                   Description="Levels the rebuilt band from a model fitted to real coded music, instead of a fixed slope. Worth a further 23 percent above the cutoff. It predicts a level for every band, never a detail.">
+                                   Description="Levels the rebuilt band from a model fitted to real coded music, instead of a fixed slope. On six releases it had never heard, coded to Ogg Vorbis, it halves what is left of the error above the cutoff. It predicts a level for every band, never a detail.">
                 <ToggleSwitch IsChecked="{Binding Predict}" OnContent="" OffContent="" />
               </controls:SettingRow>
               <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,4"

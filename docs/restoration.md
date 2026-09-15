@@ -9,7 +9,8 @@ closer to where it started. None of it is the master.
 
 What can be said, because it was measured on releases the model had never been shown, is in
 [Does it work](#does-it-work). The short version: a fixed algorithm does most of the work, and a
-learned per-band curve levels it better than a fixed slope does.
+network trained on enough different music levels it better than either a fixed slope or a constant
+curve does.
 
 ## How the cutoff is found
 
@@ -64,21 +65,39 @@ format, by zeroing every weight and putting the curve in the output biases.
 
 That is not a shortcut. It is what the measurement asked for.
 
-### Why a curve and not a network
+### A curve or a network: what the corpus decides
 
-Trained on 33 releases and judged on releases it had never heard, the frame-by-frame network scored
-**5.86**, one constant gain per band scored **3.64**, and doing nothing at all scored **6.03**, all as
-mean squared error in decibels. Weight decay did not close the gap; nor did a smaller network.
+Fitted to **33 releases**, all of them from ambient netlabels, and all coded with one encoder, the
+frame-by-frame network lost to a constant curve and lost badly: 5.86 against the curve's 3.64, with
+6.03 for doing nothing at all, as mean squared error in decibels on releases none of them had heard.
+Weight decay did not close the gap; nor did a smaller network. The conclusion drawn at the time was
+that a constant curve is the honest answer here.
 
-Whatever the network learns about an individual frame does not survive a change of record, and on
-unfamiliar music that costs more than it gains. So `train-repair` measures both, and if the network
-loses it saves the curve and says so.
+Fitted to **155 releases by 180 artists, coded with four encoders at fourteen bit rates**, the same
+architecture wins by a distance:
+
+| | held-out error |
+| --- | --- |
+| doing nothing | 6.982 |
+| one constant gain per band | 5.516 |
+| 290-48-24-96 network | 3.080 |
+| 290-96-64-96 network | **3.021** |
+
+The network is **45 % better than the curve**, where before it was 60 % worse. Nothing about the
+architecture changed. What changed is that a corpus of one genre coded one way teaches a network that
+genre's habits, and those do not survive a change of record; a corpus of 155 releases across four
+codecs teaches it what a codec does.
+
+That is worth stating plainly because the earlier conclusion was wrong in a way that looked rigorous.
+The measurement was sound and the reasoning from it was not: "a network cannot learn this" and "a
+network cannot learn this **from thirty-three ambient records**" are different claims, and only the
+second one was tested.
+
+`train-repair` still measures both on every run and saves whichever wins, so a thin corpus produces a
+curve and says so rather than shipping a network that has memorised it.
 
 **A model of this kind predicts a level, never a detail.** It cannot invent a cymbal strike the
 encoder removed. What it knows is what the missing part of a spectrum usually looks like.
-
-What would change this is more releases, or features that describe a frame better than forty band
-levels do. Not a larger network, and not more training on the same material.
 
 ## Training one
 
@@ -227,6 +246,31 @@ would otherwise hide a model that does nothing for the band the codec kept.
 One more thing that matters: the two signals are lined up on 300 Hz to the cutoff, a region neither a
 codec nor a repair writes to. Lining them up on their overall level instead makes a repair that fills
 the top of the spectrum appear to improve the bottom of it as well, which it never touched.
+
+### End to end, through the player
+
+The numbers above come from the evaluator. This one comes from rendering whole files through the
+player itself and measuring the result against the lossless master: six releases never trained on,
+coded to Ogg Vorbis at 128 kbit/s, error in decibels per band.
+
+| kHz | coded | fitted to 33 releases | fitted to 155 |
+| --- | --- | --- | --- |
+| 18-19 | 7.5 | 2.6 | **2.4** |
+| 19-20 | 36.3 | 5.3 | **1.6** |
+| 20-21 | 59.4 | 8.6 | **4.6** |
+| 21-22 | 29.0 | 7.3 | **6.5** |
+| mean, 12 to 22 kHz | 14.9 | 3.8 | **2.9** |
+
+Vorbis at 128 kbit/s puts its wall at 19 kHz, so the rows above that are where a rebuild either earns
+its place or does not. The model fitted to 33 ambient releases of AAC put 20 to 21 kHz **8.6 dB too
+loud**, which is the bright hiss a bad rebuild is heard as. The one fitted to 155 releases across four
+codecs is 4.6 dB out there, and better everywhere else as well.
+
+The stubborn band is 21 to 22 kHz, and it is stubborn for a dull reason: these are 44.1 kHz masters,
+which carry almost nothing above 21 kHz, so any invented band is wrong there by however loud it is.
+The ceiling fade exists for that, and is deliberately narrow. Made a sixth of an octave wide it starts
+cutting at 19.2 kHz and costs 7 dB at 20.5 kHz, which turned a band that had been 2 dB too loud into
+one 3 dB too quiet: a taper wide enough to be heard is not a taper, it is a filter.
 
 This is a spectral measurement, not a listening test, and it does not claim to be one.
 

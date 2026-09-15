@@ -130,15 +130,18 @@ public sealed class NeuralRepair : SpectralProcessor
     public int ExtraLatency => _model.Context * Hop;
 
     /// <summary>
-    /// Fades the rebuilt band out over the last sixth of an octave below the ceiling.
+    /// Fades the rebuilt band out over the last twelfth of an octave below the ceiling.
     ///
     /// Stopping dead at the ceiling leaves a wall ninety decibels deep, which is the very shape this
     /// stage exists to remove, put back one octave higher. A raised cosine over the last few bands
-    /// costs nothing audible and leaves an edge the ear and the eye both read as an ending.
+    /// removes that without the fade itself becoming the error: a sixth of an octave, which is what
+    /// this was first written as, costs seven decibels at 20 kHz, and measured against the lossless
+    /// originals that turned a band which had been two decibels too loud into one three decibels too
+    /// quiet. A twelfth of an octave is a twentieth of a decibel there and still no wall.
     /// </summary>
     private static double Taper(int bin, int ceiling)
     {
-        int start = (int)(ceiling / 1.125);
+        int start = (int)(ceiling / 1.06);
         if (bin <= start || ceiling <= start)
         {
             return 1.0;

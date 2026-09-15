@@ -400,26 +400,36 @@ public static class RepairDataset
         /// </summary>
         public bool TryCache(long budgetBytes = 5L << 30)
         {
-            long needed = Count * (InputSize + OutputSize) * sizeof(float);
-            if (_cache is not null || needed > budgetBytes || needed > int.MaxValue)
+            long values = Count * (InputSize + OutputSize);
+            long needed = values * sizeof(float);
+
+            // The limit is on how many numbers an array can hold, not on how many bytes they occupy.
+            // Testing the byte count against int.MaxValue turned every set over two gigabytes away,
+            // which is a set of about a million and a half frames: exactly the size worth training on,
+            // and exactly the size that most wants to be in memory.
+            if (_cache is not null || needed > budgetBytes || values > Array.MaxLength)
             {
                 return _cache is not null;
             }
 
             try
             {
-                float[] cache = new float[Count * (InputSize + OutputSize)];
+                float[] cache = new float[values];
                 byte[] buffer = new byte[1 << 20];
                 _reader.BaseStream.Position = _start;
 
+                // Counted in floats rather than bytes, since a byte offset past two gigabytes does not
+                // fit in the int that Buffer.BlockCopy takes.
                 int at = 0;
                 long remaining = needed;
                 while (remaining > 0)
                 {
                     int want = (int)Math.Min(buffer.Length, remaining);
                     _reader.BaseStream.ReadExactly(buffer, 0, want);
-                    Buffer.BlockCopy(buffer, 0, cache, at, want);
-                    at += want;
+                    System.Runtime.InteropServices.MemoryMarshal
+                        .Cast<byte, float>(buffer.AsSpan(0, want))
+                        .CopyTo(cache.AsSpan(at));
+                    at += want / sizeof(float);
                     remaining -= want;
                 }
 

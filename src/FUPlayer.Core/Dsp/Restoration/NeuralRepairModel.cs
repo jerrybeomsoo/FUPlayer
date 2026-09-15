@@ -18,16 +18,16 @@ namespace FUPlayer.Core.Dsp.Restoration;
 /// that the answer is known for every frame. What it learns is a mapping between spectra. It does not
 /// recover the samples the encoder discarded, and nothing can.
 ///
-/// One measurement is worth knowing before reaching for a bigger network. Fitted to 33 releases and
-/// judged on releases it had never seen, a frame-by-frame network scored 5.86 where simply applying
-/// one constant gain per band scored 3.64, against 6.03 for doing nothing at all. Weight decay did
-/// not close the gap. Whatever it learns about an individual frame does not survive a change of
-/// record, and on unfamiliar music that costs more than it gains. So a constant curve is a first
-/// class answer here, and one is expressible in exactly this format: zero every weight, put the
-/// curve in the output biases, and the same arithmetic returns it for every frame.
+/// What it is worth depends entirely on what it was fitted to. Fitted to 33 releases from ambient
+/// netlabels, all coded with one encoder, a frame-by-frame network scored 5.86 where one constant
+/// gain per band scored 3.64, against 6.03 for doing nothing: it had learned that corner of music
+/// rather than what a codec does, and lost to an average. Fitted to 155 releases by 180 artists coded
+/// with four encoders, the same architecture scores 3.02 against the constant's 5.52.
 ///
-/// What would change that is more releases, or features that describe a frame better than forty band
-/// levels do. Not a larger network.
+/// So a constant curve is still a first class answer, and one is expressible in exactly this format:
+/// zero every weight, put the curve in the output biases, and the same arithmetic returns it for
+/// every frame. Training measures both and saves whichever wins, which means a thin corpus produces a
+/// curve rather than a network that has memorised it.
 /// </summary>
 public sealed class NeuralRepairModel
 {
