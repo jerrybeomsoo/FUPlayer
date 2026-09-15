@@ -202,6 +202,106 @@ public static class RepairDataset
         }
     }
 
+    /// <summary>
+    /// Joins training sets that were built the same way into one.
+    ///
+    /// Building a set is paced by the encoders, one file at a time, so an afternoon's corpus takes
+    /// hours on one core and a fraction of that on several. Splitting the files between a few runs
+    /// and joining the results afterwards is the whole of the parallelism, and it keeps the group
+    /// boundaries, which is what the held-out split is built on.
+    /// </summary>
+    public static long Merge(IReadOnlyList<string> sources, string output)
+    {
+        ArgumentOutOfRangeException.ThrowIfZero(sources.Count);
+
+        var readers = new List<Reader>();
+        try
+        {
+            foreach (string source in sources)
+            {
+                readers.Add(new Reader(source));
+            }
+
+            Reader first = readers[0];
+            foreach (Reader other in readers.Skip(1))
+            {
+                if (other.Bands != first.Bands || other.Context != first.Context
+                    || other.SampleRate != first.SampleRate
+                    || Math.Abs(other.LowHz - first.LowHz) > 1e-6 || Math.Abs(other.HighHz - first.HighHz) > 1e-6)
+                {
+                    throw new InvalidDataException(
+                        "Those sets were not built the same way: bands, context, rate and band range all have to match.");
+                }
+            }
+
+            var layout = new BandLayout(first.LowHz, first.HighHz, first.Bands);
+            long written = 0;
+
+            using (var writer = new Writer(output, layout, first.Context, first.SampleRate))
+            {
+                const int Batch = 4096;
+                float[] inputs = new float[Batch * first.InputSize];
+                float[] targets = new float[Batch * first.OutputSize];
+
+                foreach (Reader reader in readers)
+                {
+                    foreach ((long start, long end) in Spans(reader))
+                    {
+                        writer.BeginGroup();
+                        for (long at = start; at < end;)
+                        {
+                            int want = (int)Math.Min(Batch, end - at);
+                            int got = reader.Read(at, want, inputs, targets);
+                            if (got == 0)
+                            {
+                                break;
+                            }
+
+                            for (int i = 0; i < got; i++)
+                            {
+                                writer.Add(
+                                    inputs.AsSpan(i * first.InputSize, first.InputSize),
+                                    targets.AsSpan(i * first.OutputSize, first.OutputSize));
+                            }
+
+                            at += got;
+                            written += got;
+                        }
+                    }
+                }
+            }
+
+            return written;
+        }
+        finally
+        {
+            foreach (Reader reader in readers)
+            {
+                reader.Dispose();
+            }
+        }
+    }
+
+    /// <summary>Each source file's run of records, or one run covering everything when there is no table.</summary>
+    private static IEnumerable<(long Start, long End)> Spans(Reader reader)
+    {
+        if (reader.Groups.Count == 0)
+        {
+            yield return (0, reader.Count);
+            yield break;
+        }
+
+        for (int i = 0; i < reader.Groups.Count; i++)
+        {
+            long start = reader.Groups[i];
+            long end = i + 1 < reader.Groups.Count ? reader.Groups[i + 1] : reader.Count;
+            if (end > start)
+            {
+                yield return (start, end);
+            }
+        }
+    }
+
     public sealed class Reader : IDisposable
     {
         private readonly BinaryReader _reader;
@@ -298,7 +398,7 @@ public static class RepairDataset
         /// so a set read from disk is read once per epoch and again for every evaluation.
         /// Returns false, harmlessly, when there is not the room.
         /// </summary>
-        public bool TryCache(long budgetBytes = 3L << 30)
+        public bool TryCache(long budgetBytes = 5L << 30)
         {
             long needed = Count * (InputSize + OutputSize) * sizeof(float);
             if (_cache is not null || needed > budgetBytes || needed > int.MaxValue)

@@ -451,38 +451,22 @@ public sealed partial class DspStudioViewModel : ObservableObject
         new("Full", 0.0, "Exactly what the slope or the model asks for."),
     ];
 
-    /// <summary>What the prediction has to work with, or why it has nothing.</summary>
+    /// <summary>
+    /// What the prediction has to work with, or why it has nothing.
+    ///
+    /// Read from the models folder every time it is asked for, and asked for again whenever a switch
+    /// here changes, so that installing a model while the player is open is noticed. It used to be
+    /// read once when the page was built, which meant a model installed afterwards showed as nothing
+    /// installed until the player was restarted.
+    /// </summary>
     public string ModelStatus
     {
         get
         {
-            // A network does both jobs and is preferred when one is installed.
-            string? network = ModelLibrary.NewestNetwork();
-            if (network is not null)
-            {
-                NeuralRepairModel? trained = ModelLibrary.TryLoadNetwork(network, out string? broken);
-                return trained is null
-                    ? $"The installed network could not be read: {broken}"
-                    : $"Using {Path.GetFileName(network)}: {string.Join("-", trained.Layers)} network over "
-                        + $"{trained.Bands} bands, fitted to {trained.FramesSeen:N0} frames of coded music"
-                        + (trained.TrainedOn is null ? string.Empty : $" from {trained.TrainedOn}")
-                        + $". It sets both the rebuilt levels and the correction below the cutoff.";
-            }
-
-            string? path = ModelLibrary.Newest();
-            if (path is null)
-            {
-                return "Nothing installed. Train a network with 'fuplayer-cli dataset' and 'train-repair', or copy a "
-                    + $".funet.json file into {ModelLibrary.Directory}. Without one the rebuilt band follows a fixed "
-                    + "slope and the artefact damping is a fixed rate limit.";
-            }
-
-            HighBandModel? model = ModelLibrary.TryLoad(path, out string? failure);
-            return model is null
-                ? $"The installed model could not be read: {failure}"
-                : $"Using {Path.GetFileName(path)}: a linear fit, cutoff {model.CutoffHz / 1000.0:0.#} kHz, predicting "
-                    + $"to {model.TopHz / 1000.0:0.#} kHz, from {model.FramesSeen:N0} frames. It sets the rebuilt "
-                    + "levels only.";
+            string installed = ModelLibrary.DescribeInstalled();
+            return RebuildHarmonics || ReduceArtifacts
+                ? installed
+                : "Nothing to apply it to yet: turn on artefact reduction or harmonic rebuilding as well. " + installed;
         }
     }
 
@@ -670,15 +654,24 @@ public sealed partial class DspStudioViewModel : ObservableObject
 
     partial void OnRemoveUltrasonicsChanged(bool value) => Update(value, (bool v) => Settings.Processing.RemoveUltrasonics = v);
 
-    partial void OnReduceArtifactsChanged(bool value) => Update(value, (bool v) => Settings.Restoration.ReduceArtifacts = v);
+    partial void OnReduceArtifactsChanged(bool value)
+    {
+        Update(value, (bool v) => Settings.Restoration.ReduceArtifacts = v);
+        OnPropertyChanged(nameof(ModelStatus));
+    }
 
     partial void OnRebuildHarmonicsChanged(bool value)
     {
         Update(value, (bool v) => Settings.Restoration.RebuildHarmonics = v);
         OnPropertyChanged(nameof(IsRebuilding));
+        OnPropertyChanged(nameof(ModelStatus));
     }
 
-    partial void OnPredictChanged(bool value) => Update(value, (bool v) => Settings.Restoration.Predict = v);
+    partial void OnPredictChanged(bool value)
+    {
+        Update(value, (bool v) => Settings.Restoration.Predict = v);
+        OnPropertyChanged(nameof(ModelStatus));
+    }
 
     partial void OnSelectedArtifactStrengthChanged(Choice? value) =>
         Update(value, (double strength) => Settings.Restoration.ArtifactStrength = strength);

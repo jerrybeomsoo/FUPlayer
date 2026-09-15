@@ -252,10 +252,12 @@ internal sealed class DatasetBuilder
         }
     }
 
-    public static int Run(IReadOnlyList<string> files, string output, int[] rates, double seconds, int bands, int context, int stride)
+    public static int Run(
+        IReadOnlyList<string> files, string output, int[] rates, double seconds, int bands, int context, int stride,
+        double lowHz, double highHz)
     {
-        var layout = new BandLayout(200.0, 21_000.0, bands);
-        var builder = new DatasetBuilder(layout, context, rates, 21_000.0, stride);
+        var layout = new BandLayout(lowHz, highHz, bands);
+        var builder = new DatasetBuilder(layout, context, rates, highHz, stride);
 
         IReadOnlyList<(string Name, string Encoder, string Extension, int[] Kbps)> external = ExternalCodec.Available();
         Console.WriteLine(external.Count == 0
@@ -276,7 +278,22 @@ internal sealed class DatasetBuilder
         Console.WriteLine($"Wrote {output}");
         Console.WriteLine($"  {builder.Frames:N0} frames from {builder.FilesUsed} files, {builder.FilesSkipped} skipped "
             + $"({builder.FilesUnsupported} the encoder would not take, {builder.FilesNotFullBand} already band-limited)");
-        Console.WriteLine($"  {bands} bands, {context} frames of context, {NeuralRepairModel.ExpectedInputs(bands, context)} inputs");
+        Console.WriteLine($"  {bands} bands from {lowHz / 1000.0:0.###} to {highHz / 1000.0:0.###} kHz, "
+            + $"{context} frames of context, {NeuralRepairModel.ExpectedInputs(bands, context)} inputs");
+
+        // How many bands land above a typical codec cutoff, which is the only place the rebuild
+        // writes. Thirty bands below 10 kHz and three above 15 kHz is a layout that spends its
+        // resolution where nothing happens.
+        int working = 0;
+        for (int band = 0; band < bands; band++)
+        {
+            if (layout.CentreHz(band) >= 15_000.0)
+            {
+                working++;
+            }
+        }
+
+        Console.WriteLine($"  {working} of them above 15 kHz, which is where the rebuilt band goes");
 
         foreach ((string label, int kHz) in builder.CutoffByRate.OrderBy(pair => pair.Key, StringComparer.Ordinal))
         {

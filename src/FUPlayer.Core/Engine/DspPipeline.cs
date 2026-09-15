@@ -216,6 +216,7 @@ internal sealed class DspPipeline : IDisposable
                         Rebuild = restore.RebuildHarmonics,
                         Reduce = restore.ReduceArtifacts,
                         Amount = restore.NetworkAmount,
+                        AmountDb = restore.RebuildAmountDb,
                     };
                 }
                 else

@@ -79,6 +79,8 @@ internal static class Program
               roundtrip <file> --rate <B/s>  Code a file with the system AAC encoder and measure it
                       [--out <wav>]          Keep the coded copy, to play or render through the repair
               dataset <files…> --out <file>  Build training pairs by coding lossless music
+                      [--bands <n>] [--low <Hz>] [--high <Hz>] [--stride <n>] [--seconds <n>]
+              dataset --merge <sets…> --out <file>  Join sets built the same way, for parallel runs
               evaluate <files…>              Measure how much closer the repair gets to the original
               train-repair <dataset>         Fit the repair network to a training set
                       --out <name> [--hidden 96,64] [--epochs 8] [--decay <n>]
@@ -447,6 +449,15 @@ internal static class Program
 
     private static int Dataset(Options options)
     {
+        if (options.Has("merge"))
+        {
+            // Joining sets reads and writes files; it needs no encoder and no particular platform.
+            string merged = options.Get("out") ?? "repair-dataset.fudata";
+            long frames = RepairDataset.Merge(options.Positional, merged);
+            Console.WriteLine($"Joined {options.Positional.Count} sets into {merged}: {frames:N0} frames.");
+            return 0;
+        }
+
         if (!OperatingSystem.IsWindows())
         {
             return Fail("Building a training set needs the system AAC encoder, which is a Windows feature.");
@@ -466,9 +477,19 @@ internal static class Program
 
         string output = options.Get("out") ?? "repair-dataset.fudata";
         double seconds = Math.Clamp(options.GetInt("seconds") ?? 240, 10, 36_000);
-        int bands = Math.Clamp(options.GetInt("bands") ?? 40, 8, 96);
+        int bands = Math.Clamp(options.GetInt("bands") ?? 64, 8, 160);
         int context = Math.Clamp(options.GetInt("context") ?? 1, 0, 4);
-        int stride = Math.Clamp(options.GetInt("stride") ?? 2, 1, 8);
+        // With one codec and thirty files every other frame was worth keeping. With four codecs at
+        // fourteen bit rates and two hundred files, a hundred and fifty times as many frames arrive
+        // and most of them are the neighbours of frames already in the set. A wide stride keeps the
+        // variety and drops the repetition.
+        int stride = Math.Clamp(options.GetInt("stride") ?? 2, 1, 256);
+
+        // The layout decides where the model has resolution. Log spacing from 200 Hz spends most of
+        // its bands below 10 kHz, where a codec changes nothing, and leaves three above 15 kHz, where
+        // the whole of the rebuild happens. Raising the bottom moves them to where the work is.
+        double lowHz = Math.Clamp(options.GetDouble("low") ?? 200.0, 20.0, 5_000.0);
+        double highHz = Math.Clamp(options.GetDouble("high") ?? 22_050.0, lowHz * 4.0, 24_000.0);
 
         int[] rates = options.Get("rates") is string list
             ? [.. list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -484,7 +505,7 @@ internal static class Program
         Console.WriteLine($"Coding {files.Count} files at {string.Join(", ", rates.Select(r => $"{r * 8 / 1000} kbit/s"))}, "
             + $"up to {seconds / 60.0:0.#} min each.");
 
-        return DatasetBuilder.Run(files, output, rates, seconds, bands, context, stride);
+        return DatasetBuilder.Run(files, output, rates, seconds, bands, context, stride, lowHz, highHz);
     }
 
     /// <summary>
@@ -743,6 +764,12 @@ internal static class Program
     private static int ListModels()
     {
         Console.WriteLine($"Models folder: {ModelLibrary.Directory}");
+
+        // The same sentence the player's DSP studio shows, from the same code, so that a
+        // disagreement between the two is not possible.
+        Console.WriteLine(ModelLibrary.DescribeInstalled());
+        Console.WriteLine();
+
         IReadOnlyList<string> networks = ModelLibrary.ListNetworks();
         IReadOnlyList<string> files = ModelLibrary.List();
 
@@ -764,8 +791,7 @@ internal static class Program
 
             // A network whose weights are all zero answers with its output biases and nothing else,
             // which is a constant curve however it is stored.
-            bool curve = IsConstant(model);
-            Console.WriteLine($"  {Path.GetFileName(network)}   {(curve ? "constant curve" : "network")}");
+            Console.WriteLine($"  {Path.GetFileName(network)}   {(model.IsConstantCurve ? "constant curve" : "network")}");
             Console.WriteLine($"      {string.Join("-", model.Layers)} over {model.Bands} bands, "
                 + $"{model.Context} frames of context, {model.LowHz / 1000.0:0.#} to {model.HighHz / 1000.0:0.#} kHz");
             Console.WriteLine($"      fitted to {model.FramesSeen:N0} frames"
@@ -776,6 +802,7 @@ internal static class Program
         foreach (string file in files)
         {
             HighBandModel? model = ModelLibrary.TryLoad(file, out string? failure);
+
             if (model is null)
             {
                 Console.WriteLine($"  {Path.GetFileName(file)}: unreadable ({failure})");
@@ -790,31 +817,6 @@ internal static class Program
         }
 
         return 0;
-    }
-
-    /// <summary>True when every weight is zero, so the model answers the same thing for every frame.</summary>
-    private static bool IsConstant(NeuralRepairModel model)
-    {
-        byte[] bytes = Convert.FromBase64String(model.Weights);
-        float[] flat = new float[bytes.Length / sizeof(float)];
-        Buffer.BlockCopy(bytes, 0, flat, 0, bytes.Length);
-
-        int at = 0;
-        for (int layer = 1; layer < model.Layers.Length; layer++)
-        {
-            int weights = model.Layers[layer - 1] * model.Layers[layer];
-            for (int i = 0; i < weights; i++)
-            {
-                if (flat[at + i] != 0.0f)
-                {
-                    return false;
-                }
-            }
-
-            at += weights + model.Layers[layer];
-        }
-
-        return true;
     }
 
     private static int Train(Options options)
@@ -1129,6 +1131,17 @@ internal static class Program
 
         public List<string> Positional { get; } = [];
 
+        /// <summary>
+        /// Options that take no value. Anything not named here swallows the next word, so a switch
+        /// left off this list quietly eats the first of its own arguments.
+        /// </summary>
+        private static readonly HashSet<string> Switches = new(StringComparer.Ordinal)
+        {
+            "dop", "pass-through", "remove-ultrasonics", "no-limiter",
+            "gpu", "gpu-fast", "gpu-force", "gpu-hold", "probe", "convolution-layered",
+            "repair-artifacts", "repair-rebuild", "repair-predict", "merge",
+        };
+
         public static Options Parse(IEnumerable<string> args)
         {
             var options = new Options();
@@ -1138,10 +1151,9 @@ internal static class Program
                 if (list[i].StartsWith("--", StringComparison.Ordinal))
                 {
                     string name = list[i][2..];
-                    bool hasValue = i + 1 < list.Length && !list[i + 1].StartsWith("--", StringComparison.Ordinal)
-                        && name is not ("dop" or "pass-through" or "remove-ultrasonics" or "no-limiter"
-                            or "gpu" or "gpu-fast" or "gpu-force" or "probe" or "convolution-layered"
-                            or "gpu-hold" or "repair-artifacts" or "repair-rebuild" or "repair-predict");
+                    bool hasValue = i + 1 < list.Length
+                        && !list[i + 1].StartsWith("--", StringComparison.Ordinal)
+                        && !Switches.Contains(name);
                     options._named[name] = hasValue ? list[++i] : null;
                 }
                 else
@@ -1158,6 +1170,9 @@ internal static class Program
         public string? Get(string name) => _named.TryGetValue(name, out string? value) ? value : null;
 
         public int? GetInt(string name) => int.TryParse(Get(name), NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) ? value : null;
+
+        public double? GetDouble(string name) =>
+            double.TryParse(Get(name), NumberStyles.Float, CultureInfo.InvariantCulture, out double value) ? value : null;
 
         public PlayerSettings ToSettings(double defaultVolume)
         {

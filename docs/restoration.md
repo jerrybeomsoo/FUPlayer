@@ -130,16 +130,37 @@ encode: MP3 at 128 to 320, Opus at 96 to 160, Vorbis at 128 to 256, and AAC at 2
 downloaded to make that work, and if ffmpeg is absent the set is built from AAC alone and the builder
 says so.
 
+Getting one on Windows, if MSYS2 is already there from building the FFmpeg libraries:
+
+```bash
+pacman -S mingw-w64-ucrt-x86_64-ffmpeg
+```
+
+then put `C:\msys64\ucrt64\bin` on the path for the run. That is a full ffmpeg with the GPL parts
+enabled, which is fine here because it is a tool that makes training data on your own machine and
+nothing from it is redistributed, in the same way that a compiler's licence is not the licence of what
+it compiles. FUPlayer's own FFmpeg libraries remain the LGPL build from `build/ffmpeg/`.
+
+Training on one codec is the mistake it looks like. AAC alone covers cutoffs from 15 to 19 kHz;
+adding MP3, Opus and Vorbis spreads them from 15 to 21 kHz, and Vorbis in particular rolls off in a
+shape AAC never makes. A model that has only met AAC applies AAC's idea of an edge to an Ogg file.
+
 The cutoff is measured per file and handed to the network as a feature, so a model does generalise
 some way beyond the rates it was shown. How far is not something this project has measured.
 
 | Option | Meaning |
 | --- | --- |
-| `--seconds <n>` | How much of each file to use. 150 is plenty when there are 40 files |
+| `--seconds <n>` | How much of each file to use |
 | `--rates <list>` | Bytes per second, comma separated. The Windows encoder takes 12000 to 24000 |
-| `--bands <n>` | Bands the spectrum is described in. 40 is the default |
+| `--bands <n>` | Bands the spectrum is described in. 96 is the default |
+| `--low <Hz>` `--high <Hz>` | Where those bands start and end. 200 Hz to 22.05 kHz by default |
 | `--context <n>` | Frames either side the network sees. 1 means three frames in all |
-| `--stride <n>` | Keep every nth frame. Frames overlap by three quarters, so 2 halves the file for almost nothing |
+| `--stride <n>` | Keep every nth frame. Frames overlap by three quarters, so even 8 loses little |
+
+The layout is worth a thought before a long run. The bands are log spaced, so 40 of them from 200 Hz
+put thirty below 10 kHz, where a codec changes nothing, and three above 15 kHz, where the whole of
+the rebuild happens. The builder now prints how many land above 15 kHz; if that number is small, the
+model cannot describe the band it is being asked to invent, however long it is trained.
 
 ### 4. Train
 

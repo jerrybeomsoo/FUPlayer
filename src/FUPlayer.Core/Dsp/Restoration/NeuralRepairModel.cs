@@ -97,6 +97,16 @@ public sealed class NeuralRepairModel
     [JsonIgnore]
     public BandLayout Layout { get; }
 
+    /// <summary>
+    /// True when every weight is zero, so the same gains come back for every frame.
+    ///
+    /// That is not a broken file. Training saves a constant curve in this format whenever the
+    /// frame-by-frame network loses to one, which on the data measured so far it does, and the
+    /// arithmetic is the same either way: zero weights leave the output biases standing.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsConstantCurve => _weights.All(layer => layer.All(weight => weight == 0.0f));
+
     /// <summary>How many numbers the network expects.</summary>
     [JsonIgnore]
     public int InputSize => Layers[0];
