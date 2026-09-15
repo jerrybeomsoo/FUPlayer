@@ -30,7 +30,9 @@ public partial class MainWindow : Window, IDialogService
             AllowMultiple = true,
             FileTypeFilter =
             [
-                new FilePickerFileType("Audio files") { Patterns = DecoderFactory.PlayableExtensions.Select(Pattern).ToArray() },
+                // Every format FUPlayer knows, not only the ones playable right now: an Ogg file that the
+                // picker will not even show is a puzzle, whereas one that reports a missing library is not.
+                new FilePickerFileType("Audio files") { Patterns = DecoderFactory.KnownExtensions.Select(Pattern).ToArray() },
                 new FilePickerFileType("Playlists") { Patterns = PlaylistFile.Extensions.Select(Pattern).ToArray() },
                 FilePickerFileTypes.All,
             ],

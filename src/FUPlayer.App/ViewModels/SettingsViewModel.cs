@@ -323,6 +323,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         IsFfmpegAvailable = available;
         FfmpegStatus = available
             ? FFmpegLibrary.VersionDescription ?? "Loaded"
-            : "Not installed. FLAC, WAV, AIFF, DSF and DFF play natively; build the LGPL FFmpeg libraries (docs/Building-FFmpeg.md) for MP3, AAC, ALAC, Opus, WavPack and more.";
+            : "Not installed. FLAC, WAV, AIFF, DSF and DFF play natively. For MP3, AAC, ALAC, Ogg Vorbis, Opus, "
+              + "WavPack and the rest, build the LGPL FFmpeg libraries: run \"pwsh build/ffmpeg/build-ffmpeg.ps1\" "
+              + "in the source tree, or see docs/building-ffmpeg.md.";
     }
 }

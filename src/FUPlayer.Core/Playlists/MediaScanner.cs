@@ -23,8 +23,10 @@ public static class MediaScanner
                 {
                     result.AddRange(PlaylistFile.Load(path));
                 }
-                else if (DecoderFactory.IsAudioFile(path))
+                else if (DecoderFactory.IsKnownAudioFile(path))
                 {
+                    // A file named by hand is kept even when nothing can decode it yet, so that the
+                    // engine can say why. Folders below are scanned with IsAudioFile instead.
                     result.Add(Path.GetFullPath(path));
                 }
             }

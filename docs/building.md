@@ -77,12 +77,21 @@ AAC, ALAC, WavPack, Monkey's Audio, Ogg Vorbis, Opus, TTA, TAK and WMA, needs FF
 them the player runs normally and reports those formats as unsupported.
 
 The bindings match **FFmpeg 9.0.x** exactly (libavformat 63, libavcodec 63, libavutil 61); other major versions
-are rejected at start-up. Build the LGPL libraries with the script in `build/ffmpeg/`, and see
-[building-ffmpeg.md](building-ffmpeg.md) for the full procedure and the licensing checklist.
+are rejected at start-up. On Windows one command builds them, installing MSYS2 and a compiler first if the
+machine has neither:
 
-Place `avformat-63.dll`, `avcodec-63.dll` and `avutil-61.dll` next to `FUPlayer.exe`, in an `ffmpeg`
-sub-folder beside it, or in the folder named by the `FUPLAYER_FFMPEG_PATH` environment variable. The Settings page
-reports whether they were found.
+```powershell
+pwsh build/ffmpeg/build-ffmpeg.ps1
+```
+
+The libraries land in `native/win-x64/`, and `Directory.Build.targets` copies them into an `ffmpeg` folder
+beside `FUPlayer.exe` on every build and publish, so the next build is all it takes. See
+[building-ffmpeg.md](building-ffmpeg.md) for the manual route, for Linux and macOS, and for the licensing
+checklist.
+
+To place them by hand instead, put `avformat-63.dll`, `avcodec-63.dll`, `avutil-61.dll` and
+`swresample-7.dll` next to `FUPlayer.exe`, in an `ffmpeg` sub-folder beside it, or in the folder named by
+the `FUPLAYER_FFMPEG_PATH` environment variable. The Settings page reports whether they were found.
 
 ## Running the player against a throwaway profile
 

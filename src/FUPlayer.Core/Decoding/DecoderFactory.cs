@@ -37,10 +37,28 @@ public static class DecoderFactory
     public static IEnumerable<string> PlayableExtensions =>
         FFmpegLibrary.IsAvailable ? NativeExtensionList.Concat(FFmpegExtensionList) : NativeExtensionList;
 
+    /// <summary>Every extension FUPlayer recognises, whether or not the FFmpeg libraries are installed.</summary>
+    public static IEnumerable<string> KnownExtensions => NativeExtensionList.Concat(FFmpegExtensionList);
+
+    /// <summary>Whether this file can be played, which for the FFmpeg formats depends on the libraries being there.</summary>
     public static bool IsAudioFile(string path)
     {
         string extension = Path.GetExtension(path);
         return NativeExtensions.Contains(extension) || (FFmpegExtensions.Contains(extension) && FFmpegLibrary.IsAvailable);
+    }
+
+    /// <summary>
+    /// Whether this looks like an audio file at all, ignoring whether anything can decode it.
+    ///
+    /// Scanning a folder uses <see cref="IsAudioFile"/>, because a folder of Ogg files on a machine with no
+    /// FFmpeg should not fill the queue with errors. A file the user named themselves, by dropping it on the
+    /// window or choosing it in the file picker, uses this instead: dropping the file and having nothing at all
+    /// happen is worse than being told that the format needs a library that is not installed.
+    /// </summary>
+    public static bool IsKnownAudioFile(string path)
+    {
+        string extension = Path.GetExtension(path);
+        return NativeExtensions.Contains(extension) || FFmpegExtensions.Contains(extension);
     }
 
     public static IAudioDecoder Open(string path)

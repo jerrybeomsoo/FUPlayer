@@ -13,6 +13,14 @@
     Publish against an installed .NET runtime instead of bundling it. About a
     third of the size, but the machine then needs the .NET 9 Desktop Runtime.
 
+.PARAMETER IncludeFFmpeg
+    Put the locally built FFmpeg libraries in the package, so MP3, AAC, Ogg and
+    the rest play without the user building anything. They are left out by
+    default: they are LGPL, and shipping them means shipping their license text
+    and either the matching source or a written offer for it. The switch adds
+    the license text and a note saying where the source is; the offer is yours
+    to keep.
+
 .EXAMPLE
     pwsh build/package.ps1 -Version 0.1.0
 #>
@@ -20,7 +28,8 @@
 param(
     [string]$Version = "0.1.0",
     [string]$Runtime = "win-x64",
-    [switch]$FrameworkDependent
+    [switch]$FrameworkDependent,
+    [switch]$IncludeFFmpeg
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,6 +45,8 @@ New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
 
 $selfContained = if ($FrameworkDependent) { "false" } else { "true" }
 
+$skipFFmpeg = if ($IncludeFFmpeg) { "false" } else { "true" }
+
 foreach ($project in @("src\FUPlayer.App\FUPlayer.App.csproj", "src\FUPlayer.Cli\FUPlayer.Cli.csproj")) {
     Write-Host "publishing $project"
     dotnet publish (Join-Path $root $project) `
@@ -43,6 +54,7 @@ foreach ($project in @("src\FUPlayer.App\FUPlayer.App.csproj", "src\FUPlayer.Cli
         --runtime $Runtime `
         --self-contained $selfContained `
         -p:DebugType=none `
+        -p:FuPlayerSkipFFmpegCopy=$skipFFmpeg `
         --output $stage `
         --nologo
     if ($LASTEXITCODE -ne 0) { throw "publish failed for $project" }
@@ -56,6 +68,29 @@ foreach ($file in @("LICENSE", "THIRD-PARTY-NOTICES.md", "README.md")) {
     Copy-Item (Join-Path $root $file) $stage
 }
 Copy-Item (Join-Path $root "licenses") (Join-Path $stage "licenses") -Recurse
+
+if ($IncludeFFmpeg) {
+    $libraries = Get-ChildItem (Join-Path $stage "ffmpeg") -Filter *.dll -ErrorAction SilentlyContinue
+    if (-not $libraries) { throw "-IncludeFFmpeg was given but no libraries were published. Build them first: pwsh build/ffmpeg/build-ffmpeg.ps1" }
+
+    $copying = Join-Path $root "ffmpeg-9.0.1\COPYING.LGPLv2.1"
+    if (Test-Path $copying) { Copy-Item $copying (Join-Path $stage "licenses\FFmpeg-COPYING.LGPLv2.1") }
+
+    @"
+The ffmpeg folder holds FFmpeg 9.0.1's libavformat, libavcodec, libavutil and libswresample,
+built from unmodified FFmpeg source with the LGPL v2.1 configuration in
+build/ffmpeg/build-ffmpeg-lgpl.sh (no --enable-gpl, no --enable-nonfree, no --enable-version3).
+
+They are covered by the GNU Lesser General Public License version 2.1 or later, whose text is in
+licenses/FFmpeg-COPYING.LGPLv2.1. Replace them with your own build of the same major versions
+(avformat 63, avcodec 63, avutil 61, swresample 7) at any time; FUPlayer loads whatever is there.
+
+The corresponding source is FFmpeg 9.0.1 as published at https://ffmpeg.org/download.html,
+with the configuration named above.
+"@ | Set-Content (Join-Path $stage "ffmpeg\README.txt") -Encoding utf8
+
+    Write-Host ("including FFmpeg: {0}" -f ($libraries.Name -join ", "))
+}
 
 Compress-Archive -Path $stage -DestinationPath $zip
 

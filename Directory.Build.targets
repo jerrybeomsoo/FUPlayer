@@ -1,0 +1,51 @@
+<Project>
+
+  <!--
+    The optional FFmpeg 9.0 libraries.
+
+    FUPlayer decodes WAV, AIFF, FLAC, DSF and DSDIFF with its own code. MP3, AAC, ALAC, Ogg Vorbis,
+    Opus, WavPack, Monkey's Audio and the rest go through FFmpeg, which this repository does not
+    carry: it is LGPL, so it has to stay a separate, replaceable library. build/ffmpeg/build-ffmpeg.ps1
+    (or build-ffmpeg-lgpl.sh in an MSYS2 UCRT64 shell) builds it and leaves the libraries in
+    native/<rid>/.
+
+    What follows copies whatever is in there into an "ffmpeg" folder beside the executable, which is
+    one of the directories FFmpegLibrary searches, so a build after the FFmpeg build needs nothing
+    configured by hand. With the folder absent the build is unchanged and those formats are reported
+    as unsupported at run time.
+
+    Set FuPlayerFFmpegDirectory to use libraries from somewhere else, or FuPlayerSkipFFmpegCopy=true
+    to leave them out of a build entirely.
+  -->
+
+  <PropertyGroup>
+    <FuPlayerNativeRid Condition="'$(FuPlayerNativeRid)' == ''">$(RuntimeIdentifier)</FuPlayerNativeRid>
+    <FuPlayerNativeRid Condition="'$(FuPlayerNativeRid)' == ''">$(NETCoreSdkPortableRuntimeIdentifier)</FuPlayerNativeRid>
+    <FuPlayerRepositoryRoot>$(MSBuildThisFileDirectory)</FuPlayerRepositoryRoot>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(FuPlayerFFmpegDirectory)' == '' and '$(FuPlayerNativeRid)' != ''">
+    <!-- Where the build script stages them, and the place to drop a downloaded build by hand. -->
+    <FuPlayerFFmpegDirectory Condition="Exists('$(FuPlayerRepositoryRoot)native\$(FuPlayerNativeRid)')">$(FuPlayerRepositoryRoot)native\$(FuPlayerNativeRid)</FuPlayerFFmpegDirectory>
+    <!-- Failing that, straight out of the FFmpeg build tree. -->
+    <FuPlayerFFmpegDirectory Condition="'$(FuPlayerFFmpegDirectory)' == '' and Exists('$(FuPlayerRepositoryRoot)build\ffmpeg\out\$(FuPlayerNativeRid)\bin')">$(FuPlayerRepositoryRoot)build\ffmpeg\out\$(FuPlayerNativeRid)\bin</FuPlayerFFmpegDirectory>
+    <FuPlayerFFmpegDirectory Condition="'$(FuPlayerFFmpegDirectory)' == '' and Exists('$(FuPlayerRepositoryRoot)build\ffmpeg\out\$(FuPlayerNativeRid)\lib')">$(FuPlayerRepositoryRoot)build\ffmpeg\out\$(FuPlayerNativeRid)\lib</FuPlayerFFmpegDirectory>
+  </PropertyGroup>
+
+  <!--
+    Only the programs and the tests take a copy. Adding it to the class libraries as well would
+    hand the same files to every project that references them, and MSBuild then warns about copying
+    two identical items to one place.
+  -->
+  <ItemGroup Condition="'$(FuPlayerFFmpegDirectory)' != '' and '$(FuPlayerSkipFFmpegCopy)' != 'true' and ('$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe' or '$(IsTestProject)' == 'true')">
+    <!-- swresample is here because FFmpeg's Opus decoder needs it; avcodec loads it as a dependency. -->
+    <Content Include="$(FuPlayerFFmpegDirectory)\*avformat*;$(FuPlayerFFmpegDirectory)\*avcodec*;$(FuPlayerFFmpegDirectory)\*avutil*;$(FuPlayerFFmpegDirectory)\*swresample*"
+             Exclude="$(FuPlayerFFmpegDirectory)\*.a;$(FuPlayerFFmpegDirectory)\*.lib;$(FuPlayerFFmpegDirectory)\*.def;$(FuPlayerFFmpegDirectory)\*.pdb;$(FuPlayerFFmpegDirectory)\*.exp">
+      <Link>ffmpeg\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <Visible>false</Visible>
+    </Content>
+  </ItemGroup>
+
+</Project>

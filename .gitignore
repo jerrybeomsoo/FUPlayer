@@ -15,6 +15,10 @@ artifacts/
 # FFmpeg libraries, built with build/ffmpeg/build-ffmpeg-lgpl.sh
 build/ffmpeg/out/
 build/ffmpeg/src/
+build/ffmpeg/work/
+native/
+ffmpeg-*/
+ffmpeg-*.tar.*
 
 # OS
 Thumbs.db

@@ -63,7 +63,7 @@ public static class FFmpegLibrary
         }
         catch (DllNotFoundException)
         {
-            LoadError = "FFmpeg libraries were not found. See docs/Building-FFmpeg.md.";
+            LoadError = "FFmpeg libraries were not found. See docs/building-ffmpeg.md.";
         }
         catch (EntryPointNotFoundException ex)
         {

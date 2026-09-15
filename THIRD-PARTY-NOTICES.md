@@ -16,10 +16,12 @@ can be combined with them; the LGPL 2.1 text is included in [licenses/LGPL-2.1.t
 
 ## FFmpeg
 
-FUPlayer calls FFmpeg's `libavformat`, `libavcodec` and `libavutil` through P/Invoke. The libraries are
-not statically linked; users may replace them with their own builds of the same major versions
-(avformat 63, avcodec 63, avutil 61). Build them with `build/ffmpeg/build-ffmpeg-lgpl.sh`, which refuses
-to continue unless FFmpeg reports the "LGPL version 2.1 or later" license. When distributing binaries
+FUPlayer calls FFmpeg's `libavformat`, `libavcodec` and `libavutil` through P/Invoke, and `libswresample`
+travels with them because FFmpeg's Opus decoder needs it. The libraries are not statically linked; users
+may replace them with their own builds of the same major versions (avformat 63, avcodec 63, avutil 61,
+swresample 7). Build them with `build/ffmpeg/build-ffmpeg.ps1` on Windows or
+`build/ffmpeg/build-ffmpeg-lgpl.sh` elsewhere, which refuses to continue unless FFmpeg reports the
+"LGPL version 2.1 or later" license. When distributing binaries
 that include FFmpeg DLLs, ship this notice, the FFmpeg license text (`COPYING.LGPLv2.1` from the FFmpeg source)
 and the corresponding FFmpeg source code (or a written offer for it).
 

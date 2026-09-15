@@ -154,7 +154,7 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 | **Runtime** | None for the release zip, which bundles .NET 9. Building from source needs the [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) |
 | **CPU** | Any x64 with AVX2 for comfortable use. A 4-core laptop plays 1M taps to 705.6 kHz in real time |
 | **DAC** | Anything with a WASAPI or ASIO driver. ASIO is required for native DSD |
-| **Optional** | An OpenCL 1.2 device for GPU offload; FFmpeg LGPL builds for formats beyond FLAC, WAV, AIFF, DSF and DFF |
+| **Optional** | An OpenCL 1.2 device for GPU offload; FFmpeg LGPL builds for formats beyond FLAC, WAV, AIFF, DSF and DFF (`pwsh build/ffmpeg/build-ffmpeg.ps1` builds them) |
 
 ### Download
 
