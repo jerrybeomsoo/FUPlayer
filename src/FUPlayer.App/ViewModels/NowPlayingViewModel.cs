@@ -112,6 +112,10 @@ public sealed partial class NowPlayingViewModel : ObservableObject
     private string _acceleration = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasUpscaler))]
+    private string _upscaler = string.Empty;
+
+    [ObservableProperty]
     private string _processing = string.Empty;
 
     [ObservableProperty]
@@ -182,6 +186,8 @@ public sealed partial class NowPlayingViewModel : ObservableObject
     public bool HasCover => Cover is not null;
 
     public bool HasAcceleration => Acceleration.Length > 0;
+
+    public bool HasUpscaler => Upscaler.Length > 0;
 
     /// <summary>Only block-based filtering has a block delay; tap by tap has none to show.</summary>
     public bool HasBlockDelay => BlockDelay != "-";
@@ -262,6 +268,7 @@ public sealed partial class NowPlayingViewModel : ObservableObject
 
         Resampler = IsActive ? status.ResamplerSummary ?? string.Empty : string.Empty;
         Acceleration = IsActive ? status.Acceleration ?? string.Empty : string.Empty;
+        Upscaler = IsActive ? status.Upscaler ?? string.Empty : string.Empty;
         Device = status.BackendName is null ? string.Empty : $"{status.BackendName}  ·  {status.DeviceName}";
         DspLoad = IsActive ? Formatting.Percent(status.DspLoad) : "-";
         Buffer = IsActive ? Formatting.Percent(status.BufferFill) : "-";

@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <PackageReference Include="TagLibSharp" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
   </ItemGroup>
 
 </Project>

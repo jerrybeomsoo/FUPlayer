@@ -4,6 +4,9 @@ Four stages for material that has been through a perceptual codec, or that simpl
 the output does. They live in the DSP studio under **Lossy repair**, and every one of them is off
 until you ask for it.
 
+The **neural upscaler**, which takes 44.1 and 48 kHz sources to 88.2 and 96 kHz and stands in for these
+stages wherever it runs, has its own page: [neural-upscaler.md](neural-upscaler.md).
+
 Read this first: **none of them recovers what was discarded.** The bits are gone. Three of the four
 put back something plausible where there is a hole, and the fourth moves what survived closer to
 where it started. None of it is the master.

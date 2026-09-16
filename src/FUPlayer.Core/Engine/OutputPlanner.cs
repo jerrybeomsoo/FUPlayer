@@ -38,7 +38,7 @@ public static class OutputPlanner
             }
             else if (PlanDsd(source, settings, backend, capabilities, channels, notes) is { } dsd)
             {
-                return dsd;
+                return WithUpscaling(dsd, settings.Restoration, notes);
             }
             else
             {
@@ -46,7 +46,46 @@ public static class OutputPlanner
             }
         }
 
-        return PlanPcm(source, settings, capabilities, channels, notes);
+        return WithUpscaling(PlanPcm(source, settings, capabilities, channels, notes), settings.Restoration, notes);
+    }
+
+    /// <summary>
+    /// Adds the neural upscaler where it has something to do and somewhere to put the answer: a PCM
+    /// source at 44.1 or 48 kHz, the rates it was trained from, and an output at least twice as fast,
+    /// so that the band it writes survives the conversion. The chosen filter then runs from twice the
+    /// source rate instead of from the source rate, and has to accept that.
+    ///
+    /// The limiter runs whenever the upscaler does, whatever its own switch says. The band the network
+    /// writes adds energy, and on loud masters its peaks cross full scale: measured on a held-out song
+    /// played from a lossless file, 1.014 at the output. Those overs are the network's, not the
+    /// recording's, and left alone they would clip or drive a DSD modulator the way a lossy decode's did.
+    /// </summary>
+    internal static PlaybackPlan WithUpscaling(PlaybackPlan plan, RestorationSettings restore, List<string> notes)
+    {
+        if (!restore.Enabled || !restore.NeuralUpscaler || plan.PassThrough || plan.Source.IsDsd || plan.Filter is null)
+        {
+            return plan;
+        }
+
+        if (plan.ConversionRate is not (44_100 or 48_000))
+        {
+            return plan;
+        }
+
+        int upscale = plan.ConversionRate * 2;
+        if (plan.ProcessingRate < upscale)
+        {
+            notes.Add($"The neural upscaler needs an output of at least {AudioRates.Format(upscale)}; it is not running.");
+            return plan;
+        }
+
+        if (!ResamplerFactory.IsSupported(plan.Filter, upscale, plan.ProcessingRate))
+        {
+            notes.Add($"{plan.Filter.Name} cannot convert {AudioRates.Format(upscale)} to {AudioRates.Format(plan.ProcessingRate)}; the neural upscaler is not running.");
+            return plan;
+        }
+
+        return plan with { UpscaleRate = upscale, Limiter = true, Notes = [.. plan.Notes, .. notes.Except(plan.Notes)] };
     }
 
     /// <summary>The configured filter, or a substitute when an early roll-off filter meets a 44.1/48 kHz source.</summary>

@@ -87,6 +87,7 @@ internal static class Program
             report.AppendLine($"  network        {network}");
         }
         report.AppendLine($"  status         {ModelLibrary.DescribeInstalled()}");
+        report.AppendLine($"  upscaler       {ModelLibrary.DescribeUpscaler()}");
         report.AppendLine($"  FFmpeg         {(FFmpegLibrary.IsAvailable ? FFmpegLibrary.VersionDescription : FFmpegLibrary.LoadError)}");
         report.AppendLine($"  plays          {string.Join(" ", DecoderFactory.PlayableExtensions)}");
 

@@ -133,6 +133,95 @@ public static class ModelLibrary
     /// <summary>The most recently written model, or null when there is none.</summary>
     public static string? Newest() => List().FirstOrDefault();
 
+    private static readonly Lock UpscalerGate = new();
+    private static (string Path, DateTime Written, NeuralUpscalerModel Model)? _upscaler;
+
+    /// <summary>Every neural upscaler in any of the search folders, newest first.</summary>
+    public static IReadOnlyList<string> ListUpscalers() => [.. Files("*" + NeuralUpscalerModel.Extension)];
+
+    /// <summary>
+    /// Opens the neural upscaler, or returns null with the reason. The model is opened once and kept:
+    /// it is 40 MB of weights, the pipeline is rebuilt on every settings change and every change of
+    /// format, and an inference session is safe to share between channels and between pipelines. A file
+    /// rewritten on disk is noticed by its time stamp and opened again.
+    /// </summary>
+    public static NeuralUpscalerModel? TryLoadUpscaler(string? path, out string? failure)
+    {
+        failure = null;
+        path ??= ListUpscalers().FirstOrDefault();
+        if (path is null)
+        {
+            failure = $"no {NeuralUpscalerModel.Extension} model in {string.Join(" or ", SearchDirectories())}";
+            return null;
+        }
+
+        lock (UpscalerGate)
+        {
+            try
+            {
+                DateTime written = File.GetLastWriteTimeUtc(path);
+                if (_upscaler is { } cached && cached.Path == path && cached.Written == written)
+                {
+                    return cached.Model;
+                }
+
+                NeuralUpscalerModel model = NeuralUpscalerModel.Load(path, Math.Max(1, Environment.ProcessorCount / 4));
+                _upscaler = (path, written, model);
+                return model;
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException
+                or Microsoft.ML.OnnxRuntime.OnnxRuntimeException or DllNotFoundException or TypeInitializationException)
+            {
+                failure = $"{Path.GetFileName(path)}: {ex.Message}";
+                return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// What the neural upscaler would run with, or why it has nothing, read from the folders every time
+    /// it is asked for. The numbers are the ones the export writes beside the network: log-spectral
+    /// distance to the high-resolution master on songs kept out of training, before and after, by band.
+    /// </summary>
+    public static string DescribeUpscaler()
+    {
+        string? path = ListUpscalers().FirstOrDefault();
+        if (path is null)
+        {
+            return $"Nothing installed. Looked in {string.Join(" and ", SearchDirectories())} for a {NeuralUpscalerModel.Extension} file. "
+                + "None ships with the player: a network is fitted to somebody's music. docs/restoration.md describes training one "
+                + "from your own high-resolution files. Without one this switch interpolates to twice the rate and nothing more.";
+        }
+
+        string name = Path.GetFileName(path);
+        try
+        {
+            using var metadata = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.ChangeExtension(path, ".json")));
+            System.Text.Json.JsonElement root = metadata.RootElement;
+            double parameters = root.TryGetProperty("parameters", out var p) ? p.GetDouble() : 0.0;
+            long steps = root.TryGetProperty("step", out var s) ? s.GetInt64() : 0;
+            string text = $"Using {name}: {parameters / 1e6:0.#} million parameters, {steps:N0} training steps.";
+            if (root.TryGetProperty("scores", out var scores)
+                && Score(scores, "16-22k") is { } middle && Score(scores, "22k-nyq") is { } top)
+            {
+                text += $" On songs it never trained on, its distance from the master goes from {middle.Before:0.0} to {middle.After:0.0} dB "
+                    + $"between 16 and 22 kHz, and from {top.Before:0.0} to {top.After:0.0} dB above 22 kHz.";
+            }
+
+            return text + $" Loaded from {path}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+            or System.Text.Json.JsonException or InvalidOperationException or FormatException)
+        {
+            return $"Using {name}. There is no readable description beside it, so how it was trained is not known. Loaded from {path}";
+        }
+
+        static (double Before, double After)? Score(System.Text.Json.JsonElement scores, string band) =>
+            scores.TryGetProperty("in_" + band, out var before) && scores.TryGetProperty("out_" + band, out var after)
+                ? (before.GetDouble(), after.GetDouble())
+                : null;
+    }
+
     /// <summary>Every network in any of the search folders, newest first.</summary>
     public static IReadOnlyList<string> ListNetworks() => [.. Files("*" + NeuralExtension)];
 

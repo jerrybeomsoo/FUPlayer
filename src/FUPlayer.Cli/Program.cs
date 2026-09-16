@@ -122,6 +122,9 @@ internal static class Program
               --repair-predict             Let a trained network set the levels for both
               --repair-difference          Output what the repair added instead of the repaired signal
               --rebuild-ultrasonics        Synthesise the band above the source's own Nyquist rate
+              --neural-upscale             Run the neural upscaler: 44.1/48 kHz and lossy sources to 88.2/96 kHz
+              --upscaler <file>            Which .onnx upscaler to use
+              --upscaler-level <dB>        Gain on the band it writes above the source's Nyquist rate
               --network <file>             Which model to use, when more than one is installed
               --convolution-layered        Divide the taps between short blocks for the early ones and
                                            longer blocks behind them, instead of one length for every tap.
@@ -1135,12 +1138,17 @@ internal static class Program
                     opening ??= acceleration;
                     Console.WriteLine($"  {acceleration}");
                 }
+
+                if (status.Upscaler is { Length: > 0 } upscaler)
+                {
+                    Console.WriteLine($"  {upscaler}");
+                }
             }
 
             if (showProgress)
             {
                 Console.Write(string.Create(CultureInfo.InvariantCulture,
-                    $"\r{status.CurrentItem?.DisplayTitle,-40} {status.Position:mm\\:ss}/{status.Duration:mm\\:ss}  DSP {status.DspLoad * 100,5:0}%  FIFO {status.BufferFill * 100,3:0}%  limiter {status.LimiterEvents}  "));
+                    $"\r{status.CurrentItem?.DisplayTitle,-40} {status.Position:mm\\:ss}/{status.Duration:mm\\:ss}  DSP {status.DspLoad * 100,5:0}%  FIFO {status.BufferFill * 100,3:0}%  limiter {status.LimiterEvents}  modulator resets {status.ModulatorResets}  "));
             }
         }
 
@@ -1171,7 +1179,7 @@ internal static class Program
             "dop", "pass-through", "remove-ultrasonics", "no-limiter",
             "gpu", "gpu-fast", "gpu-force", "gpu-hold", "probe", "convolution-layered",
             "repair-artifacts", "repair-rebuild", "repair-predict", "repair-difference",
-            "rebuild-ultrasonics", "merge",
+            "rebuild-ultrasonics", "neural-upscale", "merge",
         };
 
         public static Options Parse(IEnumerable<string> args)
@@ -1279,6 +1287,9 @@ internal static class Program
             settings.Restoration.Predict = Has("repair-predict");
             settings.Restoration.OutputDifference = Has("repair-difference");
             settings.Restoration.RebuildUltrasonics = Has("rebuild-ultrasonics");
+            settings.Restoration.NeuralUpscaler = Has("neural-upscale");
+            settings.Restoration.NeuralUpscalerPath = Get("upscaler");
+            settings.Restoration.UpscalerBandDb = GetDouble("upscaler-level") ?? 0.0;
 
             // Which model, when there is more than one installed. Without this the newest wins, which
             // is right for playing and useless for comparing two of them on the same music.

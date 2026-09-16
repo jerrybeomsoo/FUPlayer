@@ -50,7 +50,9 @@
 
   <!--
     Trained models kept in models/ at the top of the repository travel into a "models" folder beside
-    the executable, the way the FFmpeg libraries do. ModelLibrary looks there first.
+    the executable, the way the FFmpeg libraries do. ModelLibrary looks there first. That is every
+    .json and .onnx file: the repair networks and models, and a neural upscaler with the description
+    written beside it.
 
     That folder exists because %APPDATA% is not always the same folder for two programs on one
     machine: a program running inside an application container has it redirected into the container,
@@ -58,7 +60,7 @@
     next to the executable is the same folder for everybody.
   -->
   <ItemGroup Condition="Exists('$(FuPlayerRepositoryRoot)models') and ('$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe')">
-    <Content Include="$(FuPlayerRepositoryRoot)models\*.funet.json;$(FuPlayerRepositoryRoot)models\*.fumodel.json">
+    <Content Include="$(FuPlayerRepositoryRoot)models\*.json;$(FuPlayerRepositoryRoot)models\*.onnx">
       <Link>models\%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

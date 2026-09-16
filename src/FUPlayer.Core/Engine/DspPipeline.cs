@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using FUPlayer.Core.Audio;
 using FUPlayer.Core.Dsp.Acceleration;
 using FUPlayer.Core.Dsp.Analysis;
 using FUPlayer.Core.Dsp.Design;
@@ -43,6 +44,7 @@ internal sealed class DspPipeline : IDisposable
     private HighBandModel? _model;
     private NeuralRepairModel? _network;
     private NeuralRepairModel? _extension;
+    private readonly NeuralUpscalerModel? _upscalerModel;
     private double _cutoffHz;
     private BandwidthEstimate _bandwidth;
     private readonly byte[][] _dsdOutputs;
@@ -94,10 +96,22 @@ internal sealed class DspPipeline : IDisposable
         _silentDsd = new byte[InputBlock + 2];
         Array.Fill(_silentDsd, DsdConstants.SilenceByte);
 
+        // The neural upscaler sits between the source rate and the chosen filter, so the filter starts
+        // from twice the source rate when it runs. If its model cannot be opened the interpolation still
+        // happens and the network is skipped, which keeps the chain the plan describes and changes the
+        // sound only by the interpolator.
+        if (plan.UpscaleRate > 0)
+        {
+            _upscalerModel = ModelLibrary.TryLoadUpscaler(settings.Restoration.NeuralUpscalerPath, out string? upscalerFailure);
+            UpscalerStatus = _upscalerModel is null
+                ? $"Neural upscaler not running: {upscalerFailure}"
+                : $"Neural upscaler: {Path.GetFileName(_upscalerModel.Path)} at {AudioRates.Format(plan.UpscaleRate)}";
+        }
+
         ResamplerChain? resampler = plan.PassThrough
             ? null
             : ResamplerFactory.Create(
-                plan.Filter!, plan.ConversionRate, plan.ProcessingRate, plan.Staging, plan.FilterTaps, plan.Convolution, plan.ConvolutionOptions);
+                plan.Filter!, ResamplerInputRate(plan), plan.ProcessingRate, plan.Staging, plan.FilterTaps, plan.Convolution, plan.ConvolutionOptions);
 
         // Channels run side by side, and a filter then divides its own work over whatever cores that leaves. Two
         // channels on an eight-core machine would otherwise use two cores and report a DSP load of several
@@ -167,7 +181,7 @@ internal sealed class DspPipeline : IDisposable
         bool detectApodization = settings.Processing.ApodizationDetection && !plan.Source.IsDsd && plan.ConversionRate <= ApodizationDetector.MaximumSampleRate;
 
         RestorationSettings restore = settings.Restoration;
-        bool canRestore = !plan.Source.IsDsd && (restore.ReduceArtifacts || restore.RebuildHarmonics);
+        bool canRestore = restore.Enabled && plan.UpscaleRate == 0 && !plan.Source.IsDsd && (restore.ReduceArtifacts || restore.RebuildHarmonics);
         if (canRestore)
         {
             _restoration = restore;
@@ -187,7 +201,7 @@ internal sealed class DspPipeline : IDisposable
 
         // Independent of the codec repair: it answers a different question, about a band no codec
         // ever touched, and it needs a conversion that has somewhere to put the answer.
-        bool canExtend = restore.RebuildUltrasonics && !plan.PassThrough && plan.ProcessingRate > plan.ConversionRate;
+        bool canExtend = restore.Enabled && plan.UpscaleRate == 0 && restore.RebuildUltrasonics && !plan.PassThrough && plan.ProcessingRate > plan.ConversionRate;
         if (canExtend)
         {
             _restoration ??= restore;
@@ -304,8 +318,26 @@ internal sealed class DspPipeline : IDisposable
                 chain.Apodization = new ApodizationDetector(plan.ConversionRate);
             }
 
+            int resamplerInput = conversionCapacity;
+            if (plan.UpscaleRate > 0)
+            {
+                chain.PreUpsampler = new TrainingUpsampler();
+                chain.Upscaled = new double[(2 * conversionCapacity) + 64];
+                resamplerInput = chain.Upscaled.Length;
+                if (_upscalerModel is not null)
+                {
+                    chain.Upscaler = new NeuralUpscaler(
+                        _upscalerModel, rate: plan.UpscaleRate, bandFromHz: plan.UpscaleRate / 4.0, bandGainDb: restore.UpscalerBandDb);
+                    if (restore.OutputDifference)
+                    {
+                        chain.UpscaledDry = new double[chain.Upscaled.Length];
+                        chain.UpscaledDryDelay = new DelayLine(chain.Upscaler.Latency);
+                    }
+                }
+            }
+
             chain.Resampler = resampler!.CreateState(stageParallelism, _accelerator);
-            int processingCapacity = resampler.MaxOutput(conversionCapacity) + 16;
+            int processingCapacity = resampler.MaxOutput(resamplerInput) + 16;
             chain.Processing = new double[processingCapacity];
             chain.Limiter = plan.Limiter ? new SoftLimiter(plan.ProcessingRate) : null;
             chain.Delay = delays[c] > 0 ? new DelayLine(delays[c]) : null;
@@ -339,6 +371,12 @@ internal sealed class DspPipeline : IDisposable
         if (ultrasonic is not null)
         {
             latency += ultrasonic.DelayOutputSamples / ultrasonic.OutputRate;
+        }
+
+        if (plan.UpscaleRate > 0 && !plan.PassThrough)
+        {
+            latency += (double)TrainingUpsampler.Latency / plan.UpscaleRate;
+            latency += (double)(_chains[0].Upscaler?.Latency ?? 0) / plan.UpscaleRate;
         }
 
         if (resampler is not null)
@@ -383,9 +421,18 @@ internal sealed class DspPipeline : IDisposable
         }
 
         ResamplerChain chain = ResamplerFactory.Create(
-            plan.Filter, plan.ConversionRate, plan.ProcessingRate, plan.Staging, plan.FilterTaps, plan.Convolution, plan.ConvolutionOptions);
+            plan.Filter, ResamplerInputRate(plan), plan.ProcessingRate, plan.Staging, plan.FilterTaps, plan.Convolution, plan.ConvolutionOptions);
         return 2.5 * BlockSecondsOf(chain);
     }
+
+    /// <summary>What the chosen filter converts from: twice the source rate while the upscaler runs.</summary>
+    private static int ResamplerInputRate(PlaybackPlan plan) => plan.UpscaleRate > 0 ? plan.UpscaleRate : plan.ConversionRate;
+
+    /// <summary>What the neural upscaler is doing, or null when it was not asked for.</summary>
+    public string? UpscalerStatus { get; }
+
+    /// <summary>True while the network itself is running, rather than only the interpolation in front of it.</summary>
+    public bool IsUpscaling => _upscalerModel is not null;
 
     private static double BlockSecondsOf(ResamplerChain? chain) =>
         chain is null ? 0.0 : chain.FlushInputSamples / (double)Math.Max(1, chain.InputRate);
@@ -789,6 +836,33 @@ internal sealed class DspPipeline : IDisposable
 
     private void ProcessConverted(int c, ChannelChain chain, ReadOnlySpan<double> signal, double volume)
     {
+        if (chain.PreUpsampler is not null)
+        {
+            int doubled = chain.PreUpsampler.Process(signal, chain.Upscaled);
+            Span<double> up = chain.Upscaled.AsSpan(0, doubled);
+            if (chain.Upscaler is not null)
+            {
+                if (chain.UpscaledDryDelay is not null)
+                {
+                    up.CopyTo(chain.UpscaledDry);
+                    chain.UpscaledDryDelay.Process(chain.UpscaledDry.AsSpan(0, doubled));
+                }
+
+                chain.Upscaler.Process(up);
+
+                if (chain.UpscaledDryDelay is not null)
+                {
+                    // What the network added, and nothing of the recording it added it to.
+                    for (int i = 0; i < doubled; i++)
+                    {
+                        up[i] -= chain.UpscaledDry[i];
+                    }
+                }
+            }
+
+            signal = up;
+        }
+
         int count = chain.Resampler!.Process(signal, chain.Processing);
         Span<double> x = chain.Processing.AsSpan(0, count);
 
@@ -915,6 +989,11 @@ internal sealed class DspPipeline : IDisposable
         public HarmonicRebuilder? Rebuilder;
         public NeuralRepair? Network;
         public NeuralRepair? Extension;
+        public TrainingUpsampler? PreUpsampler;
+        public NeuralUpscaler? Upscaler;
+        public double[] Upscaled = [];
+        public double[] UpscaledDry = [];
+        public DelayLine? UpscaledDryDelay;
         public ApodizationDetector? Apodization;
         public ResamplerChainState? Resampler;
         public readonly SmoothedGain Volume = new(1.0);
@@ -946,6 +1025,9 @@ internal sealed class DspPipeline : IDisposable
             Rebuilder?.Reset();
             Network?.Reset();
             Extension?.Reset();
+            PreUpsampler?.Reset();
+            Upscaler?.Reset();
+            UpscaledDryDelay?.Reset();
             Apodization?.Reset();
             Resampler?.Reset();
             Volume.Jump(volume);

@@ -121,6 +121,23 @@
               <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,6"
                          Text="For material that has been through a perceptual codec. Everything here adds signal that was not in the source, so all of it is off until asked for, and none of it recovers what the encoder discarded." />
 
+              <controls:SettingRow Title="Lossy repair"
+                                   Description="Everything below, on or off at once. Off builds none of it whatever each switch says, and keeps those switches as they are so that turning this back on puts them all back.">
+                <ToggleSwitch IsChecked="{Binding LossyRepair}" OnContent="" OffContent="" />
+              </controls:SettingRow>
+
+              <StackPanel Spacing="0" IsVisible="{Binding LossyRepair}">
+              <controls:SettingRow Title="Neural upscaler"
+                                   Description="A network trained on high-resolution masters and on MP3, AAC (Apple's among them), Ogg, Opus and CD-rate copies of them. It takes a 44.1 or 48 kHz source to 88.2 or 96 kHz, undoing below 22 kHz what it learned a codec does and writing a band above it. Needs an output of at least twice the source rate, and for such a source it takes the place of the stages below. It holds the sound about half a second and costs roughly a tenth of a four-core processor. The band above 22 kHz was never in the file: it is the network's estimate of what a master of that kind carries there.">
+                <ToggleSwitch IsChecked="{Binding NeuralUpscaler}" OnContent="" OffContent="" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Upscaled band level" Description="{Binding SelectedUpscalerBand.Description}"
+                                   IsVisible="{Binding NeuralUpscaler}">
+                <ComboBox ItemsSource="{Binding UpscalerBandChoices}" SelectedItem="{Binding SelectedUpscalerBand}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+              <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,4"
+                         IsVisible="{Binding NeuralUpscaler}" Text="{Binding UpscalerStatus}" />
+
               <controls:SettingRow Title="Artifact reduction"
                                    Description="Limits how far a high bin may move between transforms, so a band the encoder keeps switching on and off is held steady. Measurement does not support this one: AAC leaves the band it keeps within 0.4 dB of the original, so there is little there to repair.">
                 <ToggleSwitch IsChecked="{Binding ReduceArtifacts}" OnContent="" OffContent="" />
@@ -162,6 +179,7 @@
                                    IsVisible="{Binding IsRepairing}">
                 <ToggleSwitch IsChecked="{Binding OutputDifference}" OnContent="" OffContent="" />
               </controls:SettingRow>
+              </StackPanel>
 
               <Border Classes="divider" Margin="0,10" />
               <controls:SettingRow Title="Peak limiter" Description="{Binding LimiterDescription}">

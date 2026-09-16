@@ -11,6 +11,8 @@
     <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.1.2" />
     <!-- MVVM helpers (MIT) -->
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <!-- Neural upscaler inference (MIT) -->
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />
     <!-- Tag reading (LGPL-2.1, dynamically linked assembly) -->
     <PackageVersion Include="TagLibSharp" Version="2.3.0" />
   </ItemGroup>

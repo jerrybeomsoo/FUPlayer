@@ -261,6 +261,31 @@ public sealed class VolumeSettings
 /// </summary>
 public sealed class RestorationSettings
 {
+    /// <summary>
+    /// The whole of lossy repair, on or off in one place. Off builds none of the stages below, whatever
+    /// each of them says, and leaves their settings where they were so that turning this back on
+    /// restores them exactly. On by default, because every stage is off by default anyway and an
+    /// existing settings file has to keep meaning what it meant.
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Run the neural upscaler: a network trained on high-resolution masters and on lossy and CD-rate
+    /// copies of them, which repairs what a codec did below 22 kHz and writes the band above it, up to
+    /// 44.1 or 48 kHz. Needs an output of at least twice the source rate. Off until asked for.
+    /// </summary>
+    public bool NeuralUpscaler { get; set; }
+
+    /// <summary>The upscaler model file, or null for the one in the models folder.</summary>
+    public string? NeuralUpscalerPath { get; set; }
+
+    /// <summary>
+    /// Gain on the band the upscaler writes above the source's Nyquist rate, in decibels. Zero is what the
+    /// network was trained to write, which on held-out songs sat a couple of decibels under the masters.
+    /// Nothing of the recording is up there, so this changes only the invented band.
+    /// </summary>
+    public double UpscalerBandDb { get; set; }
+
     /// <summary>Hold a high band steady when the encoder keeps switching it on and off.</summary>
     public bool ReduceArtifacts { get; set; }
 
@@ -362,8 +387,11 @@ public sealed class ProcessingSettings
     public bool MeterAdjustedSource { get; set; } = true;
 
     /// <summary>
-    /// Catch peaks that rise above full scale after filtering with a look-ahead limiter. Turning it off leaves the
-    /// signal untouched, so intersample peaks clip in the DAC (PCM) or push the modulator harder (DSD).
+    /// Catch peaks that rise above full scale after filtering with a look-ahead limiter. Turning it off leaves a
+    /// lossless signal untouched, so intersample peaks clip in the DAC (PCM) or push the modulator harder (DSD).
+    /// A lossy source is limited whatever this says: its overs are codec artefacts, and unlimited they clip into
+    /// noise above 40 kHz on a PCM output or destabilise a high-order modulator on a DSD one. So is anything the
+    /// neural upscaler runs on, whose overs are the band it wrote.
     /// </summary>
     public bool Limiter { get; set; } = true;
 

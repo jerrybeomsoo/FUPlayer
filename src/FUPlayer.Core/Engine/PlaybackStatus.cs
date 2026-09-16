@@ -37,6 +37,12 @@ public sealed record PlaybackStatus
     /// <summary>Where the filtering runs: the processor, or the OpenCL device that took it over.</summary>
     public string? Acceleration { get; init; }
 
+    /// <summary>What the neural upscaler is doing, or null when it was not asked for.</summary>
+    public string? Upscaler { get; init; }
+
+    /// <summary>True while the neural upscaler's network is running.</summary>
+    public bool IsUpscaling { get; init; }
+
     public string? BackendName { get; init; }
 
     public string? DeviceName { get; init; }

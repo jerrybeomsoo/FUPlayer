@@ -1,0 +1,5 @@
+# PyTorch and torchaudio are installed first, from https://pytorch.org, to match your graphics card.
+numpy>=2.0
+soundfile>=0.12
+onnx>=1.16
+onnxruntime>=1.18

@@ -235,6 +235,8 @@ public sealed class PlaybackEngine : IDisposable
             Plan = pipeline?.Plan,
             ResamplerSummary = pipeline?.ResamplerSummary,
             Acceleration = pipeline?.AccelerationSummary,
+            Upscaler = pipeline?.UpscalerStatus,
+            IsUpscaling = pipeline?.IsUpscaling ?? false,
             BackendName = _backend?.DisplayName,
             DeviceName = _deviceName,
             DspLoad = Volatile.Read(ref _dspLoad),
@@ -500,7 +502,7 @@ public sealed class PlaybackEngine : IDisposable
             {
                 try
                 {
-                    StartPipeline(index, decoder, metadata, PlanFor(decoder.Format), start, keepPaused);
+                    StartPipeline(index, decoder, metadata, PlanFor(decoder), start, keepPaused);
                 }
                 catch (Exception ex) when (IsRecoverable(ex))
                 {
@@ -535,7 +537,7 @@ public sealed class PlaybackEngine : IDisposable
         {
             IAudioDecoder decoder = _capture.Open(processId, _settings.Output.Channels);
             _captureProcessId = processId;
-            StartPipeline(_decoderIndex, decoder, null, PlanFor(decoder.Format), TimeSpan.Zero, keepPaused: false);
+            StartPipeline(_decoderIndex, decoder, null, PlanFor(decoder), TimeSpan.Zero, keepPaused: false);
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
@@ -554,7 +556,7 @@ public sealed class PlaybackEngine : IDisposable
         var decoder = new TestToneDecoder(_settings.Output.Channels, mode);
         try
         {
-            StartPipeline(-1, decoder, null, PlanFor(decoder.Format), TimeSpan.Zero, keepPaused: false);
+            StartPipeline(-1, decoder, null, PlanFor(decoder), TimeSpan.Zero, keepPaused: false);
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
@@ -577,7 +579,7 @@ public sealed class PlaybackEngine : IDisposable
             // Some drivers advertise ASIO DSD mode but refuse it when a stream opens: fall back to DoP.
             _nativeDsdRefused = true;
             ReportError($"Native DSD could not be started ({ex.Message}); sending DSD as DoP instead.");
-            plan = PlanFor(decoder.Format);
+            plan = PlanFor(decoder);
             EnsureStream(plan);
         }
 
@@ -667,7 +669,7 @@ public sealed class PlaybackEngine : IDisposable
                 {
                     try
                     {
-                        PlaybackPlan plan = PlanFor(decoder.Format);
+                        PlaybackPlan plan = PlanFor(decoder);
                         if (playback.Gapless && plan.HasSameProcessing(_pipeline!.Plan))
                         {
                             AttachDecoder(next, decoder, metadata, _pipeline);
@@ -869,7 +871,7 @@ public sealed class PlaybackEngine : IDisposable
         {
             try
             {
-                if (PlanFor(_decoder.Format).HasSameProcessing(_pipeline.Plan))
+                if (PlanFor(_decoder).HasSameProcessing(_pipeline.Plan))
                 {
                     ApplyLiveGain();
                     _pipeline.SetReplayGain(ReplayGainFor(_decoderItem?.Metadata));
@@ -957,7 +959,11 @@ public sealed class PlaybackEngine : IDisposable
     }
 
     internal static bool RestorationChanged(RestorationSettings a, RestorationSettings b) =>
-        a.ReduceArtifacts != b.ReduceArtifacts
+        a.Enabled != b.Enabled
+        || a.NeuralUpscaler != b.NeuralUpscaler
+        || a.NeuralUpscalerPath != b.NeuralUpscalerPath
+        || a.UpscalerBandDb != b.UpscalerBandDb
+        || a.ReduceArtifacts != b.ReduceArtifacts
         || a.RebuildHarmonics != b.RebuildHarmonics
         || a.Predict != b.Predict
         || a.ArtifactStrength != b.ArtifactStrength
@@ -1056,6 +1062,21 @@ public sealed class PlaybackEngine : IDisposable
             return false;
         }
     }
+
+    /// <summary>
+    /// Plans a decoder's stream, with the limiter forced on for a lossy source.
+    ///
+    /// Turning the limiter off is a request to leave the signal untouched, and for a lossless file that
+    /// is a coherent thing to want. A lossy decode's overs are not the signal: they are what is left
+    /// of the harmonics the encoder removed, and left alone they clip into a spray of noise above
+    /// 40 kHz on a PCM output, or push a 9th-order modulator unstable on a DSD one. The limiter does
+    /// nothing below full scale, so on a file with no overs this changes nothing at all.
+    /// </summary>
+    private PlaybackPlan PlanFor(IAudioDecoder decoder) => ProtectLossy(PlanFor(decoder.Format), decoder.CodecName);
+
+    /// <summary>The plan with the limiter on when the codec is a lossy one, and unchanged otherwise.</summary>
+    internal static PlaybackPlan ProtectLossy(PlaybackPlan plan, string? codecName) =>
+        plan.Limiter || !LossyCodecs.IsLossy(codecName) ? plan : plan with { Limiter = true };
 
     private PlaybackPlan PlanFor(StreamFormat format)
     {

@@ -49,6 +49,13 @@ public sealed record PlaybackPlan
     /// <summary>Run the look-ahead peak limiter after volume.</summary>
     public bool Limiter { get; init; } = true;
 
+    /// <summary>
+    /// The rate the neural upscaler runs at, twice the conversion rate, or 0 when it does not run. When
+    /// it does, the source is taken to this rate first by the same 2x interpolator the network was
+    /// trained behind, repaired here, and only then converted to the output rate by the chosen filter.
+    /// </summary>
+    public int UpscaleRate { get; init; }
+
     public double PcmLevelOffsetDb { get; init; }
 
     /// <summary>Human-readable explanations of substitutions and limits.</summary>
@@ -80,5 +87,6 @@ public sealed record PlaybackPlan
         && PassThrough == other.PassThrough
         && RemoveUltrasonics == other.RemoveUltrasonics
         && Limiter == other.Limiter
+        && UpscaleRate == other.UpscaleRate
         && PcmLevelOffsetDb == other.PcmLevelOffsetDb;
 }

@@ -173,6 +173,17 @@ public sealed partial class DspStudioViewModel : ObservableObject
     private bool _removeUltrasonics;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsRepairing))]
+    private bool _lossyRepair;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsRepairing))]
+    private bool _neuralUpscaler;
+
+    [ObservableProperty]
+    private Choice? _selectedUpscalerBand;
+
+    [ObservableProperty]
     private bool _reduceArtifacts;
 
     [ObservableProperty]
@@ -503,14 +514,21 @@ public sealed partial class DspStudioViewModel : ObservableObject
         }
     }
 
+    /// <summary>What the neural upscaler would run with. Read from the models folder each time, like <see cref="ModelStatus"/>.</summary>
+    public string UpscalerStatus => ModelLibrary.DescribeUpscaler();
+
     /// <summary>Reads the models folder again. Called when the page is opened and when a switch changes.</summary>
-    public void RefreshModelStatus() => OnPropertyChanged(nameof(ModelStatus));
+    public void RefreshModelStatus()
+    {
+        OnPropertyChanged(nameof(ModelStatus));
+        OnPropertyChanged(nameof(UpscalerStatus));
+    }
 
     /// <summary>True while anything above the cutoff is being synthesised.</summary>
     public bool IsRebuilding => RebuildHarmonics;
 
     /// <summary>True while any of the repair stages is switched on, which is when a difference exists.</summary>
-    public bool IsRepairing => ReduceArtifacts || RebuildHarmonics || RebuildUltrasonics;
+    public bool IsRepairing => LossyRepair && (NeuralUpscaler || ReduceArtifacts || RebuildHarmonics || RebuildUltrasonics);
 
     /// <summary>
     /// How loud the invented band above the source's own Nyquist rate should be.
@@ -523,6 +541,18 @@ public sealed partial class DspStudioViewModel : ObservableObject
         new("Faint", -12.0, "12 dB under what the model asks for. Barely there, which is the safest way to have it at all."),
         new("Quiet", -6.0, "6 dB under. The default."),
         new("Measured", 0.0, "Exactly the level real recordings of this kind carry up there."),
+    ];
+
+    /// <summary>
+    /// How loud the band the upscaler writes above the source's Nyquist rate should be. The network's own
+    /// answer is the default; it came out a couple of decibels under the masters it was measured against.
+    /// </summary>
+    public IReadOnlyList<Choice> UpscalerBandChoices { get; } =
+    [
+        new("Quiet", -6.0, "6 dB under what the network writes. For a tweeter or an amplifier that should be spared it."),
+        new("Measured", 0.0, "What the network writes: on songs it never trained on, a couple of decibels under the masters."),
+        new("Lifted", 3.0, "3 dB over. About where the masters themselves sit, on average."),
+        new("Strong", 6.0, "6 dB over. More than a master of this kind usually carries."),
     ];
 
     public IReadOnlyList<Choice> ConvolutionLayoutChoices { get; } =
@@ -585,7 +615,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
 
     public string LimiterDescription => Limiter
         ? "Holds peaks that a filter lifts above full scale, 1 ms ahead of time. Adds 1 ms of delay; Now playing counts how often it acts."
-        : "Off: nothing stops the signal exceeding full scale. Lower the volume a little if the clipping or modulator counters start moving.";
+        : "Off for lossless files: nothing stops them exceeding full scale. Lossy files (MP3, AAC, Ogg, Opus), captured audio and anything the neural upscaler runs on are still limited, because their overs are what the codec left or the network wrote, not the recording, and left alone they clip into noise above 40 kHz or push a DSD modulator unstable.";
 
     private PlayerSettings Settings => _services.Settings;
 
@@ -705,6 +735,21 @@ public sealed partial class DspStudioViewModel : ObservableObject
     partial void OnRestoreDsdLevelChanged(bool value) => Update(value, (bool v) => Settings.DsdToPcm.RestoreLevel = v);
 
     partial void OnRemoveUltrasonicsChanged(bool value) => Update(value, (bool v) => Settings.Processing.RemoveUltrasonics = v);
+
+    partial void OnLossyRepairChanged(bool value)
+    {
+        Update(value, (bool v) => Settings.Restoration.Enabled = v);
+        OnPropertyChanged(nameof(ModelStatus));
+    }
+
+    partial void OnNeuralUpscalerChanged(bool value)
+    {
+        Update(value, (bool v) => Settings.Restoration.NeuralUpscaler = v);
+        OnPropertyChanged(nameof(UpscalerStatus));
+    }
+
+    partial void OnSelectedUpscalerBandChanged(Choice? value) =>
+        Update(value, (double gainDb) => Settings.Restoration.UpscalerBandDb = gainDb);
 
     partial void OnReduceArtifactsChanged(bool value)
     {
@@ -829,6 +874,9 @@ public sealed partial class DspStudioViewModel : ObservableObject
             SelectedConvolutionLayout =
                 Choice.Find(ConvolutionLayoutChoices, s.Processing.ConvolutionUniformBlocks) ?? ConvolutionLayoutChoices[0];
             RemoveUltrasonics = s.Processing.RemoveUltrasonics;
+            LossyRepair = s.Restoration.Enabled;
+            NeuralUpscaler = s.Restoration.NeuralUpscaler;
+            SelectedUpscalerBand = Choice.Find(UpscalerBandChoices, s.Restoration.UpscalerBandDb) ?? UpscalerBandChoices[1];
             ReduceArtifacts = s.Restoration.ReduceArtifacts;
             RebuildHarmonics = s.Restoration.RebuildHarmonics;
             Predict = s.Restoration.Predict;

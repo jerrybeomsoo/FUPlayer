@@ -99,6 +99,11 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 
 - Take audio from any running application, Firefox or a music client, and send it through the whole chain
   to your DAC. Windows process loopback, so nothing has to be routed by hand.
+- A **neural upscaler** takes 44.1 and 48 kHz files and captures to 88.2 and 96 kHz: it corrects below 22 kHz
+  what it learned a codec does and writes a band above it, measured against the masters it came from. It runs
+  on the processor through ONNX Runtime with about half a second of delay, and
+  [its page](docs/neural-upscaler.md) says what it gets right and where it is wrong. No model ships; the
+  scripts in `training/neural-upscaler` train one from your own high-resolution files.
 - Measures where a file's spectrum actually ends, which is the only way to tell a coded stream from a
   lossless one when nothing in the container says so.
 - Synthesises a band above a codec's cutoff, and damps the warbling a low bit rate leaves behind.
@@ -357,6 +362,7 @@ src/
   FUPlayer.App/             Avalonia interface
   FUPlayer.Cli/             headless tool
 docs/                         documentation and screenshots
+training/neural-upscaler/     Python scripts that train an upscaler from your own files
 build/ffmpeg/                 script that builds LGPL FFmpeg libraries
 ```
 
@@ -370,6 +376,7 @@ build/ffmpeg/                 script that builds LGPL FFmpeg libraries
 | [docs/cli.md](docs/cli.md) | Every `fuplayer-cli` command and option |
 | [docs/settings.md](docs/settings.md) | Every setting, what it changes, and what it costs |
 | [docs/restoration.md](docs/restoration.md) | The lossy repair stages, and how to train or install a model |
+| [docs/neural-upscaler.md](docs/neural-upscaler.md) | The neural upscaler: how it runs, how its model was trained, and what it measures |
 | [docs/building-ffmpeg.md](docs/building-ffmpeg.md) | Building the LGPL FFmpeg DLLs from source |
 
 ## Contributing
