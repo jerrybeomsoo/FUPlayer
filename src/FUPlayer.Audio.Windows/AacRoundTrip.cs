@@ -17,8 +17,16 @@ namespace FUPlayer.Audio.Windows;
 /// </summary>
 public static class AacRoundTrip
 {
-    /// <summary>Bit rates the Windows encoder accepts, in bytes per second.</summary>
-    public static readonly int[] BytesPerSecond = [12_000, 16_000, 20_000, 24_000];
+    /// <summary>
+    /// Bit rates the Windows encoder accepts, in bytes per second: 128, 192 and 256 kbit/s.
+    ///
+    /// 256 is here because it is what a streaming service delivers, and because this encoder does
+    /// something at that rate that a better one does not. Measured against the masters over six
+    /// tracks it keeps the spectrum running to the end of the band on average, and still empties the
+    /// band above 17 kHz in a quarter to three quarters of individual frames. The long-term average
+    /// hides that; the frames are where a model looks.
+    /// </summary>
+    public static readonly int[] BytesPerSecond = [16_000, 24_000, 32_000];
 
     private static readonly Lock Gate = new();
     private static bool _started;

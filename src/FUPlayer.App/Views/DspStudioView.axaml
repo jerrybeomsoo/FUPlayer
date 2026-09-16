@@ -139,11 +139,29 @@
                 <ComboBox ItemsSource="{Binding RebuildAmountChoices}" SelectedItem="{Binding SelectedRebuildAmount}" Width="170" MinWidth="170" />
               </controls:SettingRow>
               <controls:SettingRow Title="Generative prediction"
-                                   Description="Levels the rebuilt band from a model fitted to real coded music, instead of a fixed slope. On six releases it had never heard, coded to Ogg Vorbis, it halves what is left of the error above the cutoff. It predicts a level for every band, never a detail.">
+                                   Description="Sets every band from a model fitted to real coded music, instead of a fixed slope: the rebuilt band above the cutoff, and the bands the encoder kept below it. Works on material with no cutoff at all, which is most of what streams. It predicts a level for every band, never a detail.">
                 <ToggleSwitch IsChecked="{Binding Predict}" OnContent="" OffContent="" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Prediction strength" Description="{Binding SelectedPredictionStrength.Description}"
+                                   IsVisible="{Binding Predict}">
+                <ComboBox ItemsSource="{Binding PredictionStrengthChoices}" SelectedItem="{Binding SelectedPredictionStrength}" Width="170" MinWidth="170" />
               </controls:SettingRow>
               <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,4"
                          IsVisible="{Binding Predict}" Text="{Binding ModelStatus}" />
+              <controls:SettingRow Title="Ultrasonic rebuilding"
+                                   Description="Synthesises a band above the source's own Nyquist rate when the output runs faster than the file does: 22 to 40 kHz for a CD-rate recording played at 96 kHz. Levels come from a model fitted to real high-rate recordings. This is invention, not recovery: a 44.1 kHz file never had that band, and nobody hears 30 kHz. An amplifier or a tweeter asked to reproduce it might make something audible of it, which is the reason to leave it off.">
+                <ToggleSwitch IsChecked="{Binding RebuildUltrasonics}" OnContent="" OffContent="" />
+              </controls:SettingRow>
+              <controls:SettingRow Title="Ultrasonic level" Description="{Binding SelectedUltrasonicTrim.Description}"
+                                   IsVisible="{Binding RebuildUltrasonics}">
+                <ComboBox ItemsSource="{Binding UltrasonicTrimChoices}" SelectedItem="{Binding SelectedUltrasonicTrim}" Width="170" MinWidth="170" />
+              </controls:SettingRow>
+
+              <controls:SettingRow Title="Output the repair alone"
+                                   Description="Plays the difference between the repaired signal and the one that went in: what the repair invented, and silence everywhere it invented nothing. A way to hear exactly how much of the sound is not the recording. For checking, not for listening."
+                                   IsVisible="{Binding IsRepairing}">
+                <ToggleSwitch IsChecked="{Binding OutputDifference}" OnContent="" OffContent="" />
+              </controls:SettingRow>
 
               <Border Classes="divider" Margin="0,10" />
               <controls:SettingRow Title="Peak limiter" Description="{Binding LimiterDescription}">

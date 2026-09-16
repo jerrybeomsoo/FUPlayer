@@ -1,4 +1,4 @@
-namespace FUPlayer.Core.Dsp.Restoration;
+﻿namespace FUPlayer.Core.Dsp.Restoration;
 
 /// <summary>
 /// Where trained models are kept.
@@ -136,22 +136,67 @@ public static class ModelLibrary
     /// <summary>Every network in any of the search folders, newest first.</summary>
     public static IReadOnlyList<string> ListNetworks() => [.. Files("*" + NeuralExtension)];
 
-    public static string? NewestNetwork() => ListNetworks().FirstOrDefault();
+    /// <summary>
+    /// Where the two kinds of network part company, in hertz.
+    ///
+    /// Both are the same file format and the same arithmetic; what differs is the band they were
+    /// fitted over. A codec repair stops at the source's own Nyquist rate, around 22 kHz, because
+    /// that is where a coded 44.1 kHz recording ends. One fitted to invent the band above that rate
+    /// runs to 48 kHz. Handing either to the other's job produces confident nonsense, so they are
+    /// told apart by their layout rather than by their filename.
+    /// </summary>
+    public const double ExtensionHighHz = 30_000.0;
+
+    /// <summary>True when a network describes bands above a 44.1 kHz recording's Nyquist rate.</summary>
+    public static bool IsExtension(NeuralRepairModel model) => model.HighHz > ExtensionHighHz;
+
+    /// <summary>The newest network of one kind or the other, or null when there is none.</summary>
+    public static string? NewestNetwork(bool extension)
+    {
+        foreach (string file in ListNetworks())
+        {
+            try
+            {
+                if (IsExtension(NeuralRepairModel.Load(file)) == extension)
+                {
+                    return file;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException
+                or UnauthorizedAccessException or System.Text.Json.JsonException or FormatException)
+            {
+                // Unreadable: the next one may be fine.
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>Loads a network, or returns null with the reason when it cannot be used.</summary>
-    public static NeuralRepairModel? TryLoadNetwork(string? path, out string? failure)
+    public static NeuralRepairModel? TryLoadNetwork(string? path, out string? failure, bool extension = false)
     {
         failure = null;
-        path ??= NewestNetwork();
+        path ??= NewestNetwork(extension);
         if (path is null)
         {
-            failure = "No network is installed.";
+            failure = extension
+                ? "No network fitted above 30 kHz is installed."
+                : "No network is installed.";
             return null;
         }
 
         try
         {
-            return NeuralRepairModel.Load(path);
+            NeuralRepairModel model = NeuralRepairModel.Load(path);
+            if (IsExtension(model) != extension)
+            {
+                failure = IsExtension(model)
+                    ? $"{Path.GetFileName(path)} describes bands to {model.HighHz / 1000.0:0.#} kHz; it is a model of what sits above a recording's own band, not of what a codec removed."
+                    : $"{Path.GetFileName(path)} stops at {model.HighHz / 1000.0:0.#} kHz; it has nothing to say about the band above that.";
+                return null;
+            }
+
+            return model;
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException
             or UnauthorizedAccessException or System.Text.Json.JsonException or FormatException)
@@ -171,7 +216,12 @@ public static class ModelLibrary
     public static string DescribeInstalled()
     {
         // A network does both jobs and is preferred when one is installed.
-        string? network = NewestNetwork();
+        string? network = NewestNetwork(extension: false);
+        string? above = NewestNetwork(extension: true);
+        string extra = above is null
+            ? string.Empty
+            : $" A second network, {Path.GetFileName(above)}, covers the band above a recording's own Nyquist rate.";
+
         if (network is not null)
         {
             NeuralRepairModel? trained = TryLoadNetwork(network, out string? broken);
@@ -186,7 +236,8 @@ public static class ModelLibrary
 
             return $"Using {Path.GetFileName(network)}: {shape}, fitted to {trained.FramesSeen:N0} frames of coded music"
                 + (trained.TrainedOn is null ? string.Empty : $" from {trained.TrainedOn}")
-                + $". It sets both the rebuilt levels and the correction below the cutoff. Loaded from {network}";
+                + $". It sets both the rebuilt levels and the correction below the cutoff. Loaded from {network}"
+                + extra;
         }
 
         string? path = Newest();

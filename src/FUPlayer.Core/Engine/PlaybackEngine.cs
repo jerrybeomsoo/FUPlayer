@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Threading.Channels;
 using FUPlayer.Core.Audio;
@@ -963,6 +963,10 @@ public sealed class PlaybackEngine : IDisposable
         || a.ArtifactStrength != b.ArtifactStrength
         || a.RebuildAmountDb != b.RebuildAmountDb
         || a.NetworkAmount != b.NetworkAmount
+        || a.OutputDifference != b.OutputDifference
+        || a.RebuildUltrasonics != b.RebuildUltrasonics
+        || a.UltrasonicTrimDb != b.UltrasonicTrimDb
+        || a.UltrasonicPath != b.UltrasonicPath
         || a.ManualCutoffHz != b.ManualCutoffHz
         || a.CeilingHz != b.CeilingHz
         || a.ModelPath != b.ModelPath

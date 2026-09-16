@@ -33,8 +33,20 @@ public sealed class NeuralRepairModel
 {
     public const int CurrentVersion = 1;
 
-    /// <summary>Gains are held inside this range, in decibels, at training and at playback.</summary>
-    public const float MinGainDb = -12.0f;
+    /// <summary>
+    /// Gains are held inside this range, in decibels, at training and at playback.
+    ///
+    /// The floor was -12 dB and that was not enough to say what the top of the band needs. A 44.1 kHz
+    /// master carries almost nothing in its last kilohertz: measured across eight tracks, 21 to 22 kHz
+    /// sits at -48.7 dB while the patch, which copies an octave down, puts -6 dB there. The honest
+    /// answer is about -25 dB and the model could only ask for -12, so it asked for -12, was trained
+    /// towards -12, and left the band 21 dB too loud. The targets were clamped in the training set as
+    /// well, so the error was not something more training could reach.
+    ///
+    /// A floor deep enough to turn a patch off is what that band needs, and nothing below the cutoff
+    /// ever asks for more than a few decibels either way.
+    /// </summary>
+    public const float MinGainDb = -36.0f;
     public const float MaxGainDb = 30.0f;
 
     private readonly float[][] _weights;

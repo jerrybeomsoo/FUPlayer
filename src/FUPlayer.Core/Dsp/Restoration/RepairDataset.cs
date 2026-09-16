@@ -1,4 +1,4 @@
-using FUPlayer.Core.Dsp.Numerics;
+﻿using FUPlayer.Core.Dsp.Numerics;
 
 namespace FUPlayer.Core.Dsp.Restoration;
 
@@ -12,16 +12,22 @@ namespace FUPlayer.Core.Dsp.Restoration;
 /// </summary>
 public sealed class RepairFrameBuilder
 {
-    /// <summary>Transform size, matching the one the player repairs with.</summary>
+    /// <summary>
+    /// Transform size at 44.1 kHz, and the reference the size at any other rate is worked out from.
+    ///
+    /// The window has to span the same stretch of time whatever the rate, or the band levels the
+    /// model is fitted to are not the band levels it is shown at playback. At 96 kHz that is 4,096
+    /// points, which is what <see cref="NeuralRepair.FrameSizeFor"/> answers and what this uses.
+    /// </summary>
     public const int FftSize = 2048;
 
     public const int Hop = FftSize / 4;
 
-    private readonly RealFftPlan _plan = new(FftSize);
-    private readonly double[] _window = new double[FftSize];
-    private readonly double[] _frame = new double[FftSize];
-    private readonly double[] _re = new double[FftSize];
-    private readonly double[] _im = new double[FftSize];
+    private readonly RealFftPlan _plan;
+    private readonly double[] _window;
+    private readonly double[] _frame;
+    private readonly double[] _re;
+    private readonly double[] _im;
     private readonly double[] _power;
     private readonly float[] _original;
 
@@ -30,16 +36,29 @@ public sealed class RepairFrameBuilder
         Layout = layout;
         Context = context;
         SampleRate = sampleRate;
-        BinHz = (double)sampleRate / FftSize;
+        Size = NeuralRepair.FrameSizeFor(sampleRate);
+        HopSize = Size / 4;
+        BinHz = (double)sampleRate / Size;
 
+        _plan = new RealFftPlan(Size);
+        _window = new double[Size];
+        _frame = new double[Size];
+        _re = new double[Size];
+        _im = new double[Size];
         _power = new double[_plan.Bins];
         _original = new float[layout.Count];
 
-        for (int i = 0; i < FftSize; i++)
+        for (int i = 0; i < Size; i++)
         {
-            _window[i] = 0.5 - (0.5 * Math.Cos(2.0 * Math.PI * i / FftSize));
+            _window[i] = 0.5 - (0.5 * Math.Cos(2.0 * Math.PI * i / Size));
         }
     }
+
+    /// <summary>Transform size at this rate, which is 2,048 at 44.1 kHz and doubles with the rate.</summary>
+    public int Size { get; }
+
+    /// <summary>A quarter of <see cref="Size"/>.</summary>
+    public int HopSize { get; }
 
     public BandLayout Layout { get; }
 
@@ -59,16 +78,19 @@ public sealed class RepairFrameBuilder
     /// </summary>
     public double Describe(
         ReadOnlySpan<double> coded, ReadOnlySpan<double> original, int start, double cutoffHz, double ceilingHz,
-        long frameIndex, Span<float> codedLevels, Span<float> gainsDb, double transitionHz = 0.0)
+        long frameIndex, Span<float> codedLevels, Span<float> gainsDb)
     {
-        // The patch starts where the encoder's roll-off starts, not where it ends, and the player does
-        // the same. These two have to agree exactly: the network is asked how far a patched spectrum is
-        // from the original, so a patch made differently at playback is a question it was never asked.
-        double patchFromHz = transitionHz > 0.0 ? Math.Min(transitionHz, cutoffHz) : cutoffHz;
-        int edge = (int)Math.Ceiling(patchFromHz / BinHz) + 1;
+        // The patch starts at the cutoff, and the player does the same. These two have to agree
+        // exactly: the network is asked how far a patched spectrum is from the original, so a patch
+        // made differently at playback is a question it was never asked.
+        //
+        // Pass the Nyquist rate as the cutoff for material the encoder did not band-limit and no
+        // patch is made, which is the case for AAC at 256 kbit/s and above. The gains are still worth
+        // having there and used to be thrown away.
+        int edge = (int)Math.Ceiling(cutoffHz / BinHz) + 1;
         int ceiling = Math.Min(_plan.Bins - 1, (int)(ceilingHz / BinHz));
 
-        for (int i = 0; i < FftSize; i++)
+        for (int i = 0; i < Size; i++)
         {
             _frame[i] = coded[start + i] * _window[i];
         }
@@ -78,7 +100,7 @@ public sealed class RepairFrameBuilder
         Power();
         double level = Layout.Levels(_power, BinHz, codedLevels);
 
-        for (int i = 0; i < FftSize; i++)
+        for (int i = 0; i < Size; i++)
         {
             _frame[i] = original[start + i] * _window[i];
         }

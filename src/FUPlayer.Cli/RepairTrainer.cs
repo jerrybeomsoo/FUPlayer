@@ -167,6 +167,8 @@ internal static class RepairTrainer
             note ?? $"{reader.Groups.Count} releases",
             reader.Count, best);
 
+        PerBand(model, reader, heldSpans, curve, batch);
+
         string path = Path.Combine(ModelLibrary.Directory, output + ModelLibrary.NeuralExtension);
         model.Save(path);
 
@@ -175,6 +177,102 @@ internal static class RepairTrainer
             + $"{baseline:F3} for doing nothing, {100.0 * (1.0 - (best / baseline)):F1}% better");
         Console.WriteLine($"  trained in {clock.Elapsed.TotalMinutes:F1} min");
         return 0;
+    }
+
+    /// <summary>
+    /// What the model is worth band by band, on the frames it was not trained on.
+    ///
+    /// One number for the whole spectrum is how a model gets chosen badly. Ninety-six bands are
+    /// averaged and about eight of them sit where anything happens, so a model can improve the loss
+    /// by a third while leaving the top of the band exactly as wrong as it found it, and nothing in
+    /// the headline says so. This is the same held-out error, split by frequency.
+    /// </summary>
+    private static void PerBand(
+        NeuralRepairModel model, RepairDataset.Reader reader, List<(long Start, long End)> spans, float[] curve, int batch)
+    {
+        int bands = reader.Bands;
+        var layout = reader.Layout;
+        float[] inputs = new float[batch * reader.InputSize];
+        float[] targets = new float[batch * bands];
+        float[] gains = new float[bands];
+
+        double[] nothing = new double[bands];
+        double[] constant = new double[bands];
+        double[] network = new double[bands];
+        long counted = 0;
+
+        foreach ((long start, long end) in spans)
+        {
+            for (long at = start; at < end; at += batch)
+            {
+                int got = reader.Read(at, (int)Math.Min(batch, end - at), inputs, targets);
+                if (got == 0)
+                {
+                    break;
+                }
+
+                for (int sample = 0; sample < got; sample++)
+                {
+                    model.Predict(inputs.AsSpan(sample * reader.InputSize, reader.InputSize), gains);
+                    for (int band = 0; band < bands; band++)
+                    {
+                        double want = targets[(sample * bands) + band];
+                        nothing[band] += want * want;
+                        constant[band] += (want - curve[band]) * (want - curve[band]);
+                        network[band] += (want - gains[band]) * (want - gains[band]);
+                    }
+                }
+
+                counted += got;
+            }
+        }
+
+        if (counted == 0)
+        {
+            return;
+        }
+
+        (string Label, double Low, double High)[] regions =
+        [
+            ("below 10 kHz", 0.0, 10_000.0),
+            ("10 to 15 kHz", 10_000.0, 15_000.0),
+            ("15 to 18 kHz", 15_000.0, 18_000.0),
+            ("18 to 20 kHz", 18_000.0, 20_000.0),
+            ("above 20 kHz", 20_000.0, double.MaxValue),
+        ];
+
+        Console.WriteLine();
+        Console.WriteLine($"Held-out error by region, rms decibels:  {"bands",5} {"nothing",8} {"curve",8} {"network",8}");
+        foreach ((string label, double low, double high) in regions)
+        {
+            double a = 0.0;
+            double b = 0.0;
+            double c = 0.0;
+            int inRegion = 0;
+
+            for (int band = 0; band < bands; band++)
+            {
+                double centre = layout.CentreHz(band);
+                if (centre < low || centre >= high)
+                {
+                    continue;
+                }
+
+                a += nothing[band];
+                b += constant[band];
+                c += network[band];
+                inRegion++;
+            }
+
+            if (inRegion == 0)
+            {
+                continue;
+            }
+
+            double scale = counted * (double)inRegion;
+            Console.WriteLine($"  {label,-38} {inRegion,5} {Math.Sqrt(a / scale),8:F2} "
+                + $"{Math.Sqrt(b / scale),8:F2} {Math.Sqrt(c / scale),8:F2}");
+        }
     }
 
     /// <summary>

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -182,10 +182,23 @@ public sealed partial class DspStudioViewModel : ObservableObject
     private bool _predict;
 
     [ObservableProperty]
+    private bool _outputDifference;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsRepairing))]
+    private bool _rebuildUltrasonics;
+
+    [ObservableProperty]
+    private Choice? _selectedUltrasonicTrim;
+
+    [ObservableProperty]
     private Choice? _selectedArtifactStrength;
 
     [ObservableProperty]
     private Choice? _selectedRebuildAmount;
+
+    [ObservableProperty]
+    private Choice? _selectedPredictionStrength;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(LimiterDescription))]
@@ -452,6 +465,23 @@ public sealed partial class DspStudioViewModel : ObservableObject
     ];
 
     /// <summary>
+    /// How far to take the model at its word.
+    ///
+    /// The model was fitted to a measured distance between a coded spectrum and the original it came
+    /// from, so "Measured" is the only setting that is an answer to anything. The rest are here
+    /// because on a high bit rate that distance is genuinely small, and hearing something happen is
+    /// a reasonable thing to want even when the honest answer is that little was lost.
+    /// </summary>
+    public IReadOnlyList<Choice> PredictionStrengthChoices { get; } =
+    [
+        new("Half", 0.5, "Half of what the model asks for. For when a correction sounds overdone."),
+        new("Measured", 1.0, "What the model was fitted to say. The only setting that answers a measurement."),
+        new("Firm", 1.5, "Half again. Past the original, in the direction the original lay."),
+        new("Strong", 2.0, "Twice the correction. Audible on high bit rates, and no longer a repair."),
+        new("Extreme", 3.0, "Three times. Exaggeration; expect a lifted top end that was never recorded."),
+    ];
+
+    /// <summary>
     /// What the prediction has to work with, or why it has nothing.
     ///
     /// Read from the models folder every time it is asked for, and asked for again whenever a switch
@@ -478,6 +508,22 @@ public sealed partial class DspStudioViewModel : ObservableObject
 
     /// <summary>True while anything above the cutoff is being synthesised.</summary>
     public bool IsRebuilding => RebuildHarmonics;
+
+    /// <summary>True while any of the repair stages is switched on, which is when a difference exists.</summary>
+    public bool IsRepairing => ReduceArtifacts || RebuildHarmonics || RebuildUltrasonics;
+
+    /// <summary>
+    /// How loud the invented band above the source's own Nyquist rate should be.
+    ///
+    /// Trimmed well down by default. Nobody hears 30 kHz; an amplifier asked to reproduce it can
+    /// make something audible of it, and that something is not in the recording either.
+    /// </summary>
+    public IReadOnlyList<Choice> UltrasonicTrimChoices { get; } =
+    [
+        new("Faint", -12.0, "12 dB under what the model asks for. Barely there, which is the safest way to have it at all."),
+        new("Quiet", -6.0, "6 dB under. The default."),
+        new("Measured", 0.0, "Exactly the level real recordings of this kind carry up there."),
+    ];
 
     public IReadOnlyList<Choice> ConvolutionLayoutChoices { get; } =
     [
@@ -663,6 +709,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
     partial void OnReduceArtifactsChanged(bool value)
     {
         Update(value, (bool v) => Settings.Restoration.ReduceArtifacts = v);
+        OnPropertyChanged(nameof(IsRepairing));
         OnPropertyChanged(nameof(ModelStatus));
     }
 
@@ -670,6 +717,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
     {
         Update(value, (bool v) => Settings.Restoration.RebuildHarmonics = v);
         OnPropertyChanged(nameof(IsRebuilding));
+        OnPropertyChanged(nameof(IsRepairing));
         OnPropertyChanged(nameof(ModelStatus));
     }
 
@@ -684,6 +732,21 @@ public sealed partial class DspStudioViewModel : ObservableObject
 
     partial void OnSelectedRebuildAmountChanged(Choice? value) =>
         Update(value, (double amountDb) => Settings.Restoration.RebuildAmountDb = amountDb);
+
+    partial void OnSelectedPredictionStrengthChanged(Choice? value) =>
+        Update(value, (double amount) => Settings.Restoration.NetworkAmount = amount);
+
+    partial void OnOutputDifferenceChanged(bool value) =>
+        Update(value, (bool v) => Settings.Restoration.OutputDifference = v);
+
+    partial void OnRebuildUltrasonicsChanged(bool value)
+    {
+        Update(value, (bool v) => Settings.Restoration.RebuildUltrasonics = v);
+        OnPropertyChanged(nameof(ModelStatus));
+    }
+
+    partial void OnSelectedUltrasonicTrimChanged(Choice? value) =>
+        Update(value, (double trimDb) => Settings.Restoration.UltrasonicTrimDb = trimDb);
 
     partial void OnLimiterChanged(bool value) => Update(value, (bool v) => Settings.Processing.Limiter = v);
 
@@ -769,10 +832,16 @@ public sealed partial class DspStudioViewModel : ObservableObject
             ReduceArtifacts = s.Restoration.ReduceArtifacts;
             RebuildHarmonics = s.Restoration.RebuildHarmonics;
             Predict = s.Restoration.Predict;
+            OutputDifference = s.Restoration.OutputDifference;
+            RebuildUltrasonics = s.Restoration.RebuildUltrasonics;
+            SelectedUltrasonicTrim =
+                Choice.Find(UltrasonicTrimChoices, s.Restoration.UltrasonicTrimDb) ?? UltrasonicTrimChoices[1];
             SelectedArtifactStrength =
                 Choice.Find(ArtifactStrengthChoices, s.Restoration.ArtifactStrength) ?? ArtifactStrengthChoices[1];
             SelectedRebuildAmount =
                 Choice.Find(RebuildAmountChoices, s.Restoration.RebuildAmountDb) ?? RebuildAmountChoices[1];
+            SelectedPredictionStrength =
+                Choice.Find(PredictionStrengthChoices, s.Restoration.NetworkAmount) ?? PredictionStrengthChoices[1];
             Limiter = s.Processing.Limiter;
             ApodizationDetection = s.Processing.ApodizationDetection;
         }

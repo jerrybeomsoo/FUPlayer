@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using FUPlayer.Core.Dsp.Analysis;
 using FUPlayer.Core.Dsp.Dsd;
 using FUPlayer.Core.Dsp.Modulation;
@@ -282,14 +282,46 @@ public sealed class RestorationSettings
     /// <summary>Network file, or null for the newest one in the models folder.</summary>
     public string? NetworkPath { get; set; }
 
-    /// <summary>How much of the network's correction to apply, from 0 to 1.</summary>
+    /// <summary>
+    /// How much of the network's correction to apply. 1 is what it was fitted to say; up to 3
+    /// exaggerates it and is no longer an answer to the measurement.
+    /// </summary>
     public double NetworkAmount { get; set; } = 1.0;
+
+    /// <summary>
+    /// Output what the repair added instead of the repaired signal: the difference between the two,
+    /// which is silence wherever the repair decided to do nothing.
+    ///
+    /// A monitoring mode, not a listening one. It is the only way to hear exactly how much of what
+    /// comes out was invented, and the honest answer at a high bit rate is "very little".
+    /// </summary>
+    public bool OutputDifference { get; set; }
 
     /// <summary>Where the rebuilt band starts. 0 measures it from the signal.</summary>
     public double ManualCutoffHz { get; set; }
 
     /// <summary>Nothing is rebuilt above this.</summary>
     public double CeilingHz { get; set; } = 22_000.0;
+
+    /// <summary>
+    /// Synthesise a band above the source's own Nyquist rate when the output runs faster than the
+    /// file does: 22 to 40 kHz for a CD-rate recording played at 96 kHz or above.
+    ///
+    /// This is invention and not recovery, and the distinction is not pedantry. A 44.1 kHz recording
+    /// never had that band: the converter that made it removed everything up there before the first
+    /// sample existed. What a model fitted to real 96 kHz recordings can say is what usually sits
+    /// there in music of this kind, which is between 30 and 60 dB under the midband and above the
+    /// range of human hearing. Nobody will hear it directly. An amplifier or a tweeter asked to
+    /// reproduce it may make something audible of it, which is the argument against, and is why this
+    /// is off by default and trimmed well down when it is on.
+    /// </summary>
+    public bool RebuildUltrasonics { get; set; }
+
+    /// <summary>Network for the band above the source's Nyquist rate, or null for the newest one.</summary>
+    public string? UltrasonicPath { get; set; }
+
+    /// <summary>Trim on that band, in decibels, on top of what the model asks for.</summary>
+    public double UltrasonicTrimDb { get; set; } = -6.0;
 }
 
 public sealed class ProcessingSettings

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using FUPlayer.Core.Dsp.Acceleration;
@@ -40,9 +40,9 @@ internal sealed class DspPipeline : IDisposable
     /// counter and eventually walks off the end of its buffer.
     /// </summary>
     private int _detectorChannel = -1;
-    private double _transitionHz;
     private HighBandModel? _model;
     private NeuralRepairModel? _network;
+    private NeuralRepairModel? _extension;
     private double _cutoffHz;
     private BandwidthEstimate _bandwidth;
     private readonly byte[][] _dsdOutputs;
@@ -185,6 +185,15 @@ internal sealed class DspPipeline : IDisposable
             _network = restore.Predict ? ModelLibrary.TryLoadNetwork(restore.NetworkPath, out _) : null;
         }
 
+        // Independent of the codec repair: it answers a different question, about a band no codec
+        // ever touched, and it needs a conversion that has somewhere to put the answer.
+        bool canExtend = restore.RebuildUltrasonics && !plan.PassThrough && plan.ProcessingRate > plan.ConversionRate;
+        if (canExtend)
+        {
+            _restoration ??= restore;
+            _extension = ModelLibrary.TryLoadNetwork(restore.UltrasonicPath, out _, extension: true);
+        }
+
         _chains = new ChannelChain[_outputChannels];
         for (int c = 0; c < _outputChannels; c++)
         {
@@ -203,6 +212,21 @@ internal sealed class DspPipeline : IDisposable
             }
 
             chain.Conversion = new double[conversionCapacity];
+
+            if (_extension is not null)
+            {
+                // Rebuild only: the bands below the source's own Nyquist rate are the recording, and
+                // nothing here knows better than the recording.
+                chain.Extension = new NeuralRepair(_extension, plan.ProcessingRate)
+                {
+                    CutoffHz = plan.ConversionRate / 2.0,
+                    CeilingHz = Math.Min(_extension.HighHz, plan.ProcessingRate / 2.0 * 0.95),
+                    Rebuild = true,
+                    Reduce = false,
+                    Amount = restore.NetworkAmount,
+                    AmountDb = restore.UltrasonicTrimDb,
+                };
+            }
 
             if (canRestore)
             {
@@ -252,6 +276,27 @@ internal sealed class DspPipeline : IDisposable
             {
                 chain.Ultrasonic = ultrasonic.CreateState();
                 chain.Clean = new double[conversionCapacity];
+            }
+
+            // Difference monitoring: a copy of the signal as it went into the repair, delayed by
+            // exactly what the repair delays it by, so subtracting the two afterwards leaves what
+            // the repair added and nothing else.
+            int repairLatency = chain.Network is not null
+                ? chain.Network.Latency + chain.Network.ExtraLatency
+                : (chain.Reducer?.Latency ?? 0) + (chain.Rebuilder?.Latency ?? 0);
+
+            if ((canRestore || _extension is not null) && restore.OutputDifference && repairLatency > 0)
+            {
+                chain.Dry = new double[conversionCapacity];
+                chain.DryDelay = new DelayLine(repairLatency);
+
+                // The repair's first few frames are its windows filling, and what comes out of them
+                // is silence rather than a repair. Subtracting a real signal from that silence makes
+                // the first eighty milliseconds of difference monitoring a burst of the music at full
+                // level, which is louder than everything the repair goes on to add: measured on a
+                // 128 kbit/s MP3, it put the difference at -29 dB where the repair itself is -46.
+                chain.DryWarmupStart = repairLatency + (chain.Network?.FftSize ?? chain.Rebuilder?.FftSize ?? 0);
+                chain.DryWarmup = chain.DryWarmupStart;
             }
 
             if (detectApodization && meters)
@@ -384,15 +429,23 @@ internal sealed class DspPipeline : IDisposable
     /// <summary>
     /// True when the repair is writing to the signal, rather than merely switched on.
     ///
-    /// A network can be loaded, a switch can be on, and nothing can be happening: with a full-band
-    /// verdict the cutoff is zero and every repair stage returns without touching a sample. Reporting
-    /// "repaired by a trained network" on that is a claim to work that was not done, and it is what a
-    /// listener sees when they play a 256 kbit/s stream that has no band missing to rebuild.
+    /// A network can be loaded, a switch can be on, and nothing can be happening. Until the detector
+    /// has heard enough there is no cutoff to work from, and on full-band material only the artefact
+    /// half of the answer applies: there is no band missing, so rebuilding alone writes nothing.
+    /// Reporting "repaired by a trained network" in either case is a claim to work that was not done.
     /// </summary>
     public bool IsRepairing =>
         _network is not null
         && _cutoffHz > 0.0
-        && (_restoration?.RebuildHarmonics == true || _restoration?.ReduceArtifacts == true);
+        && (_restoration?.ReduceArtifacts == true || (_restoration?.RebuildHarmonics == true && HasBandToRebuild));
+
+    /// <summary>
+    /// True when something was taken off the top. A cutoff given by hand is taken at its word; a
+    /// measured one counts only when the detector found an edge rather than a spectrum running to
+    /// the end of the band.
+    /// </summary>
+    private bool HasBandToRebuild =>
+        _detector is null ? _cutoffHz > 0.0 : _bandwidth.Verdict == BandwidthVerdict.BandLimited;
 
     private static HighBandModel? LoadModel(RestorationSettings restore) =>
         restore.Predict ? ModelLibrary.TryLoad(restore.ModelPath, out _) : null;
@@ -411,13 +464,13 @@ internal sealed class DspPipeline : IDisposable
         _bandwidth = _detector.Estimate();
         _cutoffHz = _bandwidth.Verdict switch
         {
-            // Nothing was cut, so there is nothing to rebuild.
-            BandwidthVerdict.FullBand => 0.0,
+            // Nothing was cut, so there is nothing to rebuild. The network still has the bands that
+            // survived to correct, and saying Nyquist rather than zero is what lets it: zero means
+            // "not measured yet" and switches the whole stage off.
+            BandwidthVerdict.FullBand => _plan.ConversionRate / 2.0,
             BandwidthVerdict.BandLimited => _bandwidth.CutoffHz,
             _ => _cutoffHz,
         };
-
-        _transitionHz = _bandwidth.Verdict == BandwidthVerdict.BandLimited ? _bandwidth.TransitionHz : 0.0;
     }
 
     public long LimiterEvents => _chains.Sum(chain => chain.Limiter?.Events ?? 0);
@@ -651,6 +704,12 @@ internal sealed class DspPipeline : IDisposable
             MeterSource(source, signal);
         }
 
+        if (chain.DryDelay is not null)
+        {
+            signal.CopyTo(chain.Dry.AsSpan(0, signal.Length));
+            chain.DryDelay.Process(chain.Dry.AsSpan(0, signal.Length));
+        }
+
         if (chain.Network is not null)
         {
             if (c == _detectorChannel && _detector is not null)
@@ -659,7 +718,6 @@ internal sealed class DspPipeline : IDisposable
             }
 
             chain.Network.CutoffHz = _cutoffHz;
-            chain.Network.TransitionHz = _transitionHz;
             chain.Network.Process(signal);
         }
         else if (chain.Reducer is not null || chain.Rebuilder is not null)
@@ -676,8 +734,20 @@ internal sealed class DspPipeline : IDisposable
             if (chain.Rebuilder is not null)
             {
                 chain.Rebuilder.CutoffHz = _cutoffHz;
-                chain.Rebuilder.TransitionHz = _transitionHz;
                 chain.Rebuilder.Process(signal);
+            }
+        }
+
+        if (chain.DryDelay is not null)
+        {
+            // What is left is the repair's own output: silence wherever it decided to do nothing.
+            for (int i = 0; i < signal.Length; i++)
+            {
+                signal[i] = chain.DryWarmup > 0 ? 0.0 : signal[i] - chain.Dry[i];
+                if (chain.DryWarmup > 0)
+                {
+                    chain.DryWarmup--;
+                }
             }
         }
 
@@ -721,6 +791,12 @@ internal sealed class DspPipeline : IDisposable
     {
         int count = chain.Resampler!.Process(signal, chain.Processing);
         Span<double> x = chain.Processing.AsSpan(0, count);
+
+        // Above the source's own Nyquist rate there is nothing, because nothing was recorded there.
+        // This runs after the conversion for that reason: it is the only place in the chain where
+        // those bins exist at all.
+        chain.Extension?.Process(x);
+
         chain.Volume.Apply(x, volume, _rampSamples);
         chain.Limiter?.Process(x);
         if (chain.TrimGain != 1.0)
@@ -838,11 +914,16 @@ internal sealed class DspPipeline : IDisposable
         public ArtifactReducer? Reducer;
         public HarmonicRebuilder? Rebuilder;
         public NeuralRepair? Network;
+        public NeuralRepair? Extension;
         public ApodizationDetector? Apodization;
         public ResamplerChainState? Resampler;
         public readonly SmoothedGain Volume = new(1.0);
         public SoftLimiter? Limiter;
         public double TrimGain = 1.0;
+        public double[] Dry = [];
+        public DelayLine? DryDelay;
+        public int DryWarmup;
+        public int DryWarmupStart;
         public DelayLine? Delay;
         public ByteDelayLine? ByteDelay;
         public PcmQuantizer? Quantizer;
@@ -861,10 +942,16 @@ internal sealed class DspPipeline : IDisposable
         {
             DsdConverter?.Reset();
             Ultrasonic?.Reset();
+            Reducer?.Reset();
+            Rebuilder?.Reset();
+            Network?.Reset();
+            Extension?.Reset();
             Apodization?.Reset();
             Resampler?.Reset();
             Volume.Jump(volume);
             Limiter?.Reset();
+            DryDelay?.Reset();
+            DryWarmup = DryWarmupStart;
             Delay?.Reset();
             ByteDelay?.Reset();
             Quantizer?.Reset();

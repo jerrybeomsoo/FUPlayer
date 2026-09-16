@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using FUPlayer.Audio.Windows;
 using FUPlayer.Core.Capture;
@@ -90,6 +90,8 @@ internal static class Program
                       [--out <wav>]          Keep the coded copy, to play or render through the repair
               dataset <files…> --out <file>  Build training pairs by coding lossless music
                       [--bands <n>] [--low <Hz>] [--high <Hz>] [--stride <n>] [--seconds <n>]
+              dataset --narrow-to <Hz>       Build high-resolution pairs instead: each file with
+                                           everything above half that rate removed, against itself
               dataset --merge <sets…> --out <file>  Join sets built the same way, for parallel runs
               evaluate <files…>              Measure how much closer the repair gets to the original
               train-repair <dataset>         Fit the repair network to a training set
@@ -118,6 +120,9 @@ internal static class Program
               --repair-artifacts           Damp the warbling a low bit rate leaves behind
               --repair-rebuild             Synthesise a band above the codec's cutoff
               --repair-predict             Let a trained network set the levels for both
+              --repair-difference          Output what the repair added instead of the repaired signal
+              --rebuild-ultrasonics        Synthesise the band above the source's own Nyquist rate
+              --network <file>             Which model to use, when more than one is installed
               --convolution-layered        Divide the taps between short blocks for the early ones and
                                            longer blocks behind them, instead of one length for every tap.
                                            Far less arithmetic at a short block, and no graphics device
@@ -500,7 +505,13 @@ internal static class Program
         // its bands below 10 kHz, where a codec changes nothing, and leaves three above 15 kHz, where
         // the whole of the rebuild happens. Raising the bottom moves them to where the work is.
         double lowHz = Math.Clamp(options.GetDouble("low") ?? 200.0, 20.0, 5_000.0);
-        double highHz = Math.Clamp(options.GetDouble("high") ?? 22_050.0, lowHz * 4.0, 24_000.0);
+        // Up to 96 kHz, because the high-resolution set describes bands above the source's Nyquist
+        // rate and a 192 kHz recording has something to say as far as 96.
+        double highHz = Math.Clamp(options.GetDouble("high") ?? 22_050.0, lowHz * 4.0, 96_000.0);
+
+        // Narrowing instead of coding: the high-resolution set, where the pair is a fast recording
+        // and the same recording with everything above half this rate removed.
+        int narrowTo = Math.Clamp(options.GetInt("narrow-to") ?? 0, 0, 96_000);
 
         int[] rates = options.Get("rates") is string list
             ? [.. list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -513,10 +524,12 @@ internal static class Program
             throw new ArgumentException("No usable bit rates were given.");
         }
 
-        Console.WriteLine($"Coding {files.Count} files at {string.Join(", ", rates.Select(r => $"{r * 8 / 1000} kbit/s"))}, "
-            + $"up to {seconds / 60.0:0.#} min each.");
+        Console.WriteLine(narrowTo > 0
+            ? $"Narrowing {files.Count} files to {narrowTo / 1000.0:0.#} kHz, up to {seconds / 60.0:0.#} min each."
+            : $"Coding {files.Count} files at {string.Join(", ", rates.Select(r => $"{r * 8 / 1000} kbit/s"))}, "
+                + $"up to {seconds / 60.0:0.#} min each.");
 
-        return DatasetBuilder.Run(files, output, rates, seconds, bands, context, stride, lowHz, highHz);
+        return DatasetBuilder.Run(files, output, rates, seconds, bands, context, stride, lowHz, highHz, narrowTo);
     }
 
     /// <summary>
@@ -695,9 +708,11 @@ internal static class Program
 
         double seconds = Math.Clamp(options.GetInt("seconds") ?? 60, 2, 3600);
 
-        // "FILLS FROM" is where a rebuild would start, which is the beginning of the encoder's
-        // roll-off rather than its end. On a brick wall the two are the same frequency.
-        Console.WriteLine($"{"VERDICT",-14} {"CUTOFF",9} {"FILLS FROM",11} {"EDGE",7}  FILE");
+        // "ROLL-OFF" is where the fall begins and "CUTOFF" is where it ends. A rebuild starts at the
+        // cutoff: filling from the start of the roll-off overwrites music that is still there, and
+        // measured against the lossless masters that costs several decibels. On a brick wall the two
+        // are the same frequency anyway.
+        Console.WriteLine($"{"VERDICT",-14} {"CUTOFF",9} {"ROLL-OFF",11} {"EDGE",7}  FILE");
         foreach (string file in files)
         {
             IAudioDecoder decoder;
@@ -1155,7 +1170,8 @@ internal static class Program
         {
             "dop", "pass-through", "remove-ultrasonics", "no-limiter",
             "gpu", "gpu-fast", "gpu-force", "gpu-hold", "probe", "convolution-layered",
-            "repair-artifacts", "repair-rebuild", "repair-predict", "merge",
+            "repair-artifacts", "repair-rebuild", "repair-predict", "repair-difference",
+            "rebuild-ultrasonics", "merge",
         };
 
         public static Options Parse(IEnumerable<string> args)
@@ -1261,6 +1277,16 @@ internal static class Program
             settings.Restoration.ReduceArtifacts = Has("repair-artifacts");
             settings.Restoration.RebuildHarmonics = Has("repair-rebuild");
             settings.Restoration.Predict = Has("repair-predict");
+            settings.Restoration.OutputDifference = Has("repair-difference");
+            settings.Restoration.RebuildUltrasonics = Has("rebuild-ultrasonics");
+
+            // Which model, when there is more than one installed. Without this the newest wins, which
+            // is right for playing and useless for comparing two of them on the same music.
+            if (Get("network") is string chosen && chosen.Length > 0)
+            {
+                settings.Restoration.NetworkPath = Path.GetFullPath(chosen);
+            }
+
             settings.Processing.GpuAcceleration = Has("gpu") || Has("gpu-force");
             settings.Processing.GpuDeviceId = Get("gpu-device") ?? string.Empty;
             settings.Processing.GpuHighPrecision = !Has("gpu-fast");

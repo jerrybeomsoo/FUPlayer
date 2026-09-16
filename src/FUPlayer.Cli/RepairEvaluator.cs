@@ -37,8 +37,8 @@ internal static class RepairEvaluator
         Console.WriteLine();
         // Split at the cutoff, because filling an empty band and repairing a damaged one are not
         // the same achievement and one should not be allowed to flatter the other.
-        Console.WriteLine($"{"FILE",-26} {"kb/s",5} {"ABOVE THE CUTOFF",22}  {"BELOW THE CUTOFF",22}");
-        Console.WriteLine($"{string.Empty,-26} {string.Empty,5} {"coded",6} {"patched",7} {"network",8}  {"coded",6} {"patched",7} {"network",8}");
+        Console.WriteLine($"{"FILE",-22} {"CODEC",-16} {"ABOVE THE CUTOFF",22}  {"BELOW THE CUTOFF",22}");
+        Console.WriteLine($"{string.Empty,-22} {string.Empty,-16} {"coded",6} {"patched",7} {"network",8}  {"coded",6} {"patched",7} {"network",8}");
 
         double codedAbove = 0.0;
         double patchedAbove = 0.0;
@@ -82,9 +82,28 @@ internal static class RepairEvaluator
                     continue;
                 }
 
+                // The same encoders the training set is built from, so a number here answers a
+                // question about the material the model was fitted to rather than about one codec.
+                var passes = new List<(string Label, Func<double[][]?> Code)>();
                 foreach (int bytesPerSecond in rates)
                 {
-                    double[][]? coded = AacRoundTrip.Process(original, rate, channels, bytesPerSecond);
+                    int copy = bytesPerSecond;
+                    passes.Add(($"aac-win {copy * 8 / 1000}k", () => AacRoundTrip.Process(original, rate, channels, copy)));
+                }
+
+                foreach ((string name, string encoder, string extension, int[] kbps) in ExternalCodec.Available())
+                {
+                    foreach (int bitrate in kbps)
+                    {
+                        int copy = bitrate;
+                        passes.Add(($"{name} {copy}k",
+                            () => ExternalCodec.Code(original, rate, channels, encoder, extension, copy)));
+                    }
+                }
+
+                foreach ((string label, Func<double[][]?> code) in passes)
+                {
+                    double[][]? coded = code();
                     if (coded is null)
                     {
                         continue;
@@ -118,7 +137,7 @@ internal static class RepairEvaluator
                     measured++;
 
                     string name = Path.GetFileNameWithoutExtension(file);
-                    Console.WriteLine($"{name[..Math.Min(26, name.Length)],-26} {bytesPerSecond * 8 / 1000,5} "
+                    Console.WriteLine($"{name[..Math.Min(22, name.Length)],-22} {label,-16} "
                         + $"{ca,6:F2} {pa,7:F2} {ra,8:F2}  {cb,6:F2} {pb,7:F2} {rb,8:F2}");
                 }
             }
@@ -179,7 +198,15 @@ internal static class RepairEvaluator
 
         detector.Push(mid);
         BandwidthEstimate estimate = detector.Estimate();
-        return estimate.Verdict == BandwidthVerdict.BandLimited ? estimate.CutoffHz : 0.0;
+
+        // Nyquist, not zero, when nothing was cut: zero switches the repair off, and the point of
+        // measuring a full-band copy is to see what the gains alone are worth on it.
+        return estimate.Verdict switch
+        {
+            BandwidthVerdict.BandLimited => estimate.CutoffHz,
+            BandwidthVerdict.FullBand => rate / 2.0,
+            _ => 0.0,
+        };
     }
 
     private static double[][] Repair(
