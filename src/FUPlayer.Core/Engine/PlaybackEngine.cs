@@ -229,7 +229,6 @@ public sealed class PlaybackEngine : IDisposable
             IsTestTone = marker?.IsTestTone ?? false,
             IsCapture = marker?.IsCapture ?? false,
             Bandwidth = Describe(pipeline),
-            IsNeuralRepair = pipeline?.IsRepairing ?? false,
             Position = position,
             Duration = marker is { Length: > 0 } ? TimeSpan.FromSeconds((double)marker.Length / marker.SampleRate) : TimeSpan.Zero,
             Plan = pipeline?.Plan,
@@ -925,10 +924,10 @@ public sealed class PlaybackEngine : IDisposable
     /// Whether anything changed that the running pipeline cannot be told about, and so needs it built
     /// again.
     ///
-    /// The lossy repair belongs here and was missing from it. Those settings decide which stages the
-    /// pipeline creates, and they are read once when it is built, so toggling artefact reduction,
-    /// harmonic rebuilding or generative prediction while a track played changed the setting, saved
-    /// it, and did nothing to the sound until the next track or the next run of the program.
+    /// The lossy repair belongs here and was once missing from it. Its settings decide whether the
+    /// pipeline creates the upscaler and how, and they are read once when it is built, so switching one
+    /// while a track played changed the setting, saved it, and did nothing to the sound until the next
+    /// track or the next run of the program.
     /// </summary>
     internal static bool ProcessingOptionsChanged(PlayerSettings a, PlayerSettings b)
     {
@@ -959,24 +958,11 @@ public sealed class PlaybackEngine : IDisposable
     }
 
     internal static bool RestorationChanged(RestorationSettings a, RestorationSettings b) =>
-        a.Enabled != b.Enabled
-        || a.NeuralUpscaler != b.NeuralUpscaler
+        a.NeuralUpscaler != b.NeuralUpscaler
         || a.NeuralUpscalerPath != b.NeuralUpscalerPath
+        || a.SourceType != b.SourceType
         || a.UpscalerBandDb != b.UpscalerBandDb
-        || a.ReduceArtifacts != b.ReduceArtifacts
-        || a.RebuildHarmonics != b.RebuildHarmonics
-        || a.Predict != b.Predict
-        || a.ArtifactStrength != b.ArtifactStrength
-        || a.RebuildAmountDb != b.RebuildAmountDb
-        || a.NetworkAmount != b.NetworkAmount
-        || a.OutputDifference != b.OutputDifference
-        || a.RebuildUltrasonics != b.RebuildUltrasonics
-        || a.UltrasonicTrimDb != b.UltrasonicTrimDb
-        || a.UltrasonicPath != b.UltrasonicPath
-        || a.ManualCutoffHz != b.ManualCutoffHz
-        || a.CeilingHz != b.CeilingHz
-        || a.ModelPath != b.ModelPath
-        || a.NetworkPath != b.NetworkPath;
+        || a.OutputDelta != b.OutputDelta;
 
     /// <summary>
     /// Swaps the live pipeline and releases the old one's accelerator. Only the engine thread calls this; the
@@ -1064,7 +1050,7 @@ public sealed class PlaybackEngine : IDisposable
     }
 
     /// <summary>
-    /// Plans a decoder's stream, with the limiter forced on for a lossy source.
+    /// Plans a decoder's stream, then settles what depends on its codec.
     ///
     /// Turning the limiter off is a request to leave the signal untouched, and for a lossless file that
     /// is a coherent thing to want. A lossy decode's overs are not the signal: they are what is left
@@ -1072,11 +1058,46 @@ public sealed class PlaybackEngine : IDisposable
     /// 40 kHz on a PCM output, or push a 9th-order modulator unstable on a DSD one. The limiter does
     /// nothing below full scale, so on a file with no overs this changes nothing at all.
     /// </summary>
-    private PlaybackPlan PlanFor(IAudioDecoder decoder) => ProtectLossy(PlanFor(decoder.Format), decoder.CodecName);
+    private PlaybackPlan PlanFor(IAudioDecoder decoder) => ApplySource(PlanFor(decoder.Format), decoder.CodecName, _settings);
 
-    /// <summary>The plan with the limiter on when the codec is a lossy one, and unchanged otherwise.</summary>
-    internal static PlaybackPlan ProtectLossy(PlaybackPlan plan, string? codecName) =>
-        plan.Limiter || !LossyCodecs.IsLossy(codecName) ? plan : plan with { Limiter = true };
+    /// <summary>
+    /// The limiter on for a lossy codec; the neural upscaler told whether the source is lossy; and the upscaler
+    /// dropped for a lossless source at an output below twice its rate, where there is neither a passband to
+    /// correct nor room for the band above it.
+    /// </summary>
+    internal static PlaybackPlan ApplySource(PlaybackPlan plan, string? codecName, PlayerSettings settings)
+    {
+        bool coded = LossyCodecs.IsLossy(codecName);
+        if (!plan.Limiter && coded)
+        {
+            plan = plan with { Limiter = true };
+        }
+
+        if (plan.UpscaleRate == 0)
+        {
+            return plan;
+        }
+
+        bool lossy = settings.Restoration.SourceType switch
+        {
+            UpscalerSource.Lossy => true,
+            UpscalerSource.Lossless => false,
+            _ => coded,
+        };
+
+        if (!lossy && plan.ProcessingRate < plan.UpscaleRate)
+        {
+            return plan with
+            {
+                UpscaleRate = 0,
+                SourceIsLossy = false,
+                Limiter = settings.Processing.Limiter || coded,
+                Notes = [.. plan.Notes, $"Neural upscaler idle: lossless source, output below {AudioRates.Format(plan.UpscaleRate)}."],
+            };
+        }
+
+        return plan with { SourceIsLossy = lossy };
+    }
 
     private PlaybackPlan PlanFor(StreamFormat format)
     {

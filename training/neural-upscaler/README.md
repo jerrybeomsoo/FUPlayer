@@ -12,8 +12,8 @@ and how well the reference model did it, is in [docs/neural-upscaler.md](../../d
 - FFmpeg with `libmp3lame`, `libvorbis` and `libopus`, and ffprobe. Encoders your build lacks are
   skipped. Optionally qaac with Apple's CoreAudioToolbox, for Apple AAC copies (see `add_apple_aac.py`).
 - Python 3.11 or later, and PyTorch with torchaudio. An NVIDIA card makes it practical: the reference
-  model took about nine hours on a 4 GB Quadro M2200 that was also driving the display, a second or so
-  per adversarial step. On the processor alone expect weeks.
+  model took about fifteen hours on a 4 GB Quadro M2200 that was also driving the display, a second or
+  so per adversarial step. On the processor alone expect weeks.
 - About 60 GB of disk for a corpus of that size.
 
 ```bash
@@ -43,8 +43,14 @@ python screen_tracks.py work/tracks.csv work/corpus
 # 5. Train. Stops and resumes from work/runs/upscaler/last.pt; run the same command again
 python -m upscaler.train --manifest work/corpus/manifest-screened.csv --batch 12 --gan-batch 4 --pretrain-steps 30000 --gan-steps 24000
 
-# 6. Measure it on the songs kept out of training, codec by codec
+# 6. Measure it on the songs kept out of training: every coded copy, and lossless copies made from the
+#    masters, each read with the right flag and with the wrong one
 python -m upscaler.evaluate --manifest work/corpus/manifest-screened.csv --checkpoint work/runs/upscaler/last.pt
+python eval_tables.py work/runs/upscaler/evaluation.csv
+python eval_tables.py work/runs/upscaler/evaluation.csv --lossless
+
+# 6a. The written band 500 Hz at a time, on lossless copies made through four different filters
+python level_check.py --checkpoint work/runs/upscaler/last.pt
 
 # 7. Export, and install beside the player
 python -m upscaler.export --checkpoint work/runs/upscaler/last.pt --out work/export/neural-upscaler.onnx
@@ -84,6 +90,11 @@ coefficient, and its tests hold it to the numbers PyTorch produces.
 The floor matters more than it looks. Without it the network reads the float16 rounding of its own
 corpus above a codec's cutoff, where a clean decode in the player has nothing, and learns to rely on it.
 
+**The flag.** Every crop carries a flag, lossy or lossless, which the network adds to what each block
+reads. In the player it comes from the codec or from the Source type setting. Lossless sources need
+the network to leave their passband alone and write only above it, which a network never told the
+difference does not do.
+
 **Training.** Multi-resolution spectral loss (512 to 4,096 points, the band above 18 kHz counted twice)
 with anti-wrapping phase losses first; then a multi-period waveform discriminator and a
 multi-resolution spectral one are added, with feature matching. The spectral phase gets the level and
@@ -92,6 +103,16 @@ a real one rather than like its average. Crops quieter than −70 dBFS are drawn
 crops are requantised to 16 bits with dither, which is what a CD rip is. Each phase keeps its own best
 checkpoint, and the adversarial phase a snapshot every 4,000 steps: its best by spectral distance is not
 necessarily the best to listen to, so evaluate the snapshots and choose.
+
+**Lossless crops and the level.** Three crops in ten are made lossless from the master as they are drawn
+(`--synthetic-lossless`), through Kaiser-windowed sincs of varying roll-off and length, half of them
+through long filters with a wide passband (`--wide-filters`); one lossless crop in ten is flagged lossy
+and one coded crop in twenty lossless (`--flip-lossless`, `--flip-lossy`). Two more terms hold the
+level. On lossless crops the output must equal the input wherever the round trip through that crop's
+anti-alias filter is flat (`--identity-weight`). On every crop, each 500 Hz band above 12 kHz must come
+out at the master's level over the crop, the six bands around the source's Nyquist counting four times
+(`--band-weight`, `--seam-weight`); without it, the network writes its band on top of the last
+kilohertz of a source whose filter runs close to Nyquist.
 
 ## Whose music
 

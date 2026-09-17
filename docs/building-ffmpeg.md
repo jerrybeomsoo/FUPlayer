@@ -105,8 +105,8 @@ Without `nasm` the build still works. It warns, passes `--disable-x86asm`, and t
 slower for want of their hand-written assembly.
 
 There is no `ffmpeg.exe` at the end of this: `--disable-programs` builds the libraries only, since
-that is all FUPlayer calls. The `ffmpeg` command that `restoration.md` mentions, which widens the
-training set with more codecs, is a separate thing to install if you want it.
+that is all FUPlayer calls. The `ffmpeg` and `ffprobe` commands the upscaler's training scripts use
+(`training/neural-upscaler`) are a separate thing to install if you want them.
 
 ## Licensing checklist when redistributing
 

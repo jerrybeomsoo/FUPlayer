@@ -123,7 +123,7 @@ public enum AnalyzerPeakHold
 public sealed class PlayerSettings
 {
     /// <summary>Settings layout version; older files are upgraded when loaded.</summary>
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
 
     public int Version { get; set; } = CurrentVersion;
 
@@ -255,98 +255,46 @@ public sealed class VolumeSettings
     public bool IsBypassed => MinimumDb == 0.0 && MaximumDb == 0.0;
 }
 
+/// <summary>How the neural upscaler reads a source: as coded, as lossless, or from its codec.</summary>
+public enum UpscalerSource
+{
+    /// <summary>Lossy codecs and application captures as lossy; PCM, FLAC, ALAC and other lossless formats as lossless.</summary>
+    Automatic,
+
+    /// <summary>Correct the passband and synthesise above the codec's cutoff.</summary>
+    Lossy,
+
+    /// <summary>Leave the passband as it is and synthesise above the source's Nyquist frequency only.</summary>
+    Lossless,
+}
+
 /// <summary>
-/// What to do about material a perceptual codec has been through. Every one of these invents signal
-/// that was not in the source, so all of them are off unless asked for.
+/// Lossy repair: the neural upscaler, which takes 44.1 and 48 kHz PCM to 88.2 and 96 kHz, correcting what a
+/// codec did below the source's Nyquist frequency and synthesising the band above it. It adds signal that
+/// was not in the source, so it is off until asked for.
 /// </summary>
 public sealed class RestorationSettings
 {
-    /// <summary>
-    /// The whole of lossy repair, on or off in one place. Off builds none of the stages below, whatever
-    /// each of them says, and leaves their settings where they were so that turning this back on
-    /// restores them exactly. On by default, because every stage is off by default anyway and an
-    /// existing settings file has to keep meaning what it meant.
-    /// </summary>
-    public bool Enabled { get; set; } = true;
-
-    /// <summary>
-    /// Run the neural upscaler: a network trained on high-resolution masters and on lossy and CD-rate
-    /// copies of them, which repairs what a codec did below 22 kHz and writes the band above it, up to
-    /// 44.1 or 48 kHz. Needs an output of at least twice the source rate. Off until asked for.
-    /// </summary>
+    /// <summary>Run the neural upscaler on 44.1 and 48 kHz PCM sources.</summary>
     public bool NeuralUpscaler { get; set; }
 
-    /// <summary>The upscaler model file, or null for the one in the models folder.</summary>
+    /// <summary>The upscaler model file, or null for the newest one in the models folders.</summary>
     public string? NeuralUpscalerPath { get; set; }
 
+    /// <summary>Whether the network treats the source as coded or lossless.</summary>
+    public UpscalerSource SourceType { get; set; } = UpscalerSource.Automatic;
+
     /// <summary>
-    /// Gain on the band the upscaler writes above the source's Nyquist rate, in decibels. Zero is what the
-    /// network was trained to write, which on held-out songs sat a couple of decibels under the masters.
-    /// Nothing of the recording is up there, so this changes only the invented band.
+    /// Gain on the band the upscaler writes above the source's Nyquist frequency, in decibels. Zero is the
+    /// network's own output. Nothing of the recording lies there, so only the synthesised band changes.
     /// </summary>
     public double UpscalerBandDb { get; set; }
 
-    /// <summary>Hold a high band steady when the encoder keeps switching it on and off.</summary>
-    public bool ReduceArtifacts { get; set; }
-
-    /// <summary>0 leaves the signal alone, 1 holds a lone bin almost still.</summary>
-    public double ArtifactStrength { get; set; } = 0.5;
-
-    /// <summary>Synthesise a band above the cutoff from the one below it.</summary>
-    public bool RebuildHarmonics { get; set; }
-
-    /// <summary>Trim on the rebuilt band.</summary>
-    public double RebuildAmountDb { get; set; } = -3.0;
-
-    /// <summary>Use a trained model for the rebuilt levels rather than a fixed slope.</summary>
-    public bool Predict { get; set; }
-
-    /// <summary>Model file, or null for the newest one in the models folder.</summary>
-    public string? ModelPath { get; set; }
-
-    /// <summary>Network file, or null for the newest one in the models folder.</summary>
-    public string? NetworkPath { get; set; }
-
     /// <summary>
-    /// How much of the network's correction to apply. 1 is what it was fitted to say; up to 3
-    /// exaggerates it and is no longer an answer to the measurement.
+    /// Output the upscaler's contribution alone: its output minus its latency-aligned input. Silence
+    /// where it changed nothing, and for a source it does not run on. For monitoring, not listening.
     /// </summary>
-    public double NetworkAmount { get; set; } = 1.0;
-
-    /// <summary>
-    /// Output what the repair added instead of the repaired signal: the difference between the two,
-    /// which is silence wherever the repair decided to do nothing.
-    ///
-    /// A monitoring mode, not a listening one. It is the only way to hear exactly how much of what
-    /// comes out was invented, and the honest answer at a high bit rate is "very little".
-    /// </summary>
-    public bool OutputDifference { get; set; }
-
-    /// <summary>Where the rebuilt band starts. 0 measures it from the signal.</summary>
-    public double ManualCutoffHz { get; set; }
-
-    /// <summary>Nothing is rebuilt above this.</summary>
-    public double CeilingHz { get; set; } = 22_000.0;
-
-    /// <summary>
-    /// Synthesise a band above the source's own Nyquist rate when the output runs faster than the
-    /// file does: 22 to 40 kHz for a CD-rate recording played at 96 kHz or above.
-    ///
-    /// This is invention and not recovery, and the distinction is not pedantry. A 44.1 kHz recording
-    /// never had that band: the converter that made it removed everything up there before the first
-    /// sample existed. What a model fitted to real 96 kHz recordings can say is what usually sits
-    /// there in music of this kind, which is between 30 and 60 dB under the midband and above the
-    /// range of human hearing. Nobody will hear it directly. An amplifier or a tweeter asked to
-    /// reproduce it may make something audible of it, which is the argument against, and is why this
-    /// is off by default and trimmed well down when it is on.
-    /// </summary>
-    public bool RebuildUltrasonics { get; set; }
-
-    /// <summary>Network for the band above the source's Nyquist rate, or null for the newest one.</summary>
-    public string? UltrasonicPath { get; set; }
-
-    /// <summary>Trim on that band, in decibels, on top of what the model asks for.</summary>
-    public double UltrasonicTrimDb { get; set; } = -6.0;
+    public bool OutputDelta { get; set; }
 }
 
 public sealed class ProcessingSettings

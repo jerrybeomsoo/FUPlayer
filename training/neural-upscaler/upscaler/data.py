@@ -14,6 +14,7 @@ import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import torch
@@ -21,6 +22,39 @@ import torchaudio
 
 SEGMENT = 32_768          # samples at the training rate: 65 frames at a hop of 512
 MARGIN = 4_096            # extra either side, so the upsampler's edges fall outside the crop
+EDGE = 4_096              # extra either side again, so a synthetic downsampler's edges fall outside too
+
+
+@dataclass
+class Crop:
+    """One training example. A synthetic lossless one carries the wide master crop instead of x_low."""
+    x_low: Optional[np.ndarray]
+    y: np.ndarray
+    low: int
+    high: int
+    label: str
+    y_wide: Optional[np.ndarray] = None
+    edge_low: int = 0
+    rolloff: float = 0.99
+    width: int = 64
+    dither: bool = False
+
+    @property
+    def lossless(self) -> bool:
+        return self.label.startswith("lossless")
+
+    @property
+    def passband_hz(self) -> float:
+        """Below this the input is the master itself, for a lossless crop; 0 for a coded one."""
+        if not self.lossless:
+            return 0.0
+        if self.y_wide is not None:
+            # Where the round trip through this anti-alias filter and the player's interpolator is still
+            # flat to 0.1 dB. Measured on noise for roll-offs 0.87 to 0.99 and 16 to 64 zero crossings,
+            # this rule meets every one with 30 to 430 Hz to spare: a short kernel starts rolling off
+            # well before its nominal edge, a long one runs to within a kilohertz of it.
+            return self.rolloff * self.low / 2.0 * (1.0 - 3.0 / self.width)
+        return 0.9 * self.low / 2.0
 
 
 @dataclass
@@ -73,12 +107,15 @@ class Sampler:
     steps. Validation keeps them (min_rms 0), so its crops stay the ones it always measured.
     """
 
-    def __init__(self, tracks: list[Track], seed: int, min_rms: float = 0.0, dither16: float = 0.0) -> None:
+    def __init__(self, tracks: list[Track], seed: int, min_rms: float = 0.0, dither16: float = 0.0,
+                 synthetic_lossless: float = 0.0, wide_filters: float = 0.0) -> None:
         self.tracks = tracks
         self.weights = [t.weight for t in tracks]
         self.rng = random.Random(seed)
         self.min_rms = min_rms
         self.dither16 = dither16
+        self.synthetic_lossless = synthetic_lossless
+        self.wide_filters = wide_filters
         self._cache: dict[Path, np.ndarray] = {}
 
     def _open(self, path: Path) -> np.ndarray:
@@ -88,15 +125,51 @@ class Sampler:
             self._cache[path] = array
         return array
 
-    def draw(self) -> tuple[np.ndarray, np.ndarray, int, int, str]:
+    def draw(self) -> Crop:
         for _ in range(50):
             crop = self._draw_once()
-            if self.min_rms <= 0.0 or float(np.sqrt(np.mean(np.square(crop[1], dtype=np.float64)))) >= self.min_rms:
+            if self.min_rms <= 0.0 or float(np.sqrt(np.mean(np.square(crop.y, dtype=np.float64)))) >= self.min_rms:
                 return crop
         return crop
 
-    def _draw_once(self) -> tuple[np.ndarray, np.ndarray, int, int, str]:
+    def _draw_synthetic(self, track: Track) -> Crop:
+        """A lossless 44.1 or 48 kHz copy made from the master on the device, as a CD or a download is.
+
+        The anti-alias filter varies, a short kernel rolling off from 19 kHz to a long one from 21.8, as
+        mastering resamplers do; half the copies are also requantised to 16 bits with dither.
+        """
+        high = track.rate
+        low = 48_000 if high == 96_000 and self.rng.random() < 0.7 else 44_100
+        g = math.gcd(low, high)
+        step_low, step_high = low // g, high // g
+        units = math.ceil(EDGE / step_high)
+        edge_high, edge_low = units * step_high, units * step_low
+
+        y = self._open(track.y)
+        need_high = SEGMENT + 2 * MARGIN
+        wide = need_high + 2 * edge_high + 2 * step_high * 64
+        last = (y.shape[1] - wide) // step_high
+        j = self.rng.randrange(0, max(1, last))
+        start_high = j * step_high
+        channel = self.rng.randrange(2)
+        y_wide = np.asarray(y[channel, start_high: start_high + wide], dtype=np.float32)
+        gain = 10.0 ** (self.rng.uniform(-6.0, 1.0) / 20.0)
+        y_wide = y_wide * gain
+        y_crop = y_wide[edge_high + MARGIN: edge_high + MARGIN + SEGMENT].copy()
+        # A share of the copies through the long, wide filters a careful mastering resampler uses, whose
+        # passband runs to within a kilohertz of the new Nyquist: the case where a network that expects a
+        # band to end earlier writes its own on top of the one still there.
+        if self.wide_filters > 0.0 and self.rng.random() < self.wide_filters:
+            rolloff, width = self.rng.uniform(0.95, 0.99), self.rng.choice((32, 64))
+        else:
+            rolloff, width = self.rng.uniform(0.87, 0.99), self.rng.choice((16, 32, 64))
+        return Crop(None, y_crop, low, high, "lossless-synthetic", y_wide=y_wide, edge_low=edge_low,
+                    rolloff=rolloff, width=width, dither=self.rng.random() < 0.5)
+
+    def _draw_once(self) -> Crop:
         track = self.rng.choices(self.tracks, self.weights)[0]
+        if self.synthetic_lossless > 0.0 and self.rng.random() < self.synthetic_lossless:
+            return self._draw_synthetic(track)
         path, label, low = self.rng.choice(track.variants)
         high = track.rate
         g = math.gcd(low, high)
@@ -130,7 +203,7 @@ class Sampler:
                 tpdf = noise.uniform(-0.5, 0.5, x_crop.shape) + noise.uniform(-0.5, 0.5, x_crop.shape)
                 x_crop = (np.clip(np.round(x_crop * 32768.0 + tpdf), -32768, 32767) / 32768.0).astype(np.float32)
 
-        return x_crop, y_crop, low, high, label
+        return Crop(x_crop, y_crop, low, high, label)
 
 
 def upsample(x_low: torch.Tensor, low: int, high: int) -> torch.Tensor:
@@ -140,14 +213,46 @@ def upsample(x_low: torch.Tensor, low: int, high: int) -> torch.Tensor:
     return up[..., MARGIN: MARGIN + SEGMENT]
 
 
-def batch(sampler: Sampler, size: int, device: torch.device) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    xs, ys, rates = [], [], []
+def low_input(crop: Crop, device: torch.device) -> torch.Tensor:
+    """The crop's 44.1 or 48 kHz input on the device: stored, or made from the master for a synthetic one."""
+    if crop.x_low is not None:
+        return torch.from_numpy(crop.x_low).to(device)[None]
+    wide = torch.from_numpy(crop.y_wide).to(device, torch.float64)[None]
+    x = torchaudio.functional.resample(wide, crop.high, crop.low, lowpass_filter_width=crop.width,
+                                       rolloff=crop.rolloff, resampling_method="sinc_interp_kaiser",
+                                       beta=14.769656459379492)
+    x = x[..., crop.edge_low:].float()
+    if crop.dither:
+        tpdf = torch.rand_like(x) - torch.rand_like(x)
+        x = torch.clamp(torch.round(x * 32768.0 + tpdf), -32768, 32767) / 32768.0
+    return x
+
+
+def batch(sampler: Sampler, size: int, device: torch.device, flip_lossy: float = 0.0, flip_lossless: float = 0.0):
+    """x, y, rates, the source flag the network is given, the passband below which x must equal y, and
+    the source's own rate.
+
+    The flag is sometimes wrong on purpose, as it is in use: a lossy file converted to FLAC arrives flagged
+    lossless, and a capture of a lossless stream arrives flagged lossy. The passband target applies only
+    where the flag and the source agree.
+    """
+    xs, ys, rates, flags, passbands, lows = [], [], [], [], [], []
     for _ in range(size):
-        x_low, y, low, high, _ = sampler.draw()
-        up = upsample(torch.from_numpy(x_low).to(device)[None], low, high)[0]
+        crop = sampler.draw()
+        up = upsample(low_input(crop, device), crop.low, crop.high)[0]
         if up.shape[0] < SEGMENT:
             up = torch.nn.functional.pad(up, (0, SEGMENT - up.shape[0]))
         xs.append(up)
-        ys.append(torch.from_numpy(y).to(device))
-        rates.append(high)
-    return torch.stack(xs), torch.stack(ys), torch.tensor(rates, device=device)
+        ys.append(torch.from_numpy(crop.y).to(device))
+        rates.append(crop.high)
+        lossy = 0.0 if crop.lossless else 1.0
+        if crop.lossless and sampler.rng.random() < flip_lossless:
+            lossy = 1.0
+        elif not crop.lossless and sampler.rng.random() < flip_lossy:
+            lossy = 0.0
+        flags.append(lossy)
+        passbands.append(crop.passband_hz if lossy == 0.0 else 0.0)
+        lows.append(crop.low)
+    return (torch.stack(xs), torch.stack(ys), torch.tensor(rates, device=device),
+            torch.tensor(flags, device=device), torch.tensor(passbands, device=device),
+            torch.tensor(lows, device=device))

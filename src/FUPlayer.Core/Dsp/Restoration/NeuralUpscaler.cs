@@ -149,6 +149,12 @@ public sealed class NeuralUpscaler
     /// <summary>Frames kept from each network call.</summary>
     public int ChunkFrames { get; }
 
+    /// <summary>
+    /// Whether the source is coded (or of unknown origin) rather than lossless. Read by a network trained
+    /// with a source condition; ignored by one without.
+    /// </summary>
+    public bool Lossy { get; set; } = true;
+
     /// <summary>Samples between a sample going in and its repaired version coming out.</summary>
     public int Latency { get; }
 
@@ -233,7 +239,7 @@ public sealed class NeuralUpscaler
             }
         }
 
-        _model.Run(_inRe, _inIm, _span, _outRe, _outIm);
+        _model.Run(_inRe, _inIm, _span, _outRe, _outIm, Lossy);
 
         double sign = _conjugate ? -1.0 : 1.0;
         for (int t = Context; t < Context + ChunkFrames; t++)

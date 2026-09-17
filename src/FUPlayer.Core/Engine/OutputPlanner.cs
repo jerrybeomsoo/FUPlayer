@@ -50,10 +50,9 @@ public static class OutputPlanner
     }
 
     /// <summary>
-    /// Adds the neural upscaler where it has something to do and somewhere to put the answer: a PCM
-    /// source at 44.1 or 48 kHz, the rates it was trained from, and an output at least twice as fast,
-    /// so that the band it writes survives the conversion. The chosen filter then runs from twice the
-    /// source rate instead of from the source rate, and has to accept that.
+    /// Adds the neural upscaler for a PCM source at 44.1 or 48 kHz, the rates it was trained from. It runs at
+    /// twice the source rate, and the chosen filter converts from there to the output rate, up or down, so
+    /// the filter has to accept that conversion.
     ///
     /// The limiter runs whenever the upscaler does, whatever its own switch says. The band the network
     /// writes adds energy, and on loud masters its peaks cross full scale: measured on a held-out song
@@ -62,7 +61,7 @@ public static class OutputPlanner
     /// </summary>
     internal static PlaybackPlan WithUpscaling(PlaybackPlan plan, RestorationSettings restore, List<string> notes)
     {
-        if (!restore.Enabled || !restore.NeuralUpscaler || plan.PassThrough || plan.Source.IsDsd || plan.Filter is null)
+        if (!restore.NeuralUpscaler || plan.PassThrough || plan.Source.IsDsd || plan.Filter is null)
         {
             return plan;
         }
@@ -72,12 +71,10 @@ public static class OutputPlanner
             return plan;
         }
 
+        // Twice the source rate whatever the output: an output below that keeps the passband correction and
+        // the filter takes the synthesised band back out. Whether a lossless source is worth running at such
+        // an output is decided once its codec is known (PlaybackEngine.ApplySource).
         int upscale = plan.ConversionRate * 2;
-        if (plan.ProcessingRate < upscale)
-        {
-            notes.Add($"The neural upscaler needs an output of at least {AudioRates.Format(upscale)}; it is not running.");
-            return plan;
-        }
 
         if (!ResamplerFactory.IsSupported(plan.Filter, upscale, plan.ProcessingRate))
         {

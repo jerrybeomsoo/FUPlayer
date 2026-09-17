@@ -56,6 +56,12 @@ public sealed record PlaybackPlan
     /// </summary>
     public int UpscaleRate { get; init; }
 
+    /// <summary>
+    /// How the neural upscaler reads the source: coded or of unknown origin (true), or lossless (false). Set
+    /// by the engine once the decoder is open, from the codec or from <see cref="Settings.RestorationSettings.SourceType"/>.
+    /// </summary>
+    public bool SourceIsLossy { get; init; } = true;
+
     public double PcmLevelOffsetDb { get; init; }
 
     /// <summary>Human-readable explanations of substitutions and limits.</summary>
@@ -88,5 +94,6 @@ public sealed record PlaybackPlan
         && RemoveUltrasonics == other.RemoveUltrasonics
         && Limiter == other.Limiter
         && UpscaleRate == other.UpscaleRate
+        && (UpscaleRate == 0 || SourceIsLossy == other.SourceIsLossy)
         && PcmLevelOffsetDb == other.PcmLevelOffsetDb;
 }

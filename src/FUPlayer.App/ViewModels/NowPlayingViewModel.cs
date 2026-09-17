@@ -261,9 +261,7 @@ public sealed partial class NowPlayingViewModel : ObservableObject
 
         // What the source's own spectrum says, which is the only way to tell a coded file from a
         // lossless one when the container does not say.
-        Bandwidth = IsActive && status.Bandwidth is { } verdict
-            ? verdict + (status.IsNeuralRepair ? "  ·  repaired by a trained network" : string.Empty)
-            : string.Empty;
+        Bandwidth = IsActive && status.Bandwidth is { } verdict ? verdict : string.Empty;
         HasBandwidth = Bandwidth.Length > 0;
 
         Resampler = IsActive ? status.ResamplerSummary ?? string.Empty : string.Empty;

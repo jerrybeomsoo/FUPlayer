@@ -57,17 +57,29 @@ def measure(pred: torch.Tensor, target: torch.Tensor, rate: int) -> dict[str, fl
 
 
 @torch.no_grad()
-def run_model(model: Upscaler, wave: torch.Tensor, chunk: int = 1024, context: int = 32) -> torch.Tensor:
+def run_model(model: Upscaler, wave: torch.Tensor, lossy: float = 1.0, chunk: int = 1024, context: int = 32) -> torch.Tensor:
     """The whole excerpt through the network, in overlapping stretches of frames so memory stays bounded."""
     spec = stft(wave)
+    flag = torch.full((spec.shape[0],), lossy, device=spec.device)
     frames = spec.shape[-1]
     out = torch.empty_like(spec)
     for start in range(0, frames, chunk):
         lo = max(0, start - context)
         hi = min(frames, start + chunk + context)
-        part = model(spec[..., lo:hi])
+        part = model(spec[..., lo:hi], flag)
         out[..., start: min(frames, start + chunk)] = part[..., start - lo: start - lo + min(chunk, frames - start)]
     return istft(out, wave.shape[-1])
+
+
+@torch.no_grad()
+def passband_moved_db(out: torch.Tensor, inp: torch.Tensor, rate: int, passband_hz: float) -> float:
+    """Energy of what the network changed below passband_hz, relative to the input there, in dB."""
+    a, b = stft(out), stft(inp)
+    hz = torch.arange(b.shape[1], device=b.device) * (rate / N_FFT)
+    band = hz < passband_hz
+    moved = (a[:, band, :] - b[:, band, :]).abs().pow(2).sum()
+    energy = b[:, band, :].abs().pow(2).sum().clamp_min(1e-20)
+    return float(10.0 * torch.log10(moved / energy + 1e-20))
 
 
 def main() -> None:
@@ -79,16 +91,23 @@ def main() -> None:
     ap.add_argument("--tracks", type=int, default=0, help="measure only this many held-out tracks (0 = all)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--csv", default="work/runs/upscaler/evaluation.csv")
+    ap.add_argument("--no-lossless", action="store_true", help="skip the lossless copies made from the masters")
+    ap.add_argument("--split", choices=("held", "train"), default="held",
+                    help="which side of the split to measure; 'train' is for telling a bias from a song's own variance")
     args = ap.parse_args()
 
     device = torch.device(args.device)
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     model = Upscaler(dim=state.get("dim", 384), intermediate=state.get("dim", 384) * 3, blocks=state.get("blocks", 8))
-    model.load_state_dict(state["model"])
+    missing, _ = model.load_state_dict(state["model"], strict=False)
+    if missing:
+        print(f"no source condition in this checkpoint: {missing}", flush=True)
     model.to(device).eval()
     print(f"{args.checkpoint}: step {state.get('step', '?')}", flush=True)
 
-    _, held = data.split(data.load_manifest(Path(args.corpus), Path(args.manifest) if args.manifest else None))
+    train, held = data.split(data.load_manifest(Path(args.corpus), Path(args.manifest) if args.manifest else None))
+    if args.split == "train":
+        held = train
     if args.tracks:
         held = held[: args.tracks]
 
@@ -113,12 +132,45 @@ def main() -> None:
             up = torchaudio.functional.resample(x, low, high, lowpass_filter_width=64, rolloff=0.99,
                                                 resampling_method="sinc_interp_kaiser", beta=14.769656459379492)
             up = up[:, margin: margin + need_high]
-            out = run_model(model, up)
+            lossless = label == "lossless"
+            out = run_model(model, up, 0.0 if lossless else 1.0)
             before, after = measure(up, y, high), measure(out, y, high)
-            row = {"track": track.title, "japanese": int(track.japanese), "codec": label, "low": low, "high": high}
+            row = {"track": track.title, "japanese": int(track.japanese), "codec": label, "low": low, "high": high,
+                   "flag": "lossless" if lossless else "lossy",
+                   "passband_db": passband_moved_db(out, up, high, 0.9 * low / 2) if lossless else float("nan")}
             row.update({f"in_{k}": v for k, v in before.items()})
             row.update({f"out_{k}": v for k, v in after.items()})
             rows.append(row)
+
+        if not args.no_lossless:
+            # Lossless copies made from the master, as a CD or a download is: 24-bit float and 16-bit with TPDF
+            # dither, at half the master's rate, each read with the right flag and, to show what the flag does,
+            # with the wrong one.
+            low = high // 2
+            margin = 8192
+            need_high = int(args.seconds * high)
+            mid = (y_all.shape[1] // 2) // 2 * 2
+            wide = torch.from_numpy(np.asarray(y_all[:, mid - 2 * margin: mid + need_high + 2 * margin], dtype=np.float32)).to(device)
+            x = torchaudio.functional.resample(wide.double(), high, low, lowpass_filter_width=64, rolloff=0.99,
+                                               resampling_method="sinc_interp_kaiser", beta=14.769656459379492).float()
+            y = wide[:, 2 * margin: 2 * margin + need_high]
+            generator = torch.Generator(device=device).manual_seed(n)
+            tpdf = torch.rand(x.shape, generator=generator, device=device) - torch.rand(x.shape, generator=generator, device=device)
+            x16 = torch.clamp(torch.round(x * 32768.0 + tpdf), -32768, 32767) / 32768.0
+            name = "cd" if high == 88_200 else "dvd"
+            for label, source in ((f"lossless-{name}-24", x), (f"lossless-{name}-16", x16)):
+                up = torchaudio.functional.resample(source, low, high, lowpass_filter_width=64, rolloff=0.99,
+                                                    resampling_method="sinc_interp_kaiser", beta=14.769656459379492)
+                up = up[:, 2 * margin: 2 * margin + need_high]
+                for flag, value in (("lossless", 0.0), ("lossy", 1.0)):
+                    out = run_model(model, up, value)
+                    before, after = measure(up, y, high), measure(out, y, high)
+                    row = {"track": track.title, "japanese": int(track.japanese),
+                           "codec": label if flag == "lossless" else label + " (flagged lossy)", "low": low, "high": high,
+                           "flag": flag, "passband_db": passband_moved_db(out, up, high, 0.9 * low / 2)}
+                    row.update({f"in_{k}": v for k, v in before.items()})
+                    row.update({f"out_{k}": v for k, v in after.items()})
+                    rows.append(row)
         print(f"[{n}/{len(held)}] {track.title}", flush=True)
 
     with open(args.csv, "w", newline="", encoding="utf-8") as f:
@@ -132,19 +184,20 @@ def main() -> None:
     by_codec["ALL"] = rows
 
     print()
-    print(f"{'codec':<20}{'n':>4} | {'LSD 0-16k':>13} {'LSD 16-22k':>13} {'LSD 22k+':>13} | "
-          f"{'level 16-22k':>14} {'level 22k+':>14} | {'motion 22k+':>11}")
+    print(f"{'codec':<34}{'n':>4} | {'LSD 0-16k':>13} {'LSD 16-22k':>13} {'LSD 22k+':>13} | "
+          f"{'level 16-22k':>14} {'level 22k+':>14} | {'motion 22k+':>11} | {'passband moved':>14}")
     for codec, items in by_codec.items():
         def mean(key: str) -> float:
             values = [r[key] for r in items if not math.isnan(r[key])]
             return sum(values) / max(1, len(values))
-        print(f"{codec:<20}{len(items):>4} | "
+        print(f"{codec:<34}{len(items):>4} | "
               f"{mean('in_lsd_0-16k'):5.2f}->{mean('out_lsd_0-16k'):5.2f} "
               f"{mean('in_lsd_16-22k'):5.2f}->{mean('out_lsd_16-22k'):5.2f} "
               f"{mean('in_lsd_22k-nyq'):5.1f}->{mean('out_lsd_22k-nyq'):5.1f} | "
               f"{mean('in_level_16-22k'):6.1f}->{mean('out_level_16-22k'):5.1f} "
               f"{mean('in_level_22k-nyq'):6.1f}->{mean('out_level_22k-nyq'):5.1f} | "
-              f"{mean('out_motion_22k-nyq'):11.2f}")
+              f"{mean('out_motion_22k-nyq'):11.2f} | "
+              f"{mean('passband_db'):11.1f} dB")
     print(f"\nrows written to {args.csv}")
 
 

@@ -14,6 +14,9 @@ namespace FUPlayer.Core.Dsp.Restoration;
 /// Every output frame depends on <see cref="Context"/> frames either side of it. A frame nearer the
 /// edge of what it was given than that sees padding instead of music, and its answer is not the one the
 /// network was trained to give, so the stage that runs this only keeps frames at least that far in.
+///
+/// A network trained with a source condition has a third input, "lossy", shaped [batch]: 1 for a coded
+/// or unknown source, 0 for a lossless one. A network without it is run as it was trained, without.
 /// </summary>
 public sealed class NeuralUpscalerModel : IDisposable
 {
@@ -27,16 +30,21 @@ public sealed class NeuralUpscalerModel : IDisposable
     public const string Extension = ".onnx";
 
     private readonly InferenceSession _session;
-    private readonly string[] _inputNames = ["re", "im"];
+    private readonly string[] _inputNames;
     private readonly string[] _outputNames = ["out_re", "out_im"];
 
-    private NeuralUpscalerModel(InferenceSession session, string path)
+    private NeuralUpscalerModel(InferenceSession session, string path, bool conditioned)
     {
         _session = session;
         Path = path;
+        IsConditioned = conditioned;
+        _inputNames = conditioned ? ["re", "im", "lossy"] : ["re", "im"];
     }
 
     public string Path { get; }
+
+    /// <summary>True when the network takes the lossy/lossless source flag.</summary>
+    public bool IsConditioned { get; }
 
     /// <summary>
     /// Opens a model. Inference uses the processor: this build ships the processor runtime alone, which
@@ -66,14 +74,15 @@ public sealed class NeuralUpscalerModel : IDisposable
             }
         }
 
-        return new NeuralUpscalerModel(session, path);
+        bool conditioned = session.InputMetadata.TryGetValue("lossy", out NodeMetadata? flag) && flag.Dimensions.Length == 1;
+        return new NeuralUpscalerModel(session, path, conditioned);
     }
 
     /// <summary>
     /// Runs the network on <paramref name="frames"/> frames of one channel. Inputs and outputs are laid
     /// out bin by bin, as the tensors are: element [bin * frames + frame].
     /// </summary>
-    public void Run(float[] re, float[] im, int frames, float[] outRe, float[] outIm)
+    public void Run(float[] re, float[] im, int frames, float[] outRe, float[] outIm, bool lossy = true)
     {
         long[] shape = [1, Bins, frames];
         int count = Bins * frames;
@@ -82,7 +91,15 @@ public sealed class NeuralUpscalerModel : IDisposable
         using var resRe = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance, outRe.AsMemory(0, count), shape);
         using var resIm = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance, outIm.AsMemory(0, count), shape);
         using var runOptions = new RunOptions();
-        _session.Run(runOptions, _inputNames, [inRe, inIm], _outputNames, [resRe, resIm]);
+        if (!IsConditioned)
+        {
+            _session.Run(runOptions, _inputNames, [inRe, inIm], _outputNames, [resRe, resIm]);
+            return;
+        }
+
+        float[] flag = [lossy ? 1.0f : 0.0f];
+        using var inFlag = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance, flag.AsMemory(), [1]);
+        _session.Run(runOptions, _inputNames, [inRe, inIm, inFlag], _outputNames, [resRe, resIm]);
     }
 
     public void Dispose() => _session.Dispose();

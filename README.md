@@ -99,19 +99,13 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 
 - Take audio from any running application, Firefox or a music client, and send it through the whole chain
   to your DAC. Windows process loopback, so nothing has to be routed by hand.
-- A **neural upscaler** takes 44.1 and 48 kHz files and captures to 88.2 and 96 kHz: it corrects below 22 kHz
-  what it learned a codec does and writes a band above it, measured against the masters it came from. It runs
-  on the processor through ONNX Runtime with about half a second of delay, and
-  [its page](docs/neural-upscaler.md) says what it gets right and where it is wrong. No model ships; the
-  scripts in `training/neural-upscaler` train one from your own high-resolution files.
+- Lossy repair is a **neural upscaler**: 44.1 and 48 kHz files and captures to 88.2 and 96 kHz, with the passband
+  of coded sources corrected and the band above the codec cutoff and the source Nyquist synthesised. It is told
+  whether a source is lossy or lossless, runs on the processor through ONNX Runtime with about half a second of
+  delay, and [its page](docs/neural-upscaler.md) says what it gets right and where it is wrong. No model ships;
+  the scripts in `training/neural-upscaler` train one from your own high-resolution files.
 - Measures where a file's spectrum actually ends, which is the only way to tell a coded stream from a
   lossless one when nothing in the container says so.
-- Synthesises a band above a codec's cutoff, and damps the warbling a low bit rate leaves behind.
-- Optionally levels both from a model fitted to real coded music. Fetch freely licensed lossless releases,
-  code them with a real encoder, and fit the model on your own machine; nothing ships pre-trained.
-- Everything is judged on releases the model has never heard, against two baselines, and the tooling refuses to
-  save a model that does not beat them. It is synthesis, not recovery, and
-  [the documentation says exactly how much it is worth](docs/restoration.md).
 
 **Analysis**
 
@@ -375,7 +369,6 @@ build/ffmpeg/                 script that builds LGPL FFmpeg libraries
 | [docs/dsp.md](docs/dsp.md) | The signal processing in detail, with the arithmetic |
 | [docs/cli.md](docs/cli.md) | Every `fuplayer-cli` command and option |
 | [docs/settings.md](docs/settings.md) | Every setting, what it changes, and what it costs |
-| [docs/restoration.md](docs/restoration.md) | The lossy repair stages, and how to train or install a model |
 | [docs/neural-upscaler.md](docs/neural-upscaler.md) | The neural upscaler: how it runs, how its model was trained, and what it measures |
 | [docs/building-ffmpeg.md](docs/building-ffmpeg.md) | Building the LGPL FFmpeg DLLs from source |
 

@@ -18,6 +18,11 @@ file at 22.05, and a learned per-bin gate puts the seam wherever this frame's mu
 The heads are initialised so that the untrained network passes its input through unchanged: mask
 zero, generated magnitude negligible, crossover leaning to the input. Training then starts from
 plain upsampling rather than from noise, and can only move away from it where that helps.
+
+The network is told what kind of source it is reading: lossy (a codec, or a capture whose origin is
+unknown) or lossless (PCM at 44.1 or 48 kHz). One learned vector per block, added with a sign that
+follows the flag, lets it keep a lossless passband untouched while still repairing a coded one. The
+vectors start at zero, so a network trained before the flag existed carries on exactly as it was.
 """
 from __future__ import annotations
 
@@ -89,6 +94,9 @@ class Upscaler(nn.Module):
         self.blocks = nn.ModuleList(ConvNeXtBlock(dim, intermediate, 1.0 / blocks) for _ in range(blocks))
         self.final_norm = nn.LayerNorm(dim, eps=1e-6)
         self.head = nn.Conv1d(dim, 5 * bins, kernel_size=1)
+        # Source condition: one vector ahead of every block and one ahead of the head, +v for a lossy
+        # source and -v for a lossless one. Zero at the start, so the flag changes nothing until trained.
+        self.condition = nn.Parameter(torch.zeros(blocks + 1, dim))
         self._init_head()
 
     def _init_head(self) -> None:
@@ -106,21 +114,25 @@ class Upscaler(nn.Module):
         """Log magnitude, floored 85 dB below the frame's loudest bin (and never below 1e-7)."""
         return log_features(spec.abs())
 
-    def forward_features(self, feats: torch.Tensor) -> tuple[torch.Tensor, ...]:
-        """[B, bins, frames] log magnitude -> (g, theta, m, phi, u), each [B, bins, frames]."""
+    def forward_features(self, feats: torch.Tensor, lossy: torch.Tensor | None = None) -> tuple[torch.Tensor, ...]:
+        """[B, bins, frames] log magnitude, [B] source flag (1 lossy, 0 lossless) -> (g, theta, m, phi, u)."""
+        if lossy is None:
+            lossy = torch.ones(feats.shape[0], device=feats.device, dtype=feats.dtype)
+        sign = (2.0 * lossy.to(feats.dtype) - 1.0).view(-1, 1, 1)
         x = self.embed(feats)
         x = self.embed_norm(x.transpose(1, 2)).transpose(1, 2)
-        for block in self.blocks:
-            x = block(x)
+        for i, block in enumerate(self.blocks):
+            x = block(x + sign * self.condition[i].view(1, -1, 1))
         x = self.final_norm(x.transpose(1, 2)).transpose(1, 2)
+        x = x + sign * self.condition[-1].view(1, -1, 1)
         out = self.head(x)
         b, _, t = out.shape
         g, theta, m, phi, u = out.view(b, 5, self.bins, t).unbind(1)
         return g.clamp(-8.0, 4.0), theta, m.clamp(-20.0, 8.0), phi, u
 
-    def forward(self, spec: torch.Tensor) -> torch.Tensor:
+    def forward(self, spec: torch.Tensor, lossy: torch.Tensor | None = None) -> torch.Tensor:
         """Complex input spectrum [B, bins, frames] -> complex output spectrum of the same shape."""
-        g, theta, m, phi, u = self.forward_features(self.features(spec))
+        g, theta, m, phi, u = self.forward_features(self.features(spec), lossy)
         w = torch.sigmoid(u)
         kept = spec * torch.exp(torch.complex(g, theta))
         made = torch.exp(torch.complex(m, phi))
@@ -134,6 +146,7 @@ class ExportWrapper(nn.Module):
     """What the player runs: real tensors in, real tensors out, no complex numbers in the graph.
 
     Input  : re, im  [B, bins, frames]  the STFT of the upsampled signal
+             lossy   [B]                1 for a lossy or unknown source, 0 for a lossless one
     Output : re, im  [B, bins, frames]  the STFT of the repaired signal
     The player does the STFT and the overlap-add itself.
     """
@@ -142,10 +155,10 @@ class ExportWrapper(nn.Module):
         super().__init__()
         self.model = model
 
-    def forward(self, re: torch.Tensor, im: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, re: torch.Tensor, im: torch.Tensor, lossy: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         magnitude = torch.sqrt(re * re + im * im)
         feats = log_features(magnitude)
-        g, theta, m, phi, u = self.model.forward_features(feats)
+        g, theta, m, phi, u = self.model.forward_features(feats, lossy)
         w = torch.sigmoid(u)
         gain = torch.exp(g)
         cos_t, sin_t = torch.cos(theta), torch.sin(theta)

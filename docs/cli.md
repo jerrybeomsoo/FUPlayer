@@ -23,20 +23,10 @@ or, after building, `src/FUPlayer.Cli/bin/Release/net9.0/fuplayer-cli.exe`.
 | `apps` | Applications whose audio can be captured |
 | `capture --app <name\|pid>` | Record one application's output to a float WAV |
 | `bandwidth <files>` | Where each file's spectrum ends, and whether that looks like a codec |
-| `models` | Installed repair models and networks |
+| `models` | Installed neural upscaler models and the folders searched |
 
-### Training a repair model
-
-These four build and check a model for the lossy repair stages. See
-[restoration.md](restoration.md) for what they are for.
-
-| Command | Does |
-| --- | --- |
-| `roundtrip <file> --rate <B/s>` | Code a file with the system AAC encoder and report what it did to each band |
-| `dataset <files> --out <file>` | Build coded-against-original training pairs |
-| `train-repair <dataset> --out <name>` | Fit the network, reporting against the do-nothing baseline |
-| `evaluate <files>` | Measure how much closer the repair gets to the original, on files it never saw |
-| `train <files> --cutoff <Hz>` | Fit the simpler linear model, straight from lossless music |
+Neural upscaler models are trained with the Python scripts in `training/neural-upscaler`; see
+[neural-upscaler.md](neural-upscaler.md).
 
 ## Processing options
 
@@ -62,9 +52,11 @@ These four build and check a model for the lossy repair stages. See
 | `--pass-through` | Send DSD files unchanged when the output rate matches |
 | `--remove-ultrasonics` | Low-pass sources above 48 kHz at 20 kHz |
 | `--no-limiter` | Leave peaks above full scale alone |
-| `--repair-artifacts` | Damp the warbling a low bit rate leaves behind |
-| `--repair-rebuild` | Synthesise a band above the codec's cutoff |
-| `--repair-predict` | Let a trained network set the levels for both |
+| `--neural-upscale` | Neural upscaler: 44.1/48 kHz PCM to 88.2/96 kHz |
+| `--upscaler <file>` | Which `.onnx` model. Default is the newest installed |
+| `--source-type auto\|lossy\|lossless` | How the upscaler reads the source. Default `auto` |
+| `--upscaler-level <dB>` | Gain on the synthesised band above the source Nyquist |
+| `--output-delta` | Output the upscaler's contribution only: output minus latency-aligned input |
 
 ## Graphics acceleration
 

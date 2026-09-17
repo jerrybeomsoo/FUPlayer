@@ -173,43 +173,16 @@ public sealed partial class DspStudioViewModel : ObservableObject
     private bool _removeUltrasonics;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsRepairing))]
-    private bool _lossyRepair;
+    private bool _neuralUpscaler;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsRepairing))]
-    private bool _neuralUpscaler;
+    private Choice? _selectedUpscalerSource;
 
     [ObservableProperty]
     private Choice? _selectedUpscalerBand;
 
     [ObservableProperty]
-    private bool _reduceArtifacts;
-
-    [ObservableProperty]
-    private bool _rebuildHarmonics;
-
-    [ObservableProperty]
-    private bool _predict;
-
-    [ObservableProperty]
-    private bool _outputDifference;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsRepairing))]
-    private bool _rebuildUltrasonics;
-
-    [ObservableProperty]
-    private Choice? _selectedUltrasonicTrim;
-
-    [ObservableProperty]
-    private Choice? _selectedArtifactStrength;
-
-    [ObservableProperty]
-    private Choice? _selectedRebuildAmount;
-
-    [ObservableProperty]
-    private Choice? _selectedPredictionStrength;
+    private bool _outputDelta;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(LimiterDescription))]
@@ -459,100 +432,25 @@ public sealed partial class DspStudioViewModel : ObservableObject
             "64 samples, 128-point FFT at 44.1 kHz, the shortest block available. 5x to 24x uniform, 1.3x to 2.2x layered."),
     ];
 
-    /// <summary>Who pays for a short window: every tap, or only the early ones.</summary>
-    public IReadOnlyList<Choice> ArtifactStrengthChoices { get; } =
-    [
-        new("Light", 0.25, "A high bin may move 18 dB between transforms. Damps the worst chirping only."),
-        new("Moderate", 0.5, "12 dB between transforms. The usual setting."),
-        new("Firm", 0.75, "7 dB between transforms. Audibly smooths cymbals as well as artefacts."),
-        new("Heavy", 1.0, "3 dB between transforms. For material that warbles badly, at the cost of the top octave's life."),
-    ];
-
-    public IReadOnlyList<Choice> RebuildAmountChoices { get; } =
-    [
-        new("Quiet", -9.0, "9 dB under the level the slope or the model asks for."),
-        new("Normal", -3.0, "3 dB under, which keeps the invented band behind the real one."),
-        new("Full", 0.0, "Exactly what the slope or the model asks for."),
-    ];
-
-    /// <summary>
-    /// How far to take the model at its word.
-    ///
-    /// The model was fitted to a measured distance between a coded spectrum and the original it came
-    /// from, so "Measured" is the only setting that is an answer to anything. The rest are here
-    /// because on a high bit rate that distance is genuinely small, and hearing something happen is
-    /// a reasonable thing to want even when the honest answer is that little was lost.
-    /// </summary>
-    public IReadOnlyList<Choice> PredictionStrengthChoices { get; } =
-    [
-        new("Half", 0.5, "Half of what the model asks for. For when a correction sounds overdone."),
-        new("Measured", 1.0, "What the model was fitted to say. The only setting that answers a measurement."),
-        new("Firm", 1.5, "Half again. Past the original, in the direction the original lay."),
-        new("Strong", 2.0, "Twice the correction. Audible on high bit rates, and no longer a repair."),
-        new("Extreme", 3.0, "Three times. Exaggeration; expect a lifted top end that was never recorded."),
-    ];
-
-    /// <summary>
-    /// What the prediction has to work with, or why it has nothing.
-    ///
-    /// Read from the models folder every time it is asked for, and asked for again whenever a switch
-    /// here changes, so that installing a model while the player is open is noticed. It used to be
-    /// read once when the page was built, which meant a model installed afterwards showed as nothing
-    /// installed until the player was restarted.
-    /// </summary>
-    public string ModelStatus
-    {
-        get
-        {
-            // What is installed comes first. Leading with the caveat produced a sentence that began
-            // "Nothing to apply it to yet" while a model was sitting in the folder, which reads as
-            // nothing being installed when something is.
-            string installed = ModelLibrary.DescribeInstalled();
-            return RebuildHarmonics || ReduceArtifacts
-                ? installed
-                : installed + " Nothing is using it yet, though: turn on harmonic rebuilding or artefact reduction too.";
-        }
-    }
-
-    /// <summary>What the neural upscaler would run with. Read from the models folder each time, like <see cref="ModelStatus"/>.</summary>
+    /// <summary>What the neural upscaler would run with. Read from the models folder each time it is asked for.</summary>
     public string UpscalerStatus => ModelLibrary.DescribeUpscaler();
 
     /// <summary>Reads the models folder again. Called when the page is opened and when a switch changes.</summary>
-    public void RefreshModelStatus()
-    {
-        OnPropertyChanged(nameof(ModelStatus));
-        OnPropertyChanged(nameof(UpscalerStatus));
-    }
+    public void RefreshModelStatus() => OnPropertyChanged(nameof(UpscalerStatus));
 
-    /// <summary>True while anything above the cutoff is being synthesised.</summary>
-    public bool IsRebuilding => RebuildHarmonics;
-
-    /// <summary>True while any of the repair stages is switched on, which is when a difference exists.</summary>
-    public bool IsRepairing => LossyRepair && (NeuralUpscaler || ReduceArtifacts || RebuildHarmonics || RebuildUltrasonics);
-
-    /// <summary>
-    /// How loud the invented band above the source's own Nyquist rate should be.
-    ///
-    /// Trimmed well down by default. Nobody hears 30 kHz; an amplifier asked to reproduce it can
-    /// make something audible of it, and that something is not in the recording either.
-    /// </summary>
-    public IReadOnlyList<Choice> UltrasonicTrimChoices { get; } =
+    public IReadOnlyList<Choice> UpscalerSourceChoices { get; } =
     [
-        new("Faint", -12.0, "12 dB under what the model asks for. Barely there, which is the safest way to have it at all."),
-        new("Quiet", -6.0, "6 dB under. The default."),
-        new("Measured", 0.0, "Exactly the level real recordings of this kind carry up there."),
+        new("Automatic", UpscalerSource.Automatic, "Lossy codecs and application captures: lossy. PCM, FLAC, ALAC: lossless."),
+        new("Lossy", UpscalerSource.Lossy, "Passband correction below the codec cutoff; synthesis above it."),
+        new("Lossless", UpscalerSource.Lossless, "Passband preserved; synthesis above Nyquist only. Idle when the output is below 2 fs."),
     ];
 
-    /// <summary>
-    /// How loud the band the upscaler writes above the source's Nyquist rate should be. The network's own
-    /// answer is the default; it came out a couple of decibels under the masters it was measured against.
-    /// </summary>
     public IReadOnlyList<Choice> UpscalerBandChoices { get; } =
     [
-        new("Quiet", -6.0, "6 dB under what the network writes. For a tweeter or an amplifier that should be spared it."),
-        new("Measured", 0.0, "What the network writes: on songs it never trained on, a couple of decibels under the masters."),
-        new("Lifted", 3.0, "3 dB over. About where the masters themselves sit, on average."),
-        new("Strong", 6.0, "6 dB over. More than a master of this kind usually carries."),
+        new("Quiet", -6.0, "−6 dB relative to the model output."),
+        new("Measured", 0.0, "Model output: −0.7 dB against the held-out masters on average."),
+        new("Lifted", 3.0, "+3 dB relative to the model output."),
+        new("Strong", 6.0, "+6 dB relative to the model output."),
     ];
 
     public IReadOnlyList<Choice> ConvolutionLayoutChoices { get; } =
@@ -614,8 +512,8 @@ public sealed partial class DspStudioViewModel : ObservableObject
     public bool HasBlockDelay => BlockDelayText != "-";
 
     public string LimiterDescription => Limiter
-        ? "Holds peaks that a filter lifts above full scale, 1 ms ahead of time. Adds 1 ms of delay; Now playing counts how often it acts."
-        : "Off for lossless files: nothing stops them exceeding full scale. Lossy files (MP3, AAC, Ogg, Opus), captured audio and anything the neural upscaler runs on are still limited, because their overs are what the codec left or the network wrote, not the recording, and left alone they clip into noise above 40 kHz or push a DSD modulator unstable.";
+        ? "Look-ahead peak limiter, 1 ms: holds inter-sample overs below full scale. Now playing counts engagements."
+        : "Off for lossless sources. Lossy codecs, captures and upscaled audio stay limited: their overs are codec or network products that would alias above 40 kHz or destabilise a DSD modulator.";
 
     private PlayerSettings Settings => _services.Settings;
 
@@ -736,62 +634,19 @@ public sealed partial class DspStudioViewModel : ObservableObject
 
     partial void OnRemoveUltrasonicsChanged(bool value) => Update(value, (bool v) => Settings.Processing.RemoveUltrasonics = v);
 
-    partial void OnLossyRepairChanged(bool value)
-    {
-        Update(value, (bool v) => Settings.Restoration.Enabled = v);
-        OnPropertyChanged(nameof(ModelStatus));
-    }
-
     partial void OnNeuralUpscalerChanged(bool value)
     {
         Update(value, (bool v) => Settings.Restoration.NeuralUpscaler = v);
         OnPropertyChanged(nameof(UpscalerStatus));
     }
 
+    partial void OnSelectedUpscalerSourceChanged(Choice? value) =>
+        Update(value, (UpscalerSource source) => Settings.Restoration.SourceType = source);
+
     partial void OnSelectedUpscalerBandChanged(Choice? value) =>
         Update(value, (double gainDb) => Settings.Restoration.UpscalerBandDb = gainDb);
 
-    partial void OnReduceArtifactsChanged(bool value)
-    {
-        Update(value, (bool v) => Settings.Restoration.ReduceArtifacts = v);
-        OnPropertyChanged(nameof(IsRepairing));
-        OnPropertyChanged(nameof(ModelStatus));
-    }
-
-    partial void OnRebuildHarmonicsChanged(bool value)
-    {
-        Update(value, (bool v) => Settings.Restoration.RebuildHarmonics = v);
-        OnPropertyChanged(nameof(IsRebuilding));
-        OnPropertyChanged(nameof(IsRepairing));
-        OnPropertyChanged(nameof(ModelStatus));
-    }
-
-    partial void OnPredictChanged(bool value)
-    {
-        Update(value, (bool v) => Settings.Restoration.Predict = v);
-        OnPropertyChanged(nameof(ModelStatus));
-    }
-
-    partial void OnSelectedArtifactStrengthChanged(Choice? value) =>
-        Update(value, (double strength) => Settings.Restoration.ArtifactStrength = strength);
-
-    partial void OnSelectedRebuildAmountChanged(Choice? value) =>
-        Update(value, (double amountDb) => Settings.Restoration.RebuildAmountDb = amountDb);
-
-    partial void OnSelectedPredictionStrengthChanged(Choice? value) =>
-        Update(value, (double amount) => Settings.Restoration.NetworkAmount = amount);
-
-    partial void OnOutputDifferenceChanged(bool value) =>
-        Update(value, (bool v) => Settings.Restoration.OutputDifference = v);
-
-    partial void OnRebuildUltrasonicsChanged(bool value)
-    {
-        Update(value, (bool v) => Settings.Restoration.RebuildUltrasonics = v);
-        OnPropertyChanged(nameof(ModelStatus));
-    }
-
-    partial void OnSelectedUltrasonicTrimChanged(Choice? value) =>
-        Update(value, (double trimDb) => Settings.Restoration.UltrasonicTrimDb = trimDb);
+    partial void OnOutputDeltaChanged(bool value) => Update(value, (bool v) => Settings.Restoration.OutputDelta = v);
 
     partial void OnLimiterChanged(bool value) => Update(value, (bool v) => Settings.Processing.Limiter = v);
 
@@ -874,22 +729,10 @@ public sealed partial class DspStudioViewModel : ObservableObject
             SelectedConvolutionLayout =
                 Choice.Find(ConvolutionLayoutChoices, s.Processing.ConvolutionUniformBlocks) ?? ConvolutionLayoutChoices[0];
             RemoveUltrasonics = s.Processing.RemoveUltrasonics;
-            LossyRepair = s.Restoration.Enabled;
             NeuralUpscaler = s.Restoration.NeuralUpscaler;
+            SelectedUpscalerSource = Choice.Find(UpscalerSourceChoices, s.Restoration.SourceType) ?? UpscalerSourceChoices[0];
             SelectedUpscalerBand = Choice.Find(UpscalerBandChoices, s.Restoration.UpscalerBandDb) ?? UpscalerBandChoices[1];
-            ReduceArtifacts = s.Restoration.ReduceArtifacts;
-            RebuildHarmonics = s.Restoration.RebuildHarmonics;
-            Predict = s.Restoration.Predict;
-            OutputDifference = s.Restoration.OutputDifference;
-            RebuildUltrasonics = s.Restoration.RebuildUltrasonics;
-            SelectedUltrasonicTrim =
-                Choice.Find(UltrasonicTrimChoices, s.Restoration.UltrasonicTrimDb) ?? UltrasonicTrimChoices[1];
-            SelectedArtifactStrength =
-                Choice.Find(ArtifactStrengthChoices, s.Restoration.ArtifactStrength) ?? ArtifactStrengthChoices[1];
-            SelectedRebuildAmount =
-                Choice.Find(RebuildAmountChoices, s.Restoration.RebuildAmountDb) ?? RebuildAmountChoices[1];
-            SelectedPredictionStrength =
-                Choice.Find(PredictionStrengthChoices, s.Restoration.NetworkAmount) ?? PredictionStrengthChoices[1];
+            OutputDelta = s.Restoration.OutputDelta;
             Limiter = s.Processing.Limiter;
             ApodizationDetection = s.Processing.ApodizationDetection;
         }

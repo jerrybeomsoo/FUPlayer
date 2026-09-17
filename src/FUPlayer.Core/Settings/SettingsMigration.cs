@@ -68,6 +68,28 @@ internal static class SettingsMigration
             (root["Dsd"] as JsonObject)?.Remove("Staging");
         }
 
+        if (version < 4 && root["Restoration"] is JsonObject restoration)
+        {
+            // Lossy repair became the neural upscaler alone. The master switch it had is gone, so a file
+            // that had it off keeps the upscaler off; the difference monitor is now the output delta; the
+            // older stages and their models no longer exist, and their settings are dropped.
+            if (restoration["Enabled"] is JsonValue enabled && enabled.TryGetValue(out bool on) && !on)
+            {
+                restoration["NeuralUpscaler"] = false;
+            }
+
+            Rename(restoration, "OutputDifference", "OutputDelta");
+            foreach (string gone in new[]
+            {
+                "Enabled", "ReduceArtifacts", "ArtifactStrength", "RebuildHarmonics", "RebuildAmountDb", "Predict",
+                "ModelPath", "NetworkPath", "NetworkAmount", "ManualCutoffHz", "CeilingHz", "RebuildUltrasonics",
+                "UltrasonicPath", "UltrasonicTrimDb",
+            })
+            {
+                restoration.Remove(gone);
+            }
+        }
+
         root["Version"] = PlayerSettings.CurrentVersion;
     }
 

@@ -12,6 +12,8 @@ complex STFT, with hinge losses and feature matching.
 """
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -45,6 +47,76 @@ def multi_resolution_stft_loss(pred: torch.Tensor, target: torch.Tensor, rate: t
         log_l1 = (w * (torch.log(t.clamp_min(1e-7)) - torch.log(p.clamp_min(1e-7))).abs()).mean(dim=(1, 2))
         total = total + sc.mean() + log_l1.mean()
     return total / len(RESOLUTIONS)
+
+
+BAND_FROM_HZ = 12_000.0
+BAND_WIDTH_HZ = 500.0
+BAND_FLOOR_DB = 85.0
+
+
+def band_levels_db(spec_out: torch.Tensor, spec_target: torch.Tensor, rate: torch.Tensor):
+    """Level of each 500 Hz band above 12 kHz over the whole crop, output against master, in dB.
+
+    Returns the differences [B, bands], which bands each item has below its Nyquist, and where each band
+    starts. Bands more than 85 dB under the master's loudest band above 12 kHz count only down to that floor.
+    """
+    p_out = spec_out.abs().pow(2).sum(dim=-1)
+    p_tgt = spec_target.abs().pow(2).sum(dim=-1)
+    batch, bins = p_out.shape
+    nyquist = rate.float()[:, None] / 2.0
+    hz = torch.arange(bins, device=p_out.device, dtype=torch.float32)[None, :] * (nyquist / (bins - 1))
+    count = int(math.ceil((float(rate.max()) / 2.0 - BAND_FROM_HZ) / BAND_WIDTH_HZ))
+    valid = (hz >= BAND_FROM_HZ) & (hz < nyquist)
+    index = ((hz - BAND_FROM_HZ) / BAND_WIDTH_HZ).floor().long().clamp(0, count - 1)
+    zeros = p_out.new_zeros(batch, count)
+    e_out = zeros.scatter_add(1, index, torch.where(valid, p_out, 0.0))
+    e_tgt = zeros.scatter_add(1, index, torch.where(valid, p_tgt, 0.0))
+    present = zeros.scatter_add(1, index, valid.to(p_out.dtype)) > 0
+    floor = (e_tgt.amax(dim=1, keepdim=True) * 10.0 ** (-BAND_FLOOR_DB / 10.0)).clamp_min(1e-20)
+    diff = 10.0 * (torch.log10(e_out + floor) - torch.log10(e_tgt + floor))
+    starts = BAND_FROM_HZ + BAND_WIDTH_HZ * torch.arange(count, device=p_out.device, dtype=torch.float32)
+    return diff, present, starts
+
+
+def band_level_loss(spec_out: torch.Tensor, spec_target: torch.Tensor, rate: torch.Tensor,
+                    low: torch.Tensor | None = None, seam_weight: float = 1.0) -> torch.Tensor:
+    """The level of each 500 Hz band above 12 kHz over the whole crop, against the master's: |dB| / 10.
+
+    The per-bin losses see a band written 6 dB too loud across a kilohertz as forty bins among a
+    thousand, each already noisy with texture. Summed over a crop, a band's energy has no texture left
+    in it, and such an overshoot, where a source's own band ends and the written one begins, is the
+    whole of the difference. With the source rates given, the bands from 2 kHz under a source's Nyquist
+    to 1 kHz over it count seam_weight times: six bands of seventy-two are otherwise too few to move.
+    """
+    diff, present, starts = band_levels_db(spec_out, spec_target, rate)
+    weight = present.to(diff.dtype)
+    if low is not None and seam_weight != 1.0:
+        edge = low.float()[:, None] / 2.0
+        seam = (starts[None, :] >= edge - 2000.0) & (starts[None, :] < edge + 1000.0)
+        weight = weight * torch.where(seam, seam_weight, 1.0)
+    return (diff.abs() / 10.0 * weight).sum() / weight.sum().clamp_min(1)
+
+
+def passband_identity_loss(spec_out: torch.Tensor, spec_in: torch.Tensor, rate: torch.Tensor,
+                           passband_hz: torch.Tensor) -> torch.Tensor:
+    """How far a lossless source's own passband moved: |out - in| relative to |in|, below passband_hz.
+
+    Relative to the input, floored 85 dB under each frame's loudest bin the way the network's own reading
+    is, so a quiet bin counts as much as a loud one and noise the network cannot see does not count.
+    Items with no passband (coded sources) contribute nothing.
+    """
+    active = passband_hz > 0.0
+    if not bool(active.any()):
+        return spec_out.real.new_zeros(())
+    out, inp = spec_out[active], spec_in[active]
+    bins = inp.shape[1]
+    hz = torch.arange(bins, device=inp.device, dtype=torch.float32)[None, :] * (rate[active][:, None].float() / (2 * (bins - 1)))
+    mask = (hz < passband_hz[active][:, None]).to(inp.real.dtype)[:, :, None]
+    magnitude = inp.abs()
+    floor = (magnitude.amax(dim=1, keepdim=True) * 10.0 ** (-85.0 / 20.0)).clamp_min(1e-7)
+    relative = (out - inp).abs() / torch.maximum(magnitude, floor)
+    frames = inp.shape[2]
+    return ((relative * mask).sum(dim=(1, 2)) / (mask.sum(dim=(1, 2)) * frames).clamp_min(1.0)).mean()
 
 
 def _anti_wrap(x: torch.Tensor) -> torch.Tensor:

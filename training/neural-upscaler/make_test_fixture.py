@@ -7,7 +7,8 @@ away from passing its input through, so that a mistake anywhere in the player's 
 difference rather than hiding behind an identity. Then, from PyTorch and torchaudio:
 
   wave.f32              two seconds of tones and noise at 96 kHz
-  rebuilt.f32           torch.stft, the network and torch.istft over the whole of it
+  rebuilt.f32           torch.stft, the network and torch.istft over the whole of it, flagged lossy
+  rebuilt_lossless.f32  the same, flagged lossless
   frame100_re/_im.f32   frame 100 of torch.stft, which the player's transform must reproduce
   up_in.f32, up_out.f32 the 2x interpolator the network is trained behind, on its own
   tiny.onnx             the network, exported as the player loads it
@@ -44,6 +45,7 @@ def main() -> None:
         bias[2].normal_(-4.0, 1.0)         # m: a generated component loud enough to matter
         bias[3].normal_(0.0, 1.0)          # phi
         bias[4].normal_(0.0, 1.5)          # u: crossovers all over the place
+        model.condition.normal_(0.0, 0.5)  # a source flag that changes the answer
 
     rate = 96_000
     t = torch.arange(2 * rate, dtype=torch.float64) / rate
@@ -53,13 +55,15 @@ def main() -> None:
 
     spec = stft(wave[None])
     with torch.no_grad():
-        rebuilt = istft(model(spec), wave.shape[0])[0]
+        rebuilt = istft(model(spec, torch.ones(1)), wave.shape[0])[0]
+        rebuilt_lossless = istft(model(spec, torch.zeros(1)), wave.shape[0])[0]
         onnx_path = args.out / "tiny.onnx"
         wrapper = ExportWrapper(model).eval()
         re, im = spec.real.contiguous(), spec.imag.contiguous()
         torch.onnx.export(
-            wrapper, (re[..., :84], im[..., :84]), str(onnx_path), input_names=["re", "im"], output_names=["out_re", "out_im"],
-            dynamic_axes={"re": {0: "batch", 2: "frames"}, "im": {0: "batch", 2: "frames"},
+            wrapper, (re[..., :84], im[..., :84], torch.ones(1)), str(onnx_path), input_names=["re", "im", "lossy"],
+            output_names=["out_re", "out_im"],
+            dynamic_axes={"re": {0: "batch", 2: "frames"}, "im": {0: "batch", 2: "frames"}, "lossy": {0: "batch"},
                           "out_re": {0: "batch", 2: "frames"}, "out_im": {0: "batch", 2: "frames"}},
             opset_version=17, dynamo=False)
 
@@ -73,6 +77,7 @@ def main() -> None:
 
     write("wave.f32", wave)
     write("rebuilt.f32", rebuilt)
+    write("rebuilt_lossless.f32", rebuilt_lossless)
     write("frame100_re.f32", spec.real[0, :, 100])
     write("frame100_im.f32", spec.imag[0, :, 100])
     write("up_in.f32", up_in)

@@ -53,9 +53,6 @@ public sealed record PlaybackStatus
     /// <summary>What the source's spectrum says about how it was coded, once enough has played.</summary>
     public string? Bandwidth { get; init; }
 
-    /// <summary>True while a trained network is doing the repair.</summary>
-    public bool IsNeuralRepair { get; init; }
-
     /// <summary>FIFO fill level 0..1.</summary>
     public double BufferFill { get; init; }
 
