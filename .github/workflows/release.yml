@@ -1,8 +1,9 @@
 name: Release
 
-# Pushing a tag such as v0.1.0 builds the Windows package and publishes it as a
-# GitHub release. Running the workflow by hand builds the same package and
-# leaves it as a build artifact without publishing anything.
+# Pushing a tag such as v0.2.0 builds the Windows package and publishes it as a
+# GitHub release, with that version's section of CHANGELOG.md as the notes.
+# Running the workflow by hand builds the same package and leaves it as a build
+# artifact without publishing anything.
 on:
   push:
     tags:
@@ -49,7 +50,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create $env:GITHUB_REF_NAME `
-            "artifacts/FUPlayer-$env:VERSION-win-x64.zip" `
-            --title "FUPlayer $env:GITHUB_REF_NAME" `
-            --generate-notes
+          # This version's section of CHANGELOG.md; GitHub writes its own notes when there is none.
+          $notes = [System.Collections.Generic.List[string]]::new()
+          $inside = $false
+          foreach ($line in Get-Content CHANGELOG.md -Encoding utf8) {
+            if ($line -match '^## ') {
+              if ($inside) { break }
+              $inside = $line -match ('^## \[?' + [regex]::Escape($env:VERSION) + '\]?(\s|$)')
+              continue
+            }
+            if ($inside) { $notes.Add($line) }
+          }
+          $text = ($notes -join "`n").Trim()
+          $package = "artifacts/FUPlayer-$env:VERSION-win-x64.zip"
+          if ($text) {
+            Set-Content -Path release-notes.md -Value $text -Encoding utf8
+            gh release create $env:GITHUB_REF_NAME $package --title "FUPlayer $env:GITHUB_REF_NAME" --notes-file release-notes.md
+          } else {
+            gh release create $env:GITHUB_REF_NAME $package --title "FUPlayer $env:GITHUB_REF_NAME" --generate-notes
+          }

@@ -40,13 +40,14 @@ debug symbols that SkiaSharp and HarfBuzzSharp ship (about 100 MB of them), adds
 `artifacts/FUPlayer-<version>-win-x64.zip`:
 
 ```bash
-pwsh build/package.ps1 -Version 0.1.0
+pwsh build/package.ps1 -Version 0.2.0
 ```
 
 The result runs on a machine with no .NET runtime installed and comes to roughly 47 MB zipped. Pass
 `-FrameworkDependent` for a build that uses an installed .NET 9 Desktop Runtime instead, which is about a third
-of the size. The same script runs in CI: pushing a tag such as `v0.1.0` makes `.github/workflows/release.yml`
-build the package and attach it to a GitHub release.
+of the size. The same script runs in CI: pushing a tag such as `v0.2.0` makes `.github/workflows/release.yml`
+build the package and attach it to a GitHub release, with that version's section of `CHANGELOG.md` as the
+release notes.
 
 For a single project without the packaging around it:
 

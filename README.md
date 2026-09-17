@@ -13,7 +13,7 @@ so your DAC's own oversampling filter and modulator never run.
 [![.NET 9](https://img.shields.io/badge/.NET-9.0-512BD4.svg?style=flat-square&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![Avalonia](https://img.shields.io/badge/UI-Avalonia%2012-8B44AC.svg?style=flat-square)](https://avaloniaui.net/)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6.svg?style=flat-square&logo=windows&logoColor=white)](#requirements)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg?style=flat-square)](#status)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg?style=flat-square)](#status)
 
 <img src="docs/images/dsp-studio.png" alt="The DSP studio, showing a 2,097,153-tap filter and its magnitude response" width="820">
 
@@ -70,7 +70,7 @@ bypasses the DAC's modulator as well.
 
 ## Status
 
-Version 0.1, early but working. The playback engine, the DSP chain, the decoders, both Windows audio back-ends
+Version 0.2, early but working. The playback engine, the DSP chain, the decoders, both Windows audio back-ends
 and the desktop interface are all functional, and PCM-to-DSD playback has been confirmed on real hardware over
 ASIO. Expect rough edges, and expect settings to move between versions.
 
@@ -364,6 +364,7 @@ build/ffmpeg/                 script that builds LGPL FFmpeg libraries
 
 | Document | What is in it |
 | --- | --- |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each release |
 | [docs/building.md](docs/building.md) | Building, publishing, and the optional FFmpeg libraries |
 | [docs/architecture.md](docs/architecture.md) | Projects, threading model, and the classes that matter |
 | [docs/dsp.md](docs/dsp.md) | The signal processing in detail, with the arithmetic |

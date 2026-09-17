@@ -19,11 +19,23 @@ public enum SpectrumWindow
 /// Keeps the most recent samples of each channel and computes windowed magnitude spectra on demand (typically from a UI
 /// timer). A full-scale sine reads 0 dBFS with every window. Samples are copied under a short lock and transformed
 /// outside it, so DSP threads are never held up by a large FFT.
+///
+/// Given the band a display shows (<see cref="SetAnalysisBand"/>), a stream at many times that band is decimated on
+/// the way in (<see cref="AnalysisDecimator"/>), so its spectra are taken at <see cref="AnalysisRate"/> rather than
+/// at a rate whose bins are too wide for the low octaves.
 /// </summary>
 public sealed class SpectrumAnalyzer
 {
     public const int MinFftSize = 512;
     public const int MaxFftSize = 65536;
+
+    /// <summary>
+    /// The longest transform <see cref="MatchedFftSize"/> asks for: four times the longest one offered, so that a
+    /// stream analysed at four times a file's rate can still be given the file's resolution.
+    /// </summary>
+    public const int MaxMatchedFftSize = 4 * MaxFftSize;
+
+    private const int RingSize = MaxMatchedFftSize;
 
     private const double KaiserBeta = 9.0;
     private const double FloorDb = -300.0;
@@ -36,9 +48,11 @@ public sealed class SpectrumAnalyzer
     private readonly int[] _positions;
     private readonly long[] _written;
     private readonly Dictionary<int, FftPlan> _plans = [];
+    private readonly AnalysisDecimator?[] _decimators;
     private double[] _re = [];
     private double[] _im = [];
     private volatile bool _enabled = true;
+    private volatile AnalysisDecimator.Design _design;
 
     public SpectrumAnalyzer(int channels, int sampleRate)
     {
@@ -47,16 +61,22 @@ public sealed class SpectrumAnalyzer
         _rings = new double[channels][];
         for (int c = 0; c < channels; c++)
         {
-            _rings[c] = new double[MaxFftSize];
+            _rings[c] = new double[RingSize];
         }
 
         _positions = new int[channels];
         _written = new long[channels];
+        _decimators = new AnalysisDecimator?[channels];
+        _design = AnalysisDecimator.Design.For(sampleRate, 1);
     }
 
     public int Channels { get; }
 
+    /// <summary>Rate of the samples pushed in.</summary>
     public int SampleRate { get; }
+
+    /// <summary>Rate the spectra are taken at: <see cref="SampleRate"/>, or less while a narrow band is shown.</summary>
+    public int AnalysisRate => _design.OutputRate;
 
     /// <summary>
     /// While false, <see cref="Push"/> ignores its input so a hidden display costs the DSP threads nothing. Enabling
@@ -85,7 +105,45 @@ public sealed class SpectrumAnalyzer
     public static int NormalizeFftSize(int fftSize) =>
         Math.Clamp(FftPlan.NextPowerOfTwo(Math.Max(1, fftSize)), MinFftSize, MaxFftSize);
 
-    public static int BinCount(int fftSize) => NormalizeFftSize(fftSize) / 2 + 1;
+    public static int BinCount(int fftSize) => NormalizeMatchedFftSize(fftSize) / 2 + 1;
+
+    /// <summary>
+    /// The transform length that gives a stream analysed at <paramref name="rate"/> the bin width and time span that
+    /// <paramref name="fftSize"/> points give one analysed at <paramref name="referenceRate"/>: the processed output
+    /// read with the same resolution as the file it came from.
+    /// </summary>
+    public static int MatchedFftSize(int fftSize, int rate, int referenceRate)
+    {
+        fftSize = NormalizeFftSize(fftSize);
+        if (rate <= 0 || referenceRate <= 0 || rate == referenceRate)
+        {
+            return fftSize;
+        }
+
+        // The power of two nearest the exact length on a logarithmic scale.
+        double exact = fftSize * (double)rate / referenceRate;
+        int size = FftPlan.NextPowerOfTwo((long)Math.Ceiling(exact / Math.Sqrt(2.0)));
+        return NormalizeMatchedFftSize(size);
+    }
+
+    /// <summary>
+    /// Chooses the analysis rate for a display showing up to <paramref name="bandHz"/> (0: everything). Changing it
+    /// discards the samples held, which were taken at the old rate.
+    /// </summary>
+    public void SetAnalysisBand(double bandHz)
+    {
+        int factor = AnalysisDecimator.FactorFor(SampleRate, bandHz);
+        if (factor == _design.Factor)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            _design = AnalysisDecimator.Design.For(SampleRate, factor);
+            ClearRings();
+        }
+    }
 
     public void Push(int channel, ReadOnlySpan<double> data)
     {
@@ -94,16 +152,46 @@ public sealed class SpectrumAnalyzer
             return;
         }
 
-        ReadOnlySpan<double> source = data.Length > MaxFftSize ? data[^MaxFftSize..] : data;
+        // Filtered outside the lock, by the one thread that feeds this channel. A band chosen meanwhile makes the
+        // result worthless, and it is dropped below.
+        AnalysisDecimator.Design design = _design;
+        ReadOnlySpan<double> source = data;
+        if (design.Factor > 1)
+        {
+            AnalysisDecimator? decimator = _decimators[channel];
+            if (decimator is null || !ReferenceEquals(decimator.Filters, design))
+            {
+                decimator = AnalysisDecimator.Create(design);
+                _decimators[channel] = decimator;
+            }
+
+            source = decimator.Process(data);
+            if (source.IsEmpty)
+            {
+                return;
+            }
+        }
+
+        int produced = source.Length;
+        if (source.Length > RingSize)
+        {
+            source = source[^RingSize..];
+        }
+
         lock (_gate)
         {
+            if (!ReferenceEquals(design, _design))
+            {
+                return;
+            }
+
             double[] ring = _rings[channel];
             int position = _positions[channel];
-            int first = Math.Min(source.Length, MaxFftSize - position);
+            int first = Math.Min(source.Length, RingSize - position);
             source[..first].CopyTo(ring.AsSpan(position));
             source[first..].CopyTo(ring);
-            _positions[channel] = (position + source.Length) & (MaxFftSize - 1);
-            _written[channel] += data.Length;
+            _positions[channel] = (position + source.Length) & (RingSize - 1);
+            _written[channel] += produced;
         }
     }
 
@@ -114,7 +202,7 @@ public sealed class SpectrumAnalyzer
     /// <returns>False until enough samples have arrived.</returns>
     public bool TryCompute(ReadOnlySpan<int> channels, int fftSize, SpectrumWindow window, Span<double> magnitudeDb)
     {
-        fftSize = NormalizeFftSize(fftSize);
+        fftSize = NormalizeMatchedFftSize(fftSize);
         int bins = fftSize / 2 + 1;
         if (channels.IsEmpty || magnitudeDb.Length < bins)
         {
@@ -146,8 +234,8 @@ public sealed class SpectrumAnalyzer
                 foreach (int channel in channels)
                 {
                     double[] ring = _rings[channel];
-                    int start = (_positions[channel] - fftSize) & (MaxFftSize - 1);
-                    int first = Math.Min(fftSize, MaxFftSize - start);
+                    int start = (_positions[channel] - fftSize) & (RingSize - 1);
+                    int first = Math.Min(fftSize, RingSize - start);
                     SimdMath.AddScaled(re[..first], ring.AsSpan(start, first), scale);
                     if (first < fftSize)
                     {
@@ -197,14 +285,22 @@ public sealed class SpectrumAnalyzer
     {
         lock (_gate)
         {
-            foreach (double[] ring in _rings)
-            {
-                Array.Clear(ring);
-            }
-
-            Array.Clear(_positions);
-            Array.Clear(_written);
+            ClearRings();
         }
+    }
+
+    private static int NormalizeMatchedFftSize(int fftSize) =>
+        Math.Clamp(FftPlan.NextPowerOfTwo(Math.Max(1, fftSize)), MinFftSize, MaxMatchedFftSize);
+
+    private void ClearRings()
+    {
+        foreach (double[] ring in _rings)
+        {
+            Array.Clear(ring);
+        }
+
+        Array.Clear(_positions);
+        Array.Clear(_written);
     }
 
     private sealed record WindowTable(double[] Coefficients, double CoherentGain)

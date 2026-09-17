@@ -210,6 +210,10 @@ public sealed partial class AnalyzerViewModel : ObservableObject
         SpectrumAnalyzer? output = hub.OutputSpectrum;
         bool useOutput = options.Signal == AnalyzerSignal.Output && output is not null;
         SpectrumAnalyzer analyzer = useOutput ? output! : hub.Spectrum;
+
+        // Both are taken no faster than the band shown needs, so neither spends its bins above it.
+        hub.Spectrum.SetAnalysisBand(options.BandHz);
+        output?.SetAnalysisBand(options.BandHz);
         hub.Spectrum.IsEnabled = visible && !useOutput;
         if (output is not null)
         {
@@ -229,9 +233,17 @@ public sealed partial class AnalyzerViewModel : ObservableObject
             return;
         }
 
-        int fftSize = SpectrumAnalyzer.NormalizeFftSize(options.FftSize);
+        // The processed output runs at several times the file's rate. Taken with as many points as the file, its bins
+        // would be that many times wider and its window that much shorter: the low octaves drawn as a few blocks, and
+        // every frame a different slice of music. It gets the points that give it the file's resolution instead, up
+        // to four times as many, which every band but the whole of a DSD stream's needs no more than.
+        int requested = SpectrumAnalyzer.NormalizeFftSize(options.FftSize);
+        int fftSize = useOutput
+            ? Math.Min(SpectrumAnalyzer.MatchedFftSize(requested, analyzer.AnalysisRate, hub.Spectrum.AnalysisRate), 4 * requested)
+            : requested;
+
         long now = Environment.TickCount64;
-        if (now - _lastComputeTicks < RefreshMilliseconds(fftSize))
+        if (now - _lastComputeTicks < RefreshMilliseconds(requested))
         {
             return;
         }
@@ -257,14 +269,14 @@ public sealed partial class AnalyzerViewModel : ObservableObject
         (double markerHz, string? markerLabel) = Marker(plan, useOutput);
         var frame = new AnalyzerFrame(
             traces.Select((t, i) => new AnalyzerTrace(t.Label, t.Color, _magnitudes[i])).ToArray(),
-            analyzer.SampleRate,
+            analyzer.AnalysisRate,
             options.BandHz,
             options.Scale,
             options.FloorDb,
             markerHz,
             markerLabel,
             options.PeakHold);
-        string summary = Describe(options, useOutput, output is not null, analyzer.SampleRate, fftSize);
+        string summary = Describe(options, useOutput, output is not null, analyzer.SampleRate, analyzer.AnalysisRate, fftSize);
         int generation = _generation;
         double[][] magnitudes = _magnitudes;
         double[][] averages = _averages;
@@ -351,7 +363,8 @@ public sealed partial class AnalyzerViewModel : ObservableObject
         <= 8192 => 33,
         <= 16384 => 50,
         <= 32768 => 80,
-        _ => 130,
+        <= 65536 => 130,
+        _ => 250,
     };
 
     private static double[][] Allocate(int count, int length)
@@ -469,7 +482,7 @@ public sealed partial class AnalyzerViewModel : ObservableObject
         _services.NotifySettingsChanged(applyToEngine: false);
     }
 
-    private string Describe(AnalyzerSettings options, bool useOutput, bool outputAvailable, int sampleRate, int fftSize)
+    private string Describe(AnalyzerSettings options, bool useOutput, bool outputAvailable, int streamRate, int sampleRate, int fftSize)
     {
         string signal = useOutput
             ? "Processed output"
@@ -484,7 +497,10 @@ public sealed partial class AnalyzerViewModel : ObservableObject
             < 1000 => resolution.ToString("0", CultureInfo.CurrentCulture) + " Hz",
             _ => (resolution / 1000).ToString("0.0", CultureInfo.CurrentCulture) + " kHz",
         };
-        return $"{signal}  ·  {AudioRates.Format(sampleRate)}  ·  {window} window  ·  {fftSize.ToString("N0", CultureInfo.InvariantCulture)}-point FFT, {perBin} per bin";
+        string rate = streamRate == sampleRate
+            ? AudioRates.Format(sampleRate)
+            : $"{AudioRates.Format(streamRate)}, analysed at {AudioRates.Format(sampleRate)}";
+        return $"{signal}  ·  {rate}  ·  {window} window  ·  {fftSize.ToString("N0", CultureInfo.InvariantCulture)}-point FFT, {perBin} per bin";
     }
 
     private void EnsureChannelChoices(int channels)
