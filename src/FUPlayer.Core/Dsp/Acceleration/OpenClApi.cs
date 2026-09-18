@@ -312,6 +312,15 @@ internal static unsafe class OpenClApi
         return completed;
     }
 
+    /// <summary>Lets go of an event nobody will wait for; the command it belongs to still runs.</summary>
+    public static void ReleaseEvent(nint completed)
+    {
+        if (completed != 0)
+        {
+            ClReleaseEvent(completed);
+        }
+    }
+
     /// <summary>Waits for an event from <see cref="WriteAsync"/> and releases it.</summary>
     public static void Wait(nint completed)
     {

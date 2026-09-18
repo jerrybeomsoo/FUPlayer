@@ -30,8 +30,18 @@ public interface ICaptureProvider
     IReadOnlyList<CaptureTarget> List();
 
     /// <summary>Opens a live decoder over one application's output. The decoder never ends.</summary>
-    IAudioDecoder Open(int processId, int channels);
+    IAudioDecoder Open(int processId, int channels, CaptureOptions? options = null);
 }
+
+/// <summary>How a capture treats the application's own playback, and where the player's output goes.</summary>
+/// <param name="SilenceDirectOutput">
+/// Mute the devices the application plays to while it is captured. Without it the application is heard twice
+/// wherever its device and the player's are the same hardware, which a driver that mixes Windows and ASIO
+/// playback makes an echo, the player's copy arriving a moment after the application's.
+/// </param>
+/// <param name="OutputBackendId">The player's output back-end, so its own device is never the one muted.</param>
+/// <param name="OutputDeviceId">The player's output device on that back-end, or null for the default.</param>
+public sealed record CaptureOptions(bool SilenceDirectOutput, string? OutputBackendId, string? OutputDeviceId);
 
 /// <summary>
 /// The pseudo-path that puts a live application into the queue, alongside the test-tone path. It is
@@ -65,4 +75,7 @@ public interface IDiagnosticCapture
 
     /// <summary>Frames the reader invented because nothing arrived in time.</summary>
     long SilentFrames { get; }
+
+    /// <summary>What was done about the application's own playback, or null when nothing was needed.</summary>
+    string? DirectOutputNote { get; }
 }

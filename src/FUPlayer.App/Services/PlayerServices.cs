@@ -30,7 +30,7 @@ public sealed class PlayerServices : IDisposable
         if (OperatingSystem.IsWindows())
         {
             backends.AddRange(WindowsAudioBackends.Create());
-            Capture = new ProcessLoopbackProvider();
+            Capture = new ProcessLoopbackProvider(Store.SettingsDirectory);
         }
 
         backends.Add(new FileAudioBackend(() => RenderDirectory));
@@ -38,6 +38,11 @@ public sealed class PlayerServices : IDisposable
         Backends = new AudioBackendRegistry(backends);
 
         Engine = new PlaybackEngine(Settings, Backends, Capture);
+
+        // What the engine reported, with the time, beside the settings: when the player dies without a message,
+        // the last lines here and in asio.log are what is left to say what it was doing.
+        string log = Path.Combine(Store.SettingsDirectory, "player.log");
+        Engine.ErrorOccurred += (_, message) => AppendLog(log, message);
         Library = new MusicLibrary(Path.Combine(Store.SettingsDirectory, "library.json"));
         Covers = new CoverArtCache(Path.Combine(Store.SettingsDirectory, "thumbnails"));
 
@@ -47,6 +52,30 @@ public sealed class PlayerServices : IDisposable
             _commitTimer.Stop();
             Commit();
         };
+    }
+
+    private static readonly object LogGate = new();
+
+    private static void AppendLog(string path, string message)
+    {
+        lock (LogGate)
+        {
+            try
+            {
+                var info = new FileInfo(path);
+                if (info.Exists && info.Length > 1 << 20)
+                {
+                    string[] lines = File.ReadAllLines(path);
+                    File.WriteAllLines(path, lines[(lines.Length / 2)..]);
+                }
+
+                File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {message}{Environment.NewLine}");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Logging must never get in the way of playing.
+            }
+        }
     }
 
     /// <summary>Raised on the UI thread whenever a page changed <see cref="Settings"/>.</summary>

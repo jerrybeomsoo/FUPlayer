@@ -50,6 +50,9 @@ public sealed partial class LiveInputViewModel : ObservableObject
     [ObservableProperty]
     private int _capturedProcessId;
 
+    [ObservableProperty]
+    private string? _captureNote;
+
     public LiveInputViewModel(PlayerServices services)
     {
         _services = services;
@@ -77,6 +80,31 @@ public sealed partial class LiveInputViewModel : ObservableObject
 
     public bool IsCapturing => CapturedProcessId > 0;
 
+    public bool HasCaptureNote => IsCapturing && !string.IsNullOrEmpty(CaptureNote);
+
+    /// <summary>Mute the devices the captured application plays to, so it is heard once.</summary>
+    public bool SilenceCapturedApplication
+    {
+        get => _services.Settings.Playback.SilenceCapturedApplication;
+        set
+        {
+            if (_services.Settings.Playback.SilenceCapturedApplication == value)
+            {
+                return;
+            }
+
+            _services.Settings.Playback.SilenceCapturedApplication = value;
+            _services.NotifySettingsChanged(applyToEngine: true);
+            OnPropertyChanged();
+
+            // The muting belongs to the capture, so a running one is opened again to take the change.
+            if (IsCapturing)
+            {
+                _services.Engine.PlayCapture(CapturedProcessId);
+            }
+        }
+    }
+
     public string CapturingLabel => Applications.FirstOrDefault(a => a.ProcessId == CapturedProcessId)?.Name
         ?? $"pid {CapturedProcessId}";
 
@@ -97,6 +125,7 @@ public sealed partial class LiveInputViewModel : ObservableObject
     /// <summary>Reflects what the engine reports, so the page still shows the truth after a device change.</summary>
     public void Update(PlaybackStatus status)
     {
+        CaptureNote = status.CaptureNote;
         if (!status.IsCapture && CapturedProcessId != 0)
         {
             CapturedProcessId = 0;
@@ -178,5 +207,8 @@ public sealed partial class LiveInputViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(IsCapturing));
         OnPropertyChanged(nameof(CapturingLabel));
+        OnPropertyChanged(nameof(HasCaptureNote));
     }
+
+    partial void OnCaptureNoteChanged(string? value) => OnPropertyChanged(nameof(HasCaptureNote));
 }

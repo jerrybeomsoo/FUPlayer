@@ -3,8 +3,12 @@ using System.Globalization;
 namespace FUPlayer.Audio.Windows;
 
 /// <summary>
-/// Optional log of every ASIO driver call, for tracking down drivers that keep the hardware after playback.
-/// Set FUPLAYER_ASIO_LOG=1 to write to %APPDATA%\FUPlayer\asio.log, or to a path to write there.
+/// Log of the ASIO driver's life in this process: loading, opening, starting, stopping, the resets and rate
+/// changes a driver asks for, and releasing. Nothing is written per buffer.
+///
+/// On by default, in %APPDATA%\FUPlayer\asio.log, kept under a megabyte: a driver that takes the process down
+/// leaves nothing else behind, and the last lines say what it was asked to do. FUPLAYER_ASIO_LOG=0 turns it off;
+/// a path writes there instead.
 /// </summary>
 public static class AsioTrace
 {
@@ -88,22 +92,32 @@ public static class AsioTrace
         }
     }
 
+    private const long MaxLogBytes = 1 << 20;
+
     private static string? ResolvePath()
     {
         string? value = Environment.GetEnvironmentVariable("FUPLAYER_ASIO_LOG");
-        if (string.IsNullOrWhiteSpace(value) || value is "0" or "false")
+        if (value is "0" or "false")
         {
             return null;
         }
 
         try
         {
-            string path = value is "1" or "true"
+            string path = string.IsNullOrWhiteSpace(value) || value is "1" or "true"
                 ? System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FUPlayer", "asio.log")
                 : value;
             if (System.IO.Path.GetDirectoryName(path) is { Length: > 0 } folder)
             {
                 Directory.CreateDirectory(folder);
+            }
+
+            // Keep the newest half once the log passes its size.
+            var info = new FileInfo(path);
+            if (info.Exists && info.Length > MaxLogBytes)
+            {
+                string[] lines = File.ReadAllLines(path);
+                File.WriteAllLines(path, lines[(lines.Length / 2)..]);
             }
 
             File.AppendAllText(path, $"{Environment.NewLine}=== FUPlayer ASIO log, {DateTime.Now:yyyy-MM-dd HH:mm:ss} ==={Environment.NewLine}");

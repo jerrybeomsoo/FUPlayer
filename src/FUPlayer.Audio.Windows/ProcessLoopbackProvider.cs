@@ -12,6 +12,21 @@ public sealed class ProcessLoopbackProvider : ICaptureProvider
 {
     private static readonly Guid SessionManagerIid = new("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F");
 
+    private readonly string? _stateDirectory;
+
+    /// <param name="stateDirectory">
+    /// Where to note the devices muted during a capture, so that a crash does not leave them muted: they are
+    /// unmuted here, on the next start. Null keeps no note.
+    /// </param>
+    public ProcessLoopbackProvider(string? stateDirectory = null)
+    {
+        _stateDirectory = stateDirectory;
+        if (IsSupported)
+        {
+            DirectOutputMuter.RestoreAfterCrash(stateDirectory);
+        }
+    }
+
     public bool IsSupported => LoopbackConstants.IsSupported;
 
     public string? UnsupportedReason => IsSupported
@@ -65,10 +80,16 @@ public sealed class ProcessLoopbackProvider : ICaptureProvider
         return [.. found.Values.OrderByDescending(t => t.IsPlaying).ThenBy(t => t.ProcessName, StringComparer.OrdinalIgnoreCase)];
     }
 
-    public IAudioDecoder Open(int processId, int channels)
+    public IAudioDecoder Open(int processId, int channels, CaptureOptions? options = null)
     {
         (int rate, int mixChannels) = MixFormat();
-        return new ProcessLoopbackDecoder(processId, rate, Math.Clamp(channels <= 0 ? mixChannels : channels, 1, 8));
+        var decoder = new ProcessLoopbackDecoder(processId, rate, Math.Clamp(channels <= 0 ? mixChannels : channels, 1, 8));
+        if (options is { SilenceDirectOutput: true })
+        {
+            decoder.SilenceDirectOutput(options, _stateDirectory);
+        }
+
+        return decoder;
     }
 
     private static void Collect(IAudioSessionManager2 manager, Dictionary<int, CaptureTarget> found)
@@ -202,11 +223,14 @@ internal sealed class ProcessLoopbackDecoder : IAudioDecoder, IDiagnosticCapture
 {
     private readonly ProcessLoopbackCapture _capture;
     private readonly string _name;
+    private readonly int _processId;
+    private DirectOutputMuter? _muter;
     private float[] _scratch = [];
     private long _position;
 
     public ProcessLoopbackDecoder(int processId, int sampleRate, int channels)
     {
+        _processId = processId;
         _capture = new ProcessLoopbackCapture(processId, sampleRate, channels);
         _capture.Start();
         Format = StreamFormat.Pcm(sampleRate, channels, 32);
@@ -239,6 +263,11 @@ internal sealed class ProcessLoopbackDecoder : IAudioDecoder, IDiagnosticCapture
 
     public long SilentFrames => _capture.SilentFrames;
 
+    public string? DirectOutputNote => _muter?.Note;
+
+    public void SilenceDirectOutput(CaptureOptions options, string? stateDirectory) =>
+        _muter ??= new DirectOutputMuter(_processId, options, stateDirectory);
+
     public int ReadPcm(double[][] destination, int offset, int maxFrames)
     {
         int channels = Format.Channels;
@@ -270,5 +299,9 @@ internal sealed class ProcessLoopbackDecoder : IAudioDecoder, IDiagnosticCapture
     {
     }
 
-    public void Dispose() => _capture.Dispose();
+    public void Dispose()
+    {
+        _capture.Dispose();
+        _muter?.Dispose();
+    }
 }

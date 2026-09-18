@@ -203,7 +203,9 @@ internal sealed class GpuConvolver : IDisposable
         byte[] staging = _staging[_slot];
         Stage(staging.AsSpan(0, half), re, mirror: 1.0, bins, n);
         Stage(staging.AsSpan(half, half), im, mirror: -1.0, bins, n);
-        OpenClApi.WriteAsync(_queue, _historyRe, offset, staging.AsSpan(0, half));
+        // The queue runs in order, so the second write finishing means the first has: only its event is kept. The
+        // first one's is released at once, where it used to be dropped, one driver event leaked every block.
+        OpenClApi.ReleaseEvent(OpenClApi.WriteAsync(_queue, _historyRe, offset, staging.AsSpan(0, half)));
         _staged[_slot] = OpenClApi.WriteAsync(_queue, _historyIm, offset, staging.AsSpan(half, half));
     }
 

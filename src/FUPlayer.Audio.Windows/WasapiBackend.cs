@@ -239,7 +239,7 @@ public sealed class WasapiBackend : IAudioBackend
         }
     }
 
-    private static string? ReadFriendlyName(IMMDevice device)
+    internal static string? ReadFriendlyName(IMMDevice device)
     {
         if (device.OpenPropertyStore(WasapiConstants.StgmRead, out IPropertyStore store) != WasapiConstants.SOk)
         {

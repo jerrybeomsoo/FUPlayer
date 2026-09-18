@@ -289,7 +289,20 @@ internal sealed class AsioThread
 /// <summary>An open ASIO stream. ASIO callbacks carry no context, so only one stream can be active per process.</summary>
 internal sealed unsafe class AsioStream : IAudioStream
 {
+    private const int MaxChannels = 64;
+
+    /// <summary>
+    /// The callback table and the buffer descriptions a driver is handed live as long as the process. A driver
+    /// winding down after it was stopped and released may still call through the table from its own thread, and
+    /// drivers are built with Control Flow Guard: a table already freed, or a DLL already unloaded under that
+    /// thread, ends the process on the spot with STATUS_STACK_BUFFER_OVERRUN and no module to blame.
+    /// </summary>
+    private static readonly AsioCallbacks* SharedCallbacks = CreateCallbacks();
+    private static readonly AsioBufferInfo* SharedBuffers =
+        (AsioBufferInfo*)NativeMemory.AllocZeroed((nuint)(MaxChannels * sizeof(AsioBufferInfo)));
+
     private static AsioStream? _active;
+    private static int _callbacksRunning;
 
     private readonly AsioDriverEntry _entry;
     private readonly AudioStreamOptions _options;
@@ -356,18 +369,48 @@ internal sealed unsafe class AsioStream : IAudioStream
     public void Dispose() => AsioThread.Shared.Invoke(Cleanup);
 
     [UnmanagedCallersOnly]
-    private static void OnBufferSwitch(int bufferIndex, int directProcess) => _active?.Render(bufferIndex);
+    private static void OnBufferSwitch(int bufferIndex, int directProcess) => RenderActive(bufferIndex);
 
     [UnmanagedCallersOnly]
     private static IntPtr OnBufferSwitchTimeInfo(IntPtr timeInfo, int bufferIndex, int directProcess)
     {
-        _active?.Render(bufferIndex);
+        RenderActive(bufferIndex);
         return timeInfo;
     }
 
+    private static void RenderActive(int bufferIndex)
+    {
+        Interlocked.Increment(ref _callbacksRunning);
+        try
+        {
+            _active?.Render(bufferIndex);
+        }
+        catch (Exception)
+        {
+            // Nothing may leave a callback the driver made: an exception crossing into its frames ends the process.
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _callbacksRunning);
+        }
+    }
+
     [UnmanagedCallersOnly]
-    private static void OnSampleRateDidChange(double rate) =>
+    private static void OnSampleRateDidChange(double rate)
+    {
+        AsioTrace.Write($"driver callback: sample rate changed to {rate:0} Hz");
         _active?.Fail(new InvalidOperationException($"The ASIO driver switched to {rate:0} Hz."));
+    }
+
+    private static AsioCallbacks* CreateCallbacks()
+    {
+        var callbacks = (AsioCallbacks*)NativeMemory.AllocZeroed((nuint)sizeof(AsioCallbacks));
+        callbacks->BufferSwitch = &OnBufferSwitch;
+        callbacks->SampleRateDidChange = &OnSampleRateDidChange;
+        callbacks->AsioMessage = &OnAsioMessage;
+        callbacks->BufferSwitchTimeInfo = &OnBufferSwitchTimeInfo;
+        return callbacks;
+    }
 
     [UnmanagedCallersOnly]
     private static int OnAsioMessage(int selector, int value, IntPtr message, double* optional)
@@ -380,6 +423,7 @@ internal sealed unsafe class AsioStream : IAudioStream
             case AsioConstants.MessageEngineVersion:
                 return 2;
             case AsioConstants.MessageResetRequest:
+                AsioTrace.Write("driver callback: reset requested");
                 _active?.Fail(new InvalidOperationException("The ASIO driver requested a reset (for example after a settings change)."));
                 return 1;
             case AsioConstants.MessageResyncRequest:
@@ -418,6 +462,11 @@ internal sealed unsafe class AsioStream : IAudioStream
             AsioTrace.Write($"init {_entry.Name}: driver at {_previousSampleRate:0} Hz, opening {Format.Describe()}");
 
             _driver.GetChannels(out _, out int outputs);
+            if (_channels > MaxChannels)
+            {
+                throw new InvalidOperationException($"ASIO output is limited to {MaxChannels} channels.");
+            }
+
             if (_options.ChannelOffset + _channels > outputs)
             {
                 throw new InvalidOperationException($"The driver has {outputs} outputs; {_channels} channels starting at {_options.ChannelOffset} do not fit.");
@@ -453,18 +502,15 @@ internal sealed unsafe class AsioStream : IAudioStream
             BufferFrames = dsd ? DsdBytesPerBuffer(_driverBufferSize) : _driverBufferSize;
             _canonical = new byte[BufferFrames * Format.CanonicalBytesPerFrame];
 
-            _buffers = (AsioBufferInfo*)NativeMemory.AllocZeroed((nuint)(_channels * sizeof(AsioBufferInfo)));
+            _buffers = SharedBuffers;
+            NativeMemory.Clear(_buffers, (nuint)(MaxChannels * sizeof(AsioBufferInfo)));
             for (int c = 0; c < _channels; c++)
             {
                 _buffers[c].IsInput = 0;
                 _buffers[c].ChannelNumber = _options.ChannelOffset + c;
             }
 
-            _callbacks = (AsioCallbacks*)NativeMemory.AllocZeroed((nuint)sizeof(AsioCallbacks));
-            _callbacks->BufferSwitch = &OnBufferSwitch;
-            _callbacks->SampleRateDidChange = &OnSampleRateDidChange;
-            _callbacks->AsioMessage = &OnAsioMessage;
-            _callbacks->BufferSwitchTimeInfo = &OnBufferSwitchTimeInfo;
+            _callbacks = SharedCallbacks;
 
             _active = this;
             AsioTrace.Write($"createBuffers({_channels} ch, {_driverBufferSize} samples)");
@@ -666,6 +712,15 @@ internal sealed unsafe class AsioStream : IAudioStream
         AsioTrace.Write($"restore setSampleRate({wanted:0}) = {driver.SetSampleRate(wanted)}");
     }
 
+    private static void WaitForCallbacks()
+    {
+        long deadline = Environment.TickCount64 + 500;
+        while (Volatile.Read(ref _callbacksRunning) > 0 && Environment.TickCount64 < deadline)
+        {
+            Thread.Sleep(1);
+        }
+    }
+
     private void Fail(Exception exception)
     {
         if (_failed)
@@ -692,6 +747,10 @@ internal sealed unsafe class AsioStream : IAudioStream
                         AsioTrace.Write($"stop {_entry.Name} = {driver.Stop()}");
                     }
 
+                    // A driver can still be inside a buffer switch when stop returns; its buffers stay put until it leaves.
+                    _failed = true;
+                    WaitForCallbacks();
+
                     if (_buffersCreated)
                     {
                         AsioTrace.Write($"disposeBuffers = {driver.DisposeBuffers()}");
@@ -712,9 +771,9 @@ internal sealed unsafe class AsioStream : IAudioStream
                     AsioTrace.Streaming(null);
                     driver.Dispose();
 
-                    // Some drivers only hand the hardware back when their DLL leaves the process.
-                    NativeMethods.CoFreeUnusedLibrariesEx(0, 0);
-                    AsioTrace.Write("CoFreeUnusedLibrariesEx(0)");
+                    // Some drivers only hand the hardware back when their DLL leaves the process. That happens on the
+                    // host thread a second after the driver is last used, not here: unloading it now would pull the
+                    // code out from under any thread the driver has not finished stopping.
                 }
             }
         }
@@ -725,17 +784,8 @@ internal sealed unsafe class AsioStream : IAudioStream
                 _active = null;
             }
 
-            if (_buffers != null)
-            {
-                NativeMemory.Free(_buffers);
-                _buffers = null;
-            }
-
-            if (_callbacks != null)
-            {
-                NativeMemory.Free(_callbacks);
-                _callbacks = null;
-            }
+            _buffers = null;
+            _callbacks = null;
         }
     }
 }

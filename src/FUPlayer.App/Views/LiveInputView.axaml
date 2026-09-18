@@ -65,6 +65,13 @@
             <TextBlock Text="{Binding CapturingLabel}" VerticalAlignment="Center" FontWeight="Medium" />
             <Button Classes="subtle" Command="{Binding StopCommand}" Content="Stop" />
           </StackPanel>
+          <TextBlock Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding HasCaptureNote}" Text="{Binding CaptureNote}" />
+
+          <Border Classes="divider" Margin="0,4" />
+          <controls:SettingRow Title="Mute the application's own playback"
+                               Description="Mutes the devices it plays to while captured, so it is heard once. The player's own output is never muted; everything is unmuted when the capture stops.">
+            <ToggleSwitch IsChecked="{Binding SilenceCapturedApplication}" OnContent="" OffContent="" />
+          </controls:SettingRow>
         </StackPanel>
       </Border>
 
@@ -76,7 +83,7 @@
           <TextBlock Classes="secondary" TextWrapping="Wrap"
                      Text="Set the captured application's own volume to full and use this player's volume instead, so nothing is attenuated before the filtering." />
           <TextBlock Classes="secondary" TextWrapping="Wrap"
-                     Text="Send the output to a different device than the one the application plays to, or mute the application at the system mixer, otherwise both the original and the processed copy reach the speakers." />
+                     Text="Do not mute the application in the Windows volume mixer: that silences the capture too. Muting its playback device, which the setting above does, leaves the capture intact." />
         </StackPanel>
       </Border>
     </StackPanel>

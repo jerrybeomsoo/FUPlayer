@@ -46,6 +46,12 @@ public partial class App : Application
             {
                 _viewModel.OpenPaths(paths);
             }
+
+            // Starts a live capture of that process, as the Live input page would.
+            if (int.TryParse(OptionValue(args, "--capture"), out int processId) && processId > 0)
+            {
+                _services.Engine.PlayCapture(processId);
+            }
         }
 
         base.OnFrameworkInitializationCompleted();

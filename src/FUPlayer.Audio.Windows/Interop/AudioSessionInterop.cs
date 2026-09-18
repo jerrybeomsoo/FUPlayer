@@ -36,6 +36,64 @@ internal interface IAudioSessionManager2
     int UnregisterDuckNotification(IntPtr notification);
 }
 
+/// <summary>IAudioEndpointVolume, as far as muting and asking whether the mute is in hardware.</summary>
+[ComImport]
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IAudioEndpointVolume
+{
+    [PreserveSig]
+    int RegisterControlChangeNotify(IntPtr notify);
+
+    [PreserveSig]
+    int UnregisterControlChangeNotify(IntPtr notify);
+
+    [PreserveSig]
+    int GetChannelCount(out uint count);
+
+    [PreserveSig]
+    int SetMasterVolumeLevel(float levelDb, ref Guid eventContext);
+
+    [PreserveSig]
+    int SetMasterVolumeLevelScalar(float level, ref Guid eventContext);
+
+    [PreserveSig]
+    int GetMasterVolumeLevel(out float levelDb);
+
+    [PreserveSig]
+    int GetMasterVolumeLevelScalar(out float level);
+
+    [PreserveSig]
+    int SetChannelVolumeLevel(uint channel, float levelDb, ref Guid eventContext);
+
+    [PreserveSig]
+    int SetChannelVolumeLevelScalar(uint channel, float level, ref Guid eventContext);
+
+    [PreserveSig]
+    int GetChannelVolumeLevel(uint channel, out float levelDb);
+
+    [PreserveSig]
+    int GetChannelVolumeLevelScalar(uint channel, out float level);
+
+    [PreserveSig]
+    int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid eventContext);
+
+    [PreserveSig]
+    int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
+
+    [PreserveSig]
+    int GetVolumeStepInfo(out uint step, out uint stepCount);
+
+    [PreserveSig]
+    int VolumeStepUp(ref Guid eventContext);
+
+    [PreserveSig]
+    int VolumeStepDown(ref Guid eventContext);
+
+    [PreserveSig]
+    int QueryHardwareSupport(out uint mask);
+}
+
 [ComImport]
 [Guid("E2F5BB11-0570-40CA-ACDD-3AA01277DEE8")]
 [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
