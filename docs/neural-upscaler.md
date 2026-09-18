@@ -11,10 +11,12 @@ what a high-resolution master of that kind of music usually carries, learned fro
 be measured against the master it came from, which is what this page does, and it can be heard alone
 with **Output delta**.
 
-No model ships with the player. A model is weights fitted to somebody's music; train your own from your
-own high-resolution files with the scripts in [training/neural-upscaler](../training/neural-upscaler/README.md),
-and put the `.onnx` file and the `.json` written beside it into the `models` folder next to `FUPlayer.exe`
-or into `%APPDATA%\FUPlayer\models`. DSP Studio says what it found.
+The release carries the model this page measures, in the `models` folder next to `FUPlayer.exe`. A model is
+weights fitted to somebody's music; to use your own instead, train it from your own high-resolution files with the
+scripts in [training/neural-upscaler](../training/neural-upscaler/README.md), and put the `.onnx` file and the
+`.json` written beside it into that folder or into `%APPDATA%\FUPlayer\models`. DSP Studio says what it found.
+For coded streams it can run after the [neural restorer](neural-restorer.md), which then hands it a source to read
+as lossless.
 
 ## Settings
 
@@ -43,7 +45,7 @@ In the order the signal meets it, per channel:
 
 | # | Stage | Rate | What it does |
 | --- | --- | --- | --- |
-| 1 | Decoder, ReplayGain | fs (44.1/48 kHz) | Decoded PCM, level-matched. |
+| 1 | Decoder, ReplayGain | fs (44.1/48 kHz) | Decoded PCM, level-matched. With the [neural restorer](neural-restorer.md) on, a coded stereo source is restored here first, both channels together, and the upscaler then reads it as lossless. |
 | 2 | Source meters, bandwidth readout | fs | Measurement only: levels, spectrum, where the source's spectrum ends. |
 | 3 | 2× interpolation | fs → 2 fs | Kaiser-windowed sinc, 64 zero crossings, β 14.77, roll-off 0.99: the exact kernel the network was trained behind. |
 | 4 | STFT | 2 fs | 2,048-point periodic Hann, hop 512, first frame centred on the first sample. |

@@ -1,11 +1,12 @@
 namespace FUPlayer.Core.Dsp.Restoration;
 
 /// <summary>
-/// Where neural upscaler models are kept.
+/// Where the neural models are kept: upscalers, and restorers, whose file names end in "restorer.onnx".
 ///
-/// No model ships with the player. A model is weights fitted to music, and which music decides what it
-/// writes, so the choice belongs to whoever is listening. Train one from your own high-resolution files
-/// with the scripts in training/neural-upscaler, or copy somebody else's into one of these folders.
+/// A release carries one of each in the "models" folder beside the program. A model is weights fitted to music,
+/// and which music decides what it writes, so any other can take its place: train one from your own files with the
+/// scripts in training/, or put somebody else's in one of these folders. The newest file of a kind is the one used
+/// unless the settings name another.
 /// </summary>
 public static class ModelLibrary
 {
@@ -112,9 +113,19 @@ public static class ModelLibrary
 
     private static readonly Lock UpscalerGate = new();
     private static (string Path, DateTime Written, NeuralUpscalerModel Model)? _upscaler;
+    private static readonly Lock RestorerGate = new();
+    private static (string Path, DateTime Written, NeuralRestorerModel Model)? _restorer;
+
+    /// <summary>Whether a model file is a restorer, by its name.</summary>
+    public static bool IsRestorerFile(string path) =>
+        Path.GetFileName(path).EndsWith(NeuralRestorerModel.Suffix, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Every neural upscaler in any of the search folders, newest first.</summary>
-    public static IReadOnlyList<string> ListUpscalers() => Files("*" + NeuralUpscalerModel.Extension);
+    public static IReadOnlyList<string> ListUpscalers() =>
+        Files("*" + NeuralUpscalerModel.Extension).Where(path => !IsRestorerFile(path)).ToList();
+
+    /// <summary>Every neural restorer in any of the search folders, newest first.</summary>
+    public static IReadOnlyList<string> ListRestorers() => Files("*" + NeuralRestorerModel.Suffix);
 
     /// <summary>
     /// Opens the neural upscaler, or returns null with the reason. The model is opened once and kept: it is
@@ -153,6 +164,87 @@ public static class ModelLibrary
                 return null;
             }
         }
+    }
+
+    /// <summary>
+    /// Opens the neural restorer, or returns null with the reason. Opened once and kept, like the upscaler, and shared
+    /// by every pipeline that plays with it.
+    /// </summary>
+    public static NeuralRestorerModel? TryLoadRestorer(string? path, out string? failure)
+    {
+        failure = null;
+        path ??= ListRestorers().FirstOrDefault();
+        if (path is null)
+        {
+            failure = $"no *{NeuralRestorerModel.Suffix} model in {string.Join(" or ", SearchDirectories())}";
+            return null;
+        }
+
+        lock (RestorerGate)
+        {
+            try
+            {
+                DateTime written = File.GetLastWriteTimeUtc(path);
+                if (_restorer is { } cached && cached.Path == path && cached.Written == written)
+                {
+                    return cached.Model;
+                }
+
+                // One thread: the network's layers are small enough that handing them between threads costs more
+                // than it saves, and the rest of the chain wants the cores.
+                NeuralRestorerModel model = NeuralRestorerModel.Load(path, threads: 1);
+                _restorer = (path, written, model);
+                return model;
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException
+                or Microsoft.ML.OnnxRuntime.OnnxRuntimeException or DllNotFoundException or TypeInitializationException)
+            {
+                failure = $"{Path.GetFileName(path)}: {ex.Message}";
+                return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// What the neural restorer would run with, in one line, or why it has nothing: the scores the export wrote beside
+    /// it, measured on songs kept out of training, before and after.
+    /// </summary>
+    public static string DescribeRestorer()
+    {
+        string? path = ListRestorers().FirstOrDefault();
+        if (path is null)
+        {
+            return $"No model installed. Place a *{NeuralRestorerModel.Suffix} model and its .json in "
+                + $"{string.Join(" or ", SearchDirectories())}; see training/neural-restorer.";
+        }
+
+        string name = Path.GetFileName(path);
+        try
+        {
+            using var metadata = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.ChangeExtension(path, ".json")));
+            System.Text.Json.JsonElement root = metadata.RootElement;
+            double parameters = root.TryGetProperty("parameters", out var p) ? p.GetDouble() : 0.0;
+            long steps = root.TryGetProperty("step", out var s) ? s.GetInt64() : 0;
+            string text = $"{name}: {parameters / 1e6:0.#} M parameters, {steps:N0} steps.";
+            if (root.TryGetProperty("scores", out var scores)
+                && Pair(scores, "in_above16k_db", "out_above16k_db") is { } level
+                && Pair(scores, "in_12k-nyq", "out_12k-nyq") is { } top
+                && Pair(scores, "in_side_db", "out_side_db") is { } side)
+            {
+                text += $" Held out, coded against lossless: level above 16 kHz {level.Before:+0.0;−0.0} → {level.After:+0.0;−0.0} dB, "
+                    + $"LSD above 12 kHz {top.Before:0.0} → {top.After:0.0} dB, side channel {side.Before:0.0} → {side.After:0.0} dB.";
+            }
+
+            return text;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+            or System.Text.Json.JsonException or InvalidOperationException or FormatException)
+        {
+            return $"{name}: no description file beside it.";
+        }
+
+        static (double Before, double After)? Pair(System.Text.Json.JsonElement scores, string before, string after) =>
+            scores.TryGetProperty(before, out var b) && scores.TryGetProperty(after, out var a) ? (b.GetDouble(), a.GetDouble()) : null;
     }
 
     /// <summary>

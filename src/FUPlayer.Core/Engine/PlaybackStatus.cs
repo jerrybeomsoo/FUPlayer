@@ -26,6 +26,9 @@ public sealed record PlaybackStatus
     /// <summary>True while the source is another application rather than a file.</summary>
     public bool IsCapture { get; init; }
 
+    /// <summary>While capturing: what was done about the application's own playback.</summary>
+    public string? CaptureNote { get; init; }
+
     public TimeSpan Position { get; init; }
 
     public TimeSpan Duration { get; init; }
@@ -42,6 +45,12 @@ public sealed record PlaybackStatus
 
     /// <summary>True while the neural upscaler's network is running.</summary>
     public bool IsUpscaling { get; init; }
+
+    /// <summary>What the neural restorer is doing, or null when it was not asked for or is idle for this source.</summary>
+    public string? Restorer { get; init; }
+
+    /// <summary>True while the restorer's network is running.</summary>
+    public bool IsRestoring { get; init; }
 
     public string? BackendName { get; init; }
 

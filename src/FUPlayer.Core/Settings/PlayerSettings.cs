@@ -255,23 +255,28 @@ public sealed class VolumeSettings
     public bool IsBypassed => MinimumDb == 0.0 && MaximumDb == 0.0;
 }
 
-/// <summary>How the neural upscaler reads a source: as coded, as lossless, or from its codec.</summary>
+/// <summary>How the neural models read a source: as coded, as lossless, or from its codec.</summary>
 public enum UpscalerSource
 {
     /// <summary>Lossy codecs and application captures as lossy; PCM, FLAC, ALAC and other lossless formats as lossless.</summary>
     Automatic,
 
-    /// <summary>Correct the passband and synthesise above the codec's cutoff.</summary>
+    /// <summary>Restore it, and have the upscaler correct the passband and synthesise above the codec's cutoff.</summary>
     Lossy,
 
-    /// <summary>Leave the passband as it is and synthesise above the source's Nyquist frequency only.</summary>
+    /// <summary>Leave the restorer out, and have the upscaler leave the passband alone and synthesise above Nyquist only.</summary>
     Lossless,
 }
 
 /// <summary>
-/// Lossy repair: the neural upscaler, which takes 44.1 and 48 kHz PCM to 88.2 and 96 kHz, correcting what a
-/// codec did below the source's Nyquist frequency and synthesising the band above it. It adds signal that
-/// was not in the source, so it is off until asked for.
+/// Lossy repair, in two networks that can run alone or one after the other.
+///
+/// The neural restorer takes a coded 44.1 or 48 kHz stereo stream back towards the lossless recording at the same
+/// rate, in 80 to 90 ms: the band above the codec's low-pass, the holes and noise it left below it, the stereo it
+/// collapsed. The neural upscaler takes 44.1 and 48 kHz PCM to 88.2 and 96 kHz, correcting what a codec did below
+/// the source's Nyquist frequency and synthesising the band above it, in about half a second. Chained, the
+/// upscaler is given the restorer's output as a lossless source. Both add signal that was not in the source, so
+/// both are off until asked for.
 /// </summary>
 public sealed class RestorationSettings
 {
@@ -280,6 +285,12 @@ public sealed class RestorationSettings
 
     /// <summary>The upscaler model file, or null for the newest one in the models folders.</summary>
     public string? NeuralUpscalerPath { get; set; }
+
+    /// <summary>Run the neural restorer on coded 44.1 and 48 kHz stereo and mono sources, ahead of everything else.</summary>
+    public bool NeuralRestorer { get; set; }
+
+    /// <summary>The restorer model file, or null for the newest one in the models folders.</summary>
+    public string? NeuralRestorerPath { get; set; }
 
     /// <summary>Whether the network treats the source as coded or lossless.</summary>
     public UpscalerSource SourceType { get; set; } = UpscalerSource.Automatic;
@@ -291,8 +302,8 @@ public sealed class RestorationSettings
     public double UpscalerBandDb { get; set; }
 
     /// <summary>
-    /// Output the upscaler's contribution alone: its output minus its latency-aligned input. Silence
-    /// where it changed nothing, and for a source it does not run on. For monitoring, not listening.
+    /// Output the neural models' contribution alone: their output minus their latency-aligned input. Silence
+    /// where they changed nothing, and for a source neither runs on. For monitoring, not listening.
     /// </summary>
     public bool OutputDelta { get; set; }
 }
@@ -426,6 +437,12 @@ public sealed class PlaybackSettings
     public bool Gapless { get; set; } = true;
 
     public TimeDisplayMode TimeDisplay { get; set; } = TimeDisplayMode.Elapsed;
+
+    /// <summary>
+    /// While an application is captured, mute the devices it plays to, so that it is heard once, through the
+    /// player. See <see cref="Capture.CaptureOptions.SilenceDirectOutput"/>.
+    /// </summary>
+    public bool SilenceCapturedApplication { get; set; } = true;
 }
 
 public sealed class LibrarySettings

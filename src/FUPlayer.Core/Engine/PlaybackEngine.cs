@@ -228,6 +228,7 @@ public sealed class PlaybackEngine : IDisposable
             CurrentItem = marker is not null ? marker.Item : index >= 0 ? Queue.Get(index) : null,
             IsTestTone = marker?.IsTestTone ?? false,
             IsCapture = marker?.IsCapture ?? false,
+            CaptureNote = marker?.IsCapture == true ? (_decoder as IDiagnosticCapture)?.DirectOutputNote : null,
             Bandwidth = Describe(pipeline),
             Position = position,
             Duration = marker is { Length: > 0 } ? TimeSpan.FromSeconds((double)marker.Length / marker.SampleRate) : TimeSpan.Zero,
@@ -236,6 +237,8 @@ public sealed class PlaybackEngine : IDisposable
             Acceleration = pipeline?.AccelerationSummary,
             Upscaler = pipeline?.UpscalerStatus,
             IsUpscaling = pipeline?.IsUpscaling ?? false,
+            Restorer = pipeline?.RestorerStatus,
+            IsRestoring = pipeline?.IsRestoring ?? false,
             BackendName = _backend?.DisplayName,
             DeviceName = _deviceName,
             DspLoad = Volatile.Read(ref _dspLoad),
@@ -520,6 +523,9 @@ public sealed class PlaybackEngine : IDisposable
         StopInternal();
     }
 
+    internal static CaptureOptions CaptureOptionsFor(PlayerSettings settings) =>
+        new(settings.Playback.SilenceCapturedApplication, settings.Output.BackendId, settings.Output.DeviceId);
+
     /// <summary>Re-opens a live capture, which is what a device or format change needs.</summary>
     private void StartCapture(int processId)
     {
@@ -534,7 +540,7 @@ public sealed class PlaybackEngine : IDisposable
         CloseDecoder();
         try
         {
-            IAudioDecoder decoder = _capture.Open(processId, _settings.Output.Channels);
+            IAudioDecoder decoder = _capture.Open(processId, _settings.Output.Channels, CaptureOptionsFor(_settings));
             _captureProcessId = processId;
             StartPipeline(_decoderIndex, decoder, null, PlanFor(decoder), TimeSpan.Zero, keepPaused: false);
         }
@@ -960,6 +966,8 @@ public sealed class PlaybackEngine : IDisposable
     internal static bool RestorationChanged(RestorationSettings a, RestorationSettings b) =>
         a.NeuralUpscaler != b.NeuralUpscaler
         || a.NeuralUpscalerPath != b.NeuralUpscalerPath
+        || a.NeuralRestorer != b.NeuralRestorer
+        || a.NeuralRestorerPath != b.NeuralRestorerPath
         || a.SourceType != b.SourceType
         || a.UpscalerBandDb != b.UpscalerBandDb
         || a.OutputDelta != b.OutputDelta;
@@ -1019,7 +1027,7 @@ public sealed class PlaybackEngine : IDisposable
                     throw new NotSupportedException(_capture?.UnsupportedReason ?? "This build cannot capture an application.");
                 }
 
-                decoder = _capture.Open(processId, _settings.Output.Channels);
+                decoder = _capture.Open(processId, _settings.Output.Channels, CaptureOptionsFor(_settings));
                 _captureProcessId = processId;
                 return true;
             }
@@ -1073,11 +1081,6 @@ public sealed class PlaybackEngine : IDisposable
             plan = plan with { Limiter = true };
         }
 
-        if (plan.UpscaleRate == 0)
-        {
-            return plan;
-        }
-
         bool lossy = settings.Restoration.SourceType switch
         {
             UpscalerSource.Lossy => true,
@@ -1085,18 +1088,37 @@ public sealed class PlaybackEngine : IDisposable
             _ => coded,
         };
 
-        if (!lossy && plan.ProcessingRate < plan.UpscaleRate)
+        if (plan.Restore && !lossy)
         {
+            plan = plan with
+            {
+                Restore = false,
+                Limiter = settings.Processing.Limiter || coded || plan.UpscaleRate > 0,
+                Notes = [.. plan.Notes, "Neural restorer idle: lossless source."],
+            };
+        }
+
+        if (plan.UpscaleRate == 0)
+        {
+            return plan;
+        }
+
+        // What the restorer hands on is lossless in all but origin, and the upscaler is told so: its passband is left
+        // alone and only the band above the source's Nyquist frequency is written.
+        bool upscalerLossy = lossy && !plan.Restore;
+        if (!upscalerLossy && plan.ProcessingRate < plan.UpscaleRate)
+        {
+            string reason = plan.Restore ? "restored source" : "lossless source";
             return plan with
             {
                 UpscaleRate = 0,
                 SourceIsLossy = false,
-                Limiter = settings.Processing.Limiter || coded,
-                Notes = [.. plan.Notes, $"Neural upscaler idle: lossless source, output below {AudioRates.Format(plan.UpscaleRate)}."],
+                Limiter = settings.Processing.Limiter || coded || plan.Restore,
+                Notes = [.. plan.Notes, $"Neural upscaler idle: {reason}, output below {AudioRates.Format(plan.UpscaleRate)}."],
             };
         }
 
-        return plan with { SourceIsLossy = lossy };
+        return plan with { SourceIsLossy = upscalerLossy };
     }
 
     private PlaybackPlan PlanFor(StreamFormat format)

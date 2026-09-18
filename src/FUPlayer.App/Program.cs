@@ -82,6 +82,7 @@ internal static class Program
             }
         }
 
+        report.AppendLine($"  restorer       {ModelLibrary.DescribeRestorer()}");
         report.AppendLine($"  upscaler       {ModelLibrary.DescribeUpscaler()}");
         report.AppendLine($"  FFmpeg         {(FFmpegLibrary.IsAvailable ? FFmpegLibrary.VersionDescription : FFmpegLibrary.LoadError)}");
         report.AppendLine($"  plays          {string.Join(" ", DecoderFactory.PlayableExtensions)}");

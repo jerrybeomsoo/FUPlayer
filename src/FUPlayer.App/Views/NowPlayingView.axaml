@@ -214,6 +214,7 @@
             <Border Classes="divider" Margin="0,2" />
             <TextBlock Text="{Binding Resampler}" Classes="muted small" TextWrapping="Wrap" />
             <TextBlock Text="{Binding Acceleration}" Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding HasAcceleration}" />
+            <TextBlock Text="{Binding Restorer}" Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding HasRestorer}" />
             <TextBlock Text="{Binding Upscaler}" Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding HasUpscaler}" />
             <TextBlock Text="{Binding Notes}" Classes="warning small" TextWrapping="Wrap" IsVisible="{Binding HasNotes}" />
           </StackPanel>

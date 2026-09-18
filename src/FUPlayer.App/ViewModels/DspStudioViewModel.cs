@@ -173,6 +173,11 @@ public sealed partial class DspStudioViewModel : ObservableObject
     private bool _removeUltrasonics;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNeuralModel))]
+    private bool _neuralRestorer;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNeuralModel))]
     private bool _neuralUpscaler;
 
     [ObservableProperty]
@@ -435,14 +440,26 @@ public sealed partial class DspStudioViewModel : ObservableObject
     /// <summary>What the neural upscaler would run with. Read from the models folder each time it is asked for.</summary>
     public string UpscalerStatus => ModelLibrary.DescribeUpscaler();
 
+    /// <summary>What the neural restorer would run with. Read from the models folder each time it is asked for.</summary>
+    public string RestorerStatus => ModelLibrary.DescribeRestorer();
+
+    /// <summary>Either network is on, so the settings they share are shown.</summary>
+    public bool HasNeuralModel => NeuralRestorer || NeuralUpscaler;
+
     /// <summary>Reads the models folder again. Called when the page is opened and when a switch changes.</summary>
-    public void RefreshModelStatus() => OnPropertyChanged(nameof(UpscalerStatus));
+    public void RefreshModelStatus()
+    {
+        OnPropertyChanged(nameof(UpscalerStatus));
+        OnPropertyChanged(nameof(RestorerStatus));
+    }
 
     public IReadOnlyList<Choice> UpscalerSourceChoices { get; } =
     [
         new("Automatic", UpscalerSource.Automatic, "Lossy codecs and application captures: lossy. PCM, FLAC, ALAC: lossless."),
-        new("Lossy", UpscalerSource.Lossy, "Passband correction below the codec cutoff; synthesis above it."),
-        new("Lossless", UpscalerSource.Lossless, "Passband preserved; synthesis above Nyquist only. Idle when the output is below 2 fs."),
+        new("Lossy", UpscalerSource.Lossy,
+            "Restorer runs. Upscaler: passband correction below the codec cutoff, synthesis above it; lossless mode after the restorer."),
+        new("Lossless", UpscalerSource.Lossless,
+            "Restorer idle. Upscaler: passband preserved, synthesis above Nyquist only; idle when the output is below 2 fs."),
     ];
 
     public IReadOnlyList<Choice> UpscalerBandChoices { get; } =
@@ -513,7 +530,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
 
     public string LimiterDescription => Limiter
         ? "Look-ahead peak limiter, 1 ms: holds inter-sample overs below full scale. Now playing counts engagements."
-        : "Off for lossless sources. Lossy codecs, captures and upscaled audio stay limited: their overs are codec or network products that would alias above 40 kHz or destabilise a DSD modulator.";
+        : "Off for lossless sources. Lossy codecs, captures, restored and upscaled audio stay limited: their overs are codec or network products that would alias above 40 kHz or destabilise a DSD modulator.";
 
     private PlayerSettings Settings => _services.Settings;
 
@@ -640,6 +657,12 @@ public sealed partial class DspStudioViewModel : ObservableObject
         OnPropertyChanged(nameof(UpscalerStatus));
     }
 
+    partial void OnNeuralRestorerChanged(bool value)
+    {
+        Update(value, (bool v) => Settings.Restoration.NeuralRestorer = v);
+        OnPropertyChanged(nameof(RestorerStatus));
+    }
+
     partial void OnSelectedUpscalerSourceChanged(Choice? value) =>
         Update(value, (UpscalerSource source) => Settings.Restoration.SourceType = source);
 
@@ -729,6 +752,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
             SelectedConvolutionLayout =
                 Choice.Find(ConvolutionLayoutChoices, s.Processing.ConvolutionUniformBlocks) ?? ConvolutionLayoutChoices[0];
             RemoveUltrasonics = s.Processing.RemoveUltrasonics;
+            NeuralRestorer = s.Restoration.NeuralRestorer;
             NeuralUpscaler = s.Restoration.NeuralUpscaler;
             SelectedUpscalerSource = Choice.Find(UpscalerSourceChoices, s.Restoration.SourceType) ?? UpscalerSourceChoices[0];
             SelectedUpscalerBand = Choice.Find(UpscalerBandChoices, s.Restoration.UpscalerBandDb) ?? UpscalerBandChoices[1];

@@ -23,10 +23,11 @@ or, after building, `src/FUPlayer.Cli/bin/Release/net9.0/fuplayer-cli.exe`.
 | `apps` | Applications whose audio can be captured |
 | `capture --app <name\|pid>` | Record one application's output to a float WAV |
 | `bandwidth <files>` | Where each file's spectrum ends, and whether that looks like a codec |
-| `models` | Installed neural upscaler models and the folders searched |
+| `models` | Installed neural restorers and upscalers, and the folders searched |
 
-Neural upscaler models are trained with the Python scripts in `training/neural-upscaler`; see
-[neural-upscaler.md](neural-upscaler.md).
+The release carries one model of each kind in `models` beside the executables. Others are trained with the Python
+scripts in `training/neural-restorer` and `training/neural-upscaler`; see [neural-restorer.md](neural-restorer.md)
+and [neural-upscaler.md](neural-upscaler.md).
 
 ## Processing options
 
@@ -52,11 +53,13 @@ Neural upscaler models are trained with the Python scripts in `training/neural-u
 | `--pass-through` | Send DSD files unchanged when the output rate matches |
 | `--remove-ultrasonics` | Low-pass sources above 48 kHz at 20 kHz |
 | `--no-limiter` | Leave peaks above full scale alone |
-| `--neural-upscale` | Neural upscaler: 44.1/48 kHz PCM to 88.2/96 kHz |
+| `--neural-restore` | Neural restorer: coded 44.1/48 kHz stereo back towards lossless at the same rate, about 90 ms |
+| `--restorer <file>` | Which `*restorer.onnx` model. Default is the newest installed |
+| `--neural-upscale` | Neural upscaler: 44.1/48 kHz PCM to 88.2/96 kHz; after the restorer when both are given |
 | `--upscaler <file>` | Which `.onnx` model. Default is the newest installed |
-| `--source-type auto\|lossy\|lossless` | How the upscaler reads the source. Default `auto` |
+| `--source-type auto\|lossy\|lossless` | How the models read the source. Default `auto` |
 | `--upscaler-level <dB>` | Gain on the synthesised band above the source Nyquist |
-| `--output-delta` | Output the upscaler's contribution only: output minus latency-aligned input |
+| `--output-delta` | Output what the models changed only: output minus latency-aligned input |
 
 ## Graphics acceleration
 

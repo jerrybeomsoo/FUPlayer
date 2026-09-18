@@ -42,9 +42,17 @@ internal sealed class DspPipeline : IDisposable
     private int _detectorChannel = -1;
     private readonly NeuralUpscalerModel? _upscalerModel;
 
+    /// <summary>The restorer, when it runs: over the source's channels together, before the per-channel chains.</summary>
+    private readonly NeuralRestorer? _restorer;
+    private double[][] _restored = [];
+
+    /// <summary>For the output delta: the source delayed by the restorer's latency, which is what its output is compared with.</summary>
+    private readonly DelayLine[] _restorerDryDelays = [];
+    private double[][] _restorerDry = [];
+
     /// <summary>
-    /// Output delta asked for, and nothing to take a delta of: the upscaler is off for this source or has no
-    /// model. The delta is then silence, rather than the music played as if it were one.
+    /// Output delta asked for, and nothing to take a delta of: no neural stage runs for this source, or the ones asked
+    /// for have no model. The delta is then silence, rather than the music played as if it were one.
     /// </summary>
     private readonly bool _silentDelta;
     private BandwidthEstimate _bandwidth;
@@ -106,7 +114,31 @@ internal sealed class DspPipeline : IDisposable
             _upscalerModel = ModelLibrary.TryLoadUpscaler(settings.Restoration.NeuralUpscalerPath, out string? upscalerFailure);
             UpscalerStatus = _upscalerModel is null
                 ? $"Neural upscaler not running: {upscalerFailure}"
-                : $"Neural upscaler: {Path.GetFileName(_upscalerModel.Path)} at {AudioRates.Format(plan.UpscaleRate)}";
+                : $"Neural upscaler: {Path.GetFileName(_upscalerModel.Path)} at {AudioRates.Format(plan.UpscaleRate)}"
+                    + (plan.Restore ? ", after the restorer" : string.Empty);
+        }
+
+        // The restorer runs at the source rate on both channels at once, so it sits in front of the per-channel
+        // chains. Without its model the source goes on unrestored.
+        if (plan.Restore)
+        {
+            NeuralRestorerModel? restorerModel = ModelLibrary.TryLoadRestorer(settings.Restoration.NeuralRestorerPath, out string? restorerFailure);
+            if (restorerModel is null)
+            {
+                RestorerStatus = $"Neural restorer not running: {restorerFailure}";
+            }
+            else
+            {
+                _restorer = new NeuralRestorer(restorerModel, plan.Source.SampleRate);
+                RestorerStatus = $"Neural restorer: {Path.GetFileName(restorerModel.Path)} at {AudioRates.Format(plan.Source.SampleRate)}, "
+                    + $"{1000.0 * _restorer.Latency / plan.Source.SampleRate:0} ms";
+                _restored = [new double[InputBlock], new double[InputBlock]];
+                if (settings.Restoration.OutputDelta)
+                {
+                    _restorerDryDelays = Enumerable.Range(0, _sourceChannels).Select(_ => new DelayLine(_restorer.Latency)).ToArray();
+                    _restorerDry = Enumerable.Range(0, _sourceChannels).Select(_ => new double[InputBlock]).ToArray();
+                }
+            }
         }
 
         ResamplerChain? resampler = plan.PassThrough
@@ -197,7 +229,8 @@ internal sealed class DspPipeline : IDisposable
             }
         }
 
-        _silentDelta = restore.NeuralUpscaler && restore.OutputDelta && _upscalerModel is null;
+        _silentDelta = restore.OutputDelta && (restore.NeuralUpscaler || restore.NeuralRestorer)
+            && _upscalerModel is null && _restorer is null;
 
         _chains = new ChannelChain[_outputChannels];
         for (int c = 0; c < _outputChannels; c++)
@@ -250,14 +283,16 @@ internal sealed class DspPipeline : IDisposable
                     {
                         Lossy = plan.SourceIsLossy,
                     };
+                }
 
-                    // Output delta: the interpolated input, delayed by exactly the network stage's latency, is
-                    // subtracted from its output, which leaves what the network changed and nothing else.
-                    if (restore.OutputDelta)
-                    {
-                        chain.UpscaledDry = new double[chain.Upscaled.Length];
-                        chain.UpscaledDryDelay = new DelayLine(chain.Upscaler.Latency);
-                    }
+                // Output delta: the interpolated input, delayed by exactly the network stage's latency, is subtracted
+                // from its output, which leaves what the network changed and nothing else. After the restorer, the
+                // input is the unrestored source, interpolated the same way, so the delta holds what both changed.
+                if (restore.OutputDelta && (chain.Upscaler is not null || _restorer is not null))
+                {
+                    chain.UpscaledDry = new double[chain.Upscaled.Length];
+                    chain.UpscaledDryDelay = chain.Upscaler is null ? null : new DelayLine(chain.Upscaler.Latency);
+                    chain.DryUpsampler = _restorer is null ? null : new TrainingUpsampler();
                 }
             }
 
@@ -296,6 +331,11 @@ internal sealed class DspPipeline : IDisposable
         if (ultrasonic is not null)
         {
             latency += ultrasonic.DelayOutputSamples / ultrasonic.OutputRate;
+        }
+
+        if (_restorer is not null)
+        {
+            latency += (double)_restorer.Latency / plan.Source.SampleRate;
         }
 
         if (plan.UpscaleRate > 0 && !plan.PassThrough)
@@ -358,6 +398,12 @@ internal sealed class DspPipeline : IDisposable
 
     /// <summary>True while the network itself is running, rather than only the interpolation in front of it.</summary>
     public bool IsUpscaling => _upscalerModel is not null;
+
+    /// <summary>What the neural restorer is doing, or null when it does not run for this source.</summary>
+    public string? RestorerStatus { get; }
+
+    /// <summary>True while the restorer's network is running.</summary>
+    public bool IsRestoring => _restorer is not null;
 
     private static double BlockSecondsOf(ResamplerChain? chain) =>
         chain is null ? 0.0 : chain.FlushInputSamples / (double)Math.Max(1, chain.InputRate);
@@ -439,7 +485,8 @@ internal sealed class DspPipeline : IDisposable
         long start = Stopwatch.GetTimestamp();
         double volume = Volatile.Read(ref _volume) * _levelOffset;
         double replayGain = Volatile.Read(ref _replayGain);
-        _workers.For(_outputChannels, c => ProcessPcmChannel(c, input, frames, volume, replayGain));
+        double[][] processed = _restorer is null ? input : Restore(input, frames);
+        _workers.For(_outputChannels, c => ProcessPcmChannel(c, input, processed, frames, volume, replayGain));
         _pendingLength = Interleave().Length;
         _pendingOffset = 0;
         LastProcessingSeconds = Stopwatch.GetElapsedTime(start).TotalSeconds;
@@ -524,6 +571,12 @@ internal sealed class DspPipeline : IDisposable
             chain.Reset(volume);
         }
 
+        _restorer?.Reset();
+        foreach (DelayLine delay in _restorerDryDelays)
+        {
+            delay.Reset();
+        }
+
         Meters.Source.Reset();
         Meters.Output?.Reset();
         Meters.Spectrum.Reset();
@@ -596,11 +649,36 @@ internal sealed class DspPipeline : IDisposable
         Meters.Spectrum.Push(channel, signal);
     }
 
-    private void ProcessPcmChannel(int c, double[][] input, int frames, double volume, double replayGain)
+    /// <summary>
+    /// Runs the restorer over the source's channels: both together, or a mono source as both. The source's own arrays
+    /// are left as they are, since the meters and detectors read them and a flush hands in the same silence each time.
+    /// </summary>
+    private double[][] Restore(double[][] input, int frames)
+    {
+        if (_restored[0].Length < frames)
+        {
+            _restored = [new double[frames], new double[frames]];
+            _restorerDry = _restorerDry.Select(_ => new double[frames]).ToArray();
+        }
+
+        input[0].AsSpan(0, frames).CopyTo(_restored[0]);
+        input[_sourceChannels > 1 ? 1 : 0].AsSpan(0, frames).CopyTo(_restored[1]);
+        for (int c = 0; c < _restorerDryDelays.Length; c++)
+        {
+            input[c].AsSpan(0, frames).CopyTo(_restorerDry[c]);
+            _restorerDryDelays[c].Process(_restorerDry[c].AsSpan(0, frames));
+        }
+
+        _restorer!.Process(_restored[0].AsSpan(0, frames), _restored[1].AsSpan(0, frames));
+        return _sourceChannels > 1 ? _restored : [_restored[0]];
+    }
+
+    private void ProcessPcmChannel(int c, double[][] input, double[][] processed, int frames, double volume, double replayGain)
     {
         ChannelChain chain = _chains[c];
         int source = SourceChannel(c);
         bool meter = source >= 0 && source == c;
+        bool restored = !ReferenceEquals(input, processed);
         Span<double> signal = chain.Conversion.AsSpan(0, frames);
         if (source < 0)
         {
@@ -608,7 +686,7 @@ internal sealed class DspPipeline : IDisposable
         }
         else
         {
-            input[source].AsSpan(0, frames).CopyTo(signal);
+            processed[source].AsSpan(0, frames).CopyTo(signal);
         }
 
         if (replayGain != 1.0)
@@ -616,29 +694,72 @@ internal sealed class DspPipeline : IDisposable
             SimdMath.Scale(signal, replayGain);
         }
 
+        // The meters, the codec detector and the apodization detector describe the source, so after the restorer
+        // they are handed the source as it arrived.
+        Span<double> original = signal;
+        if (restored && source >= 0 && (meter || c == _detectorChannel || chain.Apodization is not null))
+        {
+            EnsureCapacity(ref chain.Original, frames);
+            original = chain.Original.AsSpan(0, frames);
+            input[source].AsSpan(0, frames).CopyTo(original);
+            if (replayGain != 1.0)
+            {
+                SimdMath.Scale(original, replayGain);
+            }
+        }
+
+        // The restorer's own delta, when no upscaler follows to take it at its rate: output less the delayed source.
+        ReadOnlySpan<double> dry = ReadOnlySpan<double>.Empty;
+        if (restored && _restorerDry.Length > 0 && source >= 0)
+        {
+            EnsureCapacity(ref chain.RestorerDry, frames);
+            Span<double> delayed = chain.RestorerDry.AsSpan(0, frames);
+            _restorerDry[source].AsSpan(0, frames).CopyTo(delayed);
+            if (replayGain != 1.0)
+            {
+                SimdMath.Scale(delayed, replayGain);
+            }
+
+            if (chain.PreUpsampler is null)
+            {
+                for (int i = 0; i < frames; i++)
+                {
+                    signal[i] -= delayed[i];
+                }
+            }
+            else
+            {
+                dry = delayed;
+            }
+        }
+
         if (meter && !_meterAdjustedSource)
         {
-            MeterSource(source, signal);
+            MeterSource(source, original);
         }
 
         if (chain.Ultrasonic is not null)
         {
             int cleaned = chain.Ultrasonic.Process(signal, chain.Clean);
             signal = chain.Clean.AsSpan(0, cleaned);
+            if (!restored)
+            {
+                original = signal;
+            }
         }
 
         if (meter && _meterAdjustedSource)
         {
-            MeterSource(source, signal);
+            MeterSource(source, original);
         }
 
         if (c == _detectorChannel)
         {
-            _detector?.Push(signal);
+            _detector?.Push(original);
         }
 
-        chain.Apodization?.Process(signal);
-        ProcessConverted(c, chain, signal, volume);
+        chain.Apodization?.Process(original);
+        ProcessConverted(c, chain, signal, volume, dry);
     }
 
     private void ProcessDsdChannel(int c, byte[][] input, int bytes, double volume)
@@ -670,10 +791,14 @@ internal sealed class DspPipeline : IDisposable
             MeterSource(source, signal);
         }
 
-        ProcessConverted(c, chain, signal, volume);
+        ProcessConverted(c, chain, signal, volume, ReadOnlySpan<double>.Empty);
     }
 
-    private void ProcessConverted(int c, ChannelChain chain, ReadOnlySpan<double> signal, double volume)
+    /// <param name="dry">
+    /// For the output delta after the restorer: the source as it arrived, delayed by the restorer's latency, to be
+    /// interpolated alongside and subtracted at the upscaler's rate. Empty otherwise.
+    /// </param>
+    private void ProcessConverted(int c, ChannelChain chain, ReadOnlySpan<double> signal, double volume, ReadOnlySpan<double> dry)
     {
         if (_silentDelta)
         {
@@ -686,23 +811,29 @@ internal sealed class DspPipeline : IDisposable
         {
             int doubled = chain.PreUpsampler.Process(signal, chain.Upscaled);
             Span<double> up = chain.Upscaled.AsSpan(0, doubled);
-            if (chain.Upscaler is not null)
+            bool delta = chain.UpscaledDry.Length > 0;
+            if (delta)
             {
-                if (chain.UpscaledDryDelay is not null)
+                if (chain.DryUpsampler is not null)
+                {
+                    chain.DryUpsampler.Process(dry, chain.UpscaledDry);
+                }
+                else
                 {
                     up.CopyTo(chain.UpscaledDry);
-                    chain.UpscaledDryDelay.Process(chain.UpscaledDry.AsSpan(0, doubled));
                 }
 
-                chain.Upscaler.Process(up);
+                chain.UpscaledDryDelay?.Process(chain.UpscaledDry.AsSpan(0, doubled));
+            }
 
-                if (chain.UpscaledDryDelay is not null)
+            chain.Upscaler?.Process(up);
+
+            if (delta)
+            {
+                // What the networks added, and nothing of the recording they added it to.
+                for (int i = 0; i < doubled; i++)
                 {
-                    // What the network added, and nothing of the recording it added it to.
-                    for (int i = 0; i < doubled; i++)
-                    {
-                        up[i] -= chain.UpscaledDry[i];
-                    }
+                    up[i] -= chain.UpscaledDry[i];
                 }
             }
 
@@ -831,6 +962,9 @@ internal sealed class DspPipeline : IDisposable
         public double[] Upscaled = [];
         public double[] UpscaledDry = [];
         public DelayLine? UpscaledDryDelay;
+        public TrainingUpsampler? DryUpsampler;
+        public double[] Original = [];
+        public double[] RestorerDry = [];
         public ApodizationDetector? Apodization;
         public ResamplerChainState? Resampler;
         public readonly SmoothedGain Volume = new(1.0);
@@ -857,6 +991,7 @@ internal sealed class DspPipeline : IDisposable
             PreUpsampler?.Reset();
             Upscaler?.Reset();
             UpscaledDryDelay?.Reset();
+            DryUpsampler?.Reset();
             Apodization?.Reset();
             Resampler?.Reset();
             Volume.Jump(volume);

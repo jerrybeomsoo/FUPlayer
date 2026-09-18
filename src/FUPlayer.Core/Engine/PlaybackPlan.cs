@@ -59,8 +59,15 @@ public sealed record PlaybackPlan
     /// <summary>
     /// How the neural upscaler reads the source: coded or of unknown origin (true), or lossless (false). Set
     /// by the engine once the decoder is open, from the codec or from <see cref="Settings.RestorationSettings.SourceType"/>.
+    /// A source the restorer has been over is lossless to the upscaler.
     /// </summary>
     public bool SourceIsLossy { get; init; } = true;
+
+    /// <summary>
+    /// Whether the neural restorer runs, at the source rate, on the source's two channels (or its one), before the
+    /// per-channel chain. Planned for PCM at 44.1 and 48 kHz; the engine turns it off again for a lossless source.
+    /// </summary>
+    public bool Restore { get; init; }
 
     public double PcmLevelOffsetDb { get; init; }
 
@@ -95,5 +102,6 @@ public sealed record PlaybackPlan
         && Limiter == other.Limiter
         && UpscaleRate == other.UpscaleRate
         && (UpscaleRate == 0 || SourceIsLossy == other.SourceIsLossy)
+        && Restore == other.Restore
         && PcmLevelOffsetDb == other.PcmLevelOffsetDb;
 }

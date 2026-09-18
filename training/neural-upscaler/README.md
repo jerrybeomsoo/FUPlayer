@@ -1,9 +1,10 @@
 # Training a neural upscaler
 
 These scripts train the network behind **Neural upscaler** in DSP Studio: a model that takes a 44.1 or
-48 kHz recording, lossy or not, to 88.2 or 96 kHz. No model ships with FUPlayer. A model is weights
-fitted to somebody's music, so you train your own from your own high-resolution files. What it does,
-and how well the reference model did it, is in [docs/neural-upscaler.md](../../docs/neural-upscaler.md).
+48 kHz recording, lossy or not, to 88.2 or 96 kHz. The release ships the reference model these scripts made;
+a model is weights fitted to somebody's music, so you can train your own from your own high-resolution files
+instead. What it does, and how well the reference model did it, is in
+[docs/neural-upscaler.md](../../docs/neural-upscaler.md).
 
 ## What you need
 

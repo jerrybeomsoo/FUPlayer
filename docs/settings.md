@@ -52,6 +52,18 @@ Every setting, what it changes, and what it costs. Settings are stored in `%APPD
 | 3 ms | 128 | 256 | 3x to 12x | 1.2x to 2x |
 | 1.5 ms | 64 | 128 | 5x to 24x | 1.3x to 2.2x |
 
+### Lossy repair
+
+| Setting | Options | Notes |
+| --- | --- | --- |
+| Neural restorer | on / off | Coded 44.1/48 kHz stereo back towards lossless at the same rate; 91 ms at 48 kHz, 99 ms at 44.1. See [neural-restorer.md](neural-restorer.md) |
+| Neural upscaler | on / off | 44.1/48 kHz to 88.2/96 kHz; about 0.55 s. With the restorer on, it runs after it and reads its output as lossless. See [neural-upscaler.md](neural-upscaler.md) |
+| Upscaled band level | Quiet −6 dB, Measured, Lifted +3 dB, Strong +6 dB | Gain on what the upscaler writes above the source Nyquist |
+| Source type | Automatic, Lossy, Lossless | Automatic treats lossy codecs and captures as coded and PCM, FLAC and ALAC as lossless. The restorer runs only on coded sources |
+| Output delta | on / off | Plays only what the networks changed. For monitoring |
+
+The peak limiter runs while either network does, whatever its own switch says.
+
 ### Dither and modulation
 
 Eleven dither options, from none to five noise-shaping curves, and six delta-sigma modulators from 5th to 9th
@@ -99,6 +111,12 @@ buffer or a block-based filter needs more, and caps the ring at 256 MiB.
 
 A device is never used until it has reproduced the processor's own output for that filter. Overriding the timed
 result does not override that check.
+
+## Live input page
+
+| Setting | Options | Notes |
+| --- | --- | --- |
+| Mute the application's own playback | on (default) / off | Mutes the devices the captured application plays to while it is captured, so it is heard once, through the player. The device is muted rather than the application's session, which would silence the capture too. The player's own WASAPI device is left alone, and a device unmuted by hand stays unmuted. Anything muted is unmuted when the capture ends, or on the next start after a crash |
 
 ## Calibration page
 

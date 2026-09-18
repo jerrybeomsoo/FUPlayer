@@ -38,7 +38,7 @@ public static class OutputPlanner
             }
             else if (PlanDsd(source, settings, backend, capabilities, channels, notes) is { } dsd)
             {
-                return WithUpscaling(dsd, settings.Restoration, notes);
+                return WithRestoration(WithUpscaling(dsd, settings.Restoration, notes), settings.Restoration, notes);
             }
             else
             {
@@ -46,7 +46,37 @@ public static class OutputPlanner
             }
         }
 
-        return WithUpscaling(PlanPcm(source, settings, capabilities, channels, notes), settings.Restoration, notes);
+        return WithRestoration(
+            WithUpscaling(PlanPcm(source, settings, capabilities, channels, notes), settings.Restoration, notes),
+            settings.Restoration,
+            notes);
+    }
+
+    /// <summary>
+    /// Adds the neural restorer for a PCM source at 44.1 or 48 kHz with one or two channels: the rates and layout it
+    /// was trained on. It runs at the source rate ahead of everything else, the upscaler included. Like the upscaler
+    /// it writes energy the source did not have, so the limiter runs with it.
+    /// </summary>
+    internal static PlaybackPlan WithRestoration(PlaybackPlan plan, RestorationSettings restore, List<string> notes)
+    {
+        if (!restore.NeuralRestorer || plan.PassThrough || plan.Source.IsDsd || plan.Filter is null)
+        {
+            return plan;
+        }
+
+        if (plan.Source.SampleRate is not (44_100 or 48_000))
+        {
+            notes.Add($"The neural restorer works at 44.1 and 48 kHz; {AudioRates.Format(plan.Source.SampleRate)} is played without it.");
+            return plan with { Notes = [.. plan.Notes, .. notes.Except(plan.Notes)] };
+        }
+
+        if (plan.Source.Channels > 2)
+        {
+            notes.Add($"The neural restorer works on stereo and mono; {plan.Source.Channels} channels are played without it.");
+            return plan with { Notes = [.. plan.Notes, .. notes.Except(plan.Notes)] };
+        }
+
+        return plan with { Restore = true, Limiter = true, Notes = [.. plan.Notes, .. notes.Except(plan.Notes)] };
     }
 
     /// <summary>

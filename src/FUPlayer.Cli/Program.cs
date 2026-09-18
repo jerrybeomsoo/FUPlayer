@@ -81,7 +81,7 @@ internal static class Program
               capture --app <name|pid>     Record one application's output to a WAV file
                       --seconds <n> --out <file>
               bandwidth <files…>           Report where each file's spectrum ends
-              models                       List the installed neural upscaler models
+              models                       List the installed neural restorer and upscaler models
               --models <folder>            Keep models somewhere other than the settings folder
               info <file>                  Show format, tags and the processing plan for a file
               render <files…> --out <dir>  Process files faster than real time into WAV/DSF
@@ -100,11 +100,15 @@ internal static class Program
               --convolution auto|tap       Frequency domain for long filters, or one multiply-add per tap
               --convolution-from <taps>    Taps per phase from which the frequency domain takes over (default 1024)
               --convolution-block <ms>     Longest a frequency-domain stage may hold input (0 = choose)
-              --neural-upscale             Neural upscaler: 44.1/48 kHz PCM to 88.2/96 kHz
+              --neural-restore             Neural restorer: coded 44.1/48 kHz stereo back towards lossless,
+                                           at the same rate, in about 85 ms
+              --restorer <file>            Which *restorer.onnx model to use (default: newest installed)
+              --neural-upscale             Neural upscaler: 44.1/48 kHz PCM to 88.2/96 kHz; after the
+                                           restorer when both are given
               --upscaler <file>            Which .onnx model to use (default: newest installed)
-              --source-type auto|lossy|lossless  How the upscaler reads the source (default auto)
+              --source-type auto|lossy|lossless  How the models read the source (default auto)
               --upscaler-level <dB>        Gain on the synthesised band above the source Nyquist
-              --output-delta               Output the upscaler's contribution only (output minus input)
+              --output-delta               Output what the models changed only (output minus input)
               --convolution-layered        Divide the taps between short blocks for the early ones and
                                            longer blocks behind them, instead of one length for every tap.
                                            Far less arithmetic at a short block, and no graphics device
@@ -132,7 +136,7 @@ internal static class Program
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static ICaptureProvider CreateCaptureProvider() => new ProcessLoopbackProvider();
+    private static ICaptureProvider CreateCaptureProvider() => new ProcessLoopbackProvider(SettingsStore.DefaultDirectory);
 
     private static int Fail(string message)
     {
@@ -237,7 +241,7 @@ internal static class Program
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private static int ListWindowsApps()
     {
-        var provider = new ProcessLoopbackProvider();
+        ICaptureProvider provider = CreateCaptureProvider();
         if (!provider.IsSupported)
         {
             return Fail(provider.UnsupportedReason ?? "Capture is not available.");
@@ -275,7 +279,7 @@ internal static class Program
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private static int CaptureWindows(Options options)
     {
-        var provider = new ProcessLoopbackProvider();
+        ICaptureProvider provider = CreateCaptureProvider();
         if (!provider.IsSupported)
         {
             return Fail(provider.UnsupportedReason ?? "Capture is not available.");
@@ -484,16 +488,35 @@ internal static class Program
 
     private static int ListModels()
     {
-        Console.WriteLine("Neural upscaler models, newest first, from:");
+        Console.WriteLine("Neural models, newest first, from:");
         foreach (string directory in ModelLibrary.SearchDirectories())
         {
             Console.WriteLine($"  {directory}{(Directory.Exists(directory) ? string.Empty : "  (not there)")}");
         }
 
+        Console.WriteLine();
+        Console.WriteLine("Restorers:");
+        IReadOnlyList<string> restorers = ModelLibrary.ListRestorers();
+        if (restorers.Count == 0)
+        {
+            Console.WriteLine("  None installed. See training/neural-restorer.");
+        }
+        else
+        {
+            foreach (string file in restorers)
+            {
+                Console.WriteLine($"  {file}");
+            }
+
+            Console.WriteLine($"  {ModelLibrary.DescribeRestorer()}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Upscalers:");
         IReadOnlyList<string> upscalers = ModelLibrary.ListUpscalers();
         if (upscalers.Count == 0)
         {
-            Console.WriteLine("None installed. See training/neural-upscaler.");
+            Console.WriteLine("  None installed. See training/neural-upscaler.");
             return 0;
         }
 
@@ -502,7 +525,7 @@ internal static class Program
             Console.WriteLine($"  {file}");
         }
 
-        Console.WriteLine(ModelLibrary.DescribeUpscaler());
+        Console.WriteLine($"  {ModelLibrary.DescribeUpscaler()}");
         return 0;
     }
 
@@ -667,6 +690,11 @@ internal static class Program
                     Console.WriteLine($"  {acceleration}");
                 }
 
+                if (status.Restorer is { Length: > 0 } restorer)
+                {
+                    Console.WriteLine($"  {restorer}");
+                }
+
                 if (status.Upscaler is { Length: > 0 } upscaler)
                 {
                     Console.WriteLine($"  {upscaler}");
@@ -706,7 +734,7 @@ internal static class Program
         {
             "dop", "pass-through", "remove-ultrasonics", "no-limiter",
             "gpu", "gpu-fast", "gpu-force", "gpu-hold", "probe", "convolution-layered",
-            "neural-upscale", "output-delta",
+            "neural-upscale", "neural-restore", "output-delta",
         };
 
         public static Options Parse(IEnumerable<string> args)
@@ -811,6 +839,8 @@ internal static class Program
 
             settings.Restoration.NeuralUpscaler = Has("neural-upscale");
             settings.Restoration.NeuralUpscalerPath = Get("upscaler") is string model && model.Length > 0 ? Path.GetFullPath(model) : null;
+            settings.Restoration.NeuralRestorer = Has("neural-restore");
+            settings.Restoration.NeuralRestorerPath = Get("restorer") is string restorer && restorer.Length > 0 ? Path.GetFullPath(restorer) : null;
             settings.Restoration.UpscalerBandDb = GetDouble("upscaler-level") ?? 0.0;
             settings.Restoration.OutputDelta = Has("output-delta");
             settings.Restoration.SourceType = Get("source-type")?.ToLowerInvariant() switch
