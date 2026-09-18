@@ -1,6 +1,6 @@
 name: Release
 
-# Pushing a tag such as v0.2.0 builds the Windows package and publishes it as a
+# Pushing a tag such as v0.2.1 builds the Windows package and publishes it as a
 # GitHub release, with that version's section of CHANGELOG.md as the notes.
 # Running the workflow by hand builds the same package and leaves it as a build
 # artifact without publishing anything.

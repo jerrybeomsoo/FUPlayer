@@ -3,3 +3,4 @@
 *.sh text eol=lf
 *.png binary
 *.ico binary
+*.onnx binary

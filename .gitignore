@@ -25,5 +25,9 @@ Thumbs.db
 desktop.ini
 .DS_Store
 
-# Trained models are fitted to whatever music you fed them; they are not source.
-models/
+# The models folder holds the two networks the release ships, and nothing else is kept there.
+models/*
+!models/neural-restorer.onnx
+!models/neural-restorer.json
+!models/neural-upscaler.onnx
+!models/neural-upscaler.json

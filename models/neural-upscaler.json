@@ -1,0 +1,27 @@
+{
+  "n_fft": 2048,
+  "hop": 512,
+  "bins": 1025,
+  "window": "hann-periodic",
+  "feature_floor_below_peak_db": 85.0,
+  "conditioned": true,
+  "lookahead_frames": 26,
+  "context_frames": 26,
+  "rates": [
+    88200,
+    96000
+  ],
+  "scores": {
+    "in_0-16k": 3.652,
+    "out_0-16k": 3.474,
+    "in_16-22k": 23.396,
+    "out_16-22k": 7.538,
+    "in_22k-nyq": 48.566,
+    "out_22k-nyq": 9.741,
+    "ll_in_22k-nyq": 47.425,
+    "ll_out_22k-nyq": 9.885,
+    "ll_passband_db": -54.867
+  },
+  "step": 79537,
+  "parameters": 10283269
+}

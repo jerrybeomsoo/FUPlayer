@@ -36,18 +36,20 @@ Build output lands in `src/FUPlayer.App/bin/Release/net9.0/FUPlayer.exe` and
 ## Publishing a self-contained build
 
 `build/package.ps1` publishes the player and the command line tool into `publish/FUPlayer`, drops the native
-debug symbols that SkiaSharp and HarfBuzzSharp ship (about 100 MB of them), adds the licence files and writes
-`artifacts/FUPlayer-<version>-win-x64.zip`:
+debug symbols that SkiaSharp and HarfBuzzSharp ship (about 100 MB of them) and ONNX Runtime's import libraries,
+copies the two neural models from `models/` into a `models` folder beside the executables, adds the licence files
+and writes `artifacts/FUPlayer-<version>-win-x64.zip`:
 
 ```bash
-pwsh build/package.ps1 -Version 0.2.0
+pwsh build/package.ps1 -Version 0.2.1
 ```
 
-The result runs on a machine with no .NET runtime installed and comes to roughly 47 MB zipped. Pass
-`-FrameworkDependent` for a build that uses an installed .NET 9 Desktop Runtime instead, which is about a third
-of the size. The same script runs in CI: pushing a tag such as `v0.2.0` makes `.github/workflows/release.yml`
-build the package and attach it to a GitHub release, with that version's section of `CHANGELOG.md` as the
-release notes.
+It stops if `models/` does not hold a restorer (a file ending in `restorer.onnx`) and an upscaler, each with its
+`.json`. The result runs on a machine with no .NET runtime installed and comes to about 108 MB zipped, 55 MB of
+that the two models. Pass `-FrameworkDependent` for a build that uses an installed .NET 9 Desktop Runtime instead,
+which is smaller. The same script runs in CI: pushing a tag such as `v0.2.1` makes
+`.github/workflows/release.yml` build the package and attach it to a GitHub release, with that version's section
+of `CHANGELOG.md` as the release notes.
 
 For a single project without the packaging around it:
 

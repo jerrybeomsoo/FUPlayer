@@ -13,7 +13,7 @@ so your DAC's own oversampling filter and modulator never run.
 [![.NET 9](https://img.shields.io/badge/.NET-9.0-512BD4.svg?style=flat-square&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![Avalonia](https://img.shields.io/badge/UI-Avalonia%2012-8B44AC.svg?style=flat-square)](https://avaloniaui.net/)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6.svg?style=flat-square&logo=windows&logoColor=white)](#requirements)
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg?style=flat-square)](#status)
+[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg?style=flat-square)](#status)
 
 <img src="docs/images/dsp-studio.png" alt="The DSP studio, showing a 2,097,153-tap filter and its magnitude response" width="820">
 
@@ -99,11 +99,17 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 
 - Take audio from any running application, Firefox or a music client, and send it through the whole chain
   to your DAC. Windows process loopback, so nothing has to be routed by hand.
-- Lossy repair is a **neural upscaler**: 44.1 and 48 kHz files and captures to 88.2 and 96 kHz, with the passband
-  of coded sources corrected and the band above the codec cutoff and the source Nyquist synthesised. It is told
-  whether a source is lossy or lossless, runs on the processor through ONNX Runtime with about half a second of
-  delay, and [its page](docs/neural-upscaler.md) says what it gets right and where it is wrong. No model ships;
-  the scripts in `training/neural-upscaler` train one from your own high-resolution files.
+- Lossy repair is two neural networks, both in the release, both run on the processor through ONNX Runtime:
+  - the **neural restorer** takes coded 44.1 and 48 kHz stereo (Opus, AAC, MP3, Vorbis at 96 to 160 kbit/s) back
+    towards the lossless recording at the same rate, with about 90 ms of delay: the band above the codec's
+    low-pass, the collapsed stereo, the holes of the weaker encoders ([its page](docs/neural-restorer.md));
+  - the **neural upscaler** takes 44.1 and 48 kHz files and captures to 88.2 and 96 kHz, correcting coded passbands
+    and synthesising the band above the source Nyquist, with about half a second of delay
+    ([its page](docs/neural-upscaler.md)).
+
+  Chained, the restorer goes first and the upscaler reads its output as lossless. Neither recovers what a codec
+  discarded, and both pages say what they get right and where they are wrong. The scripts in `training/` train
+  either from your own files.
 - Measures where a file's spectrum actually ends, which is the only way to tell a coded stream from a
   lossless one when nothing in the container says so.
 
@@ -156,8 +162,8 @@ for settings and models, what is in each of them, whether the FFmpeg libraries l
 formats it will open. A window program cannot answer a question on a console, so when the interface
 says a model is not installed there is otherwise no way to ask it which folder it looked in.
 
-Models are searched for in a `models` folder beside the executable, then the folder named by
-`FUPLAYER_MODELS_PATH`, then beside the settings file. The folder next to the executable is the same
+Models are searched for in a `models` folder beside the executable, where the release puts its two,
+then the folder named by `FUPLAYER_MODELS_PATH`, then beside the settings file. The folder next to the executable is the same
 folder for every process on the machine, which the settings folder is not: a program running inside
 an application container has its `%APPDATA%` redirected into the container.
 
@@ -356,6 +362,8 @@ src/
   FUPlayer.App/             Avalonia interface
   FUPlayer.Cli/             headless tool
 docs/                         documentation and screenshots
+models/                       the two neural models the release ships
+training/neural-restorer/     Python scripts that train a restorer from your own files
 training/neural-upscaler/     Python scripts that train an upscaler from your own files
 build/ffmpeg/                 script that builds LGPL FFmpeg libraries
 ```
@@ -370,6 +378,7 @@ build/ffmpeg/                 script that builds LGPL FFmpeg libraries
 | [docs/dsp.md](docs/dsp.md) | The signal processing in detail, with the arithmetic |
 | [docs/cli.md](docs/cli.md) | Every `fuplayer-cli` command and option |
 | [docs/settings.md](docs/settings.md) | Every setting, what it changes, and what it costs |
+| [docs/neural-restorer.md](docs/neural-restorer.md) | The neural restorer: how it runs, how its model was trained, and what it measures |
 | [docs/neural-upscaler.md](docs/neural-upscaler.md) | The neural upscaler: how it runs, how its model was trained, and what it measures |
 | [docs/building-ffmpeg.md](docs/building-ffmpeg.md) | Building the LGPL FFmpeg DLLs from source |
 

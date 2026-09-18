@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-    Builds the Windows release package: the player, the command line tool and the
-    licence files, as one zip ready to attach to a GitHub release.
+    Builds the Windows release package: the player, the command line tool, the two
+    neural models and the licence files, as one zip ready to attach to a GitHub release.
 
 .PARAMETER Version
     Version string used in the file name, without a leading "v".
@@ -22,11 +22,11 @@
     to keep.
 
 .EXAMPLE
-    pwsh build/package.ps1 -Version 0.2.0
+    pwsh build/package.ps1 -Version 0.2.1
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = "0.2.0",
+    [string]$Version = "0.2.1",
     [string]$Runtime = "win-x64",
     [switch]$FrameworkDependent,
     [switch]$IncludeFFmpeg
@@ -61,8 +61,20 @@ foreach ($project in @("src\FUPlayer.App\FUPlayer.App.csproj", "src\FUPlayer.Cli
 }
 
 # SkiaSharp and HarfBuzzSharp ship native debug symbols worth about 100 MB, which
-# nobody needs in order to run the player.
+# nobody needs in order to run the player; ONNX Runtime ships import libraries for
+# linking against it, which nobody needs either.
 Get-ChildItem $stage -Filter *.pdb | Remove-Item -Force
+Get-ChildItem $stage -Filter *.lib | Remove-Item -Force
+
+# The neural restorer and upscaler, beside the executables, which is the first
+# place the player looks for models.
+$models = Get-ChildItem (Join-Path $root "models\*") -Include *.onnx, *.json -File
+if (-not ($models | Where-Object Name -like "*restorer.onnx") -or -not ($models | Where-Object { $_.Name -like "*.onnx" -and $_.Name -notlike "*restorer.onnx" })) {
+    throw "models/ must hold a restorer (*restorer.onnx) and an upscaler (*.onnx), each with its .json"
+}
+New-Item -ItemType Directory -Path (Join-Path $stage "models") -Force | Out-Null
+$models | Copy-Item -Destination (Join-Path $stage "models")
+Write-Host ("including models: {0}" -f ($models.Name -join ", "))
 
 foreach ($file in @("LICENSE", "THIRD-PARTY-NOTICES.md", "README.md")) {
     Copy-Item (Join-Path $root $file) $stage

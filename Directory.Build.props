@@ -29,7 +29,7 @@
     <Copyright>Copyright (c) 2026 FUPlayer contributors</Copyright>
     <!-- The project's own code is MIT; TagLib# and the optional FFmpeg libraries remain LGPL (see THIRD-PARTY-NOTICES.md). -->
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
     <Description>Free Upscaling Player</Description>
   </PropertyGroup>
 </Project>
