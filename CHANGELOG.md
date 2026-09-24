@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.2.2 — 2026-09-25
+
+### Changed
+
+- **A new neural restorer model.** Fitted from scratch to 634 high-resolution masters of every genre, screened so
+  that every reference really carries music to 22.05 kHz, at both delivery rates. Against the model in 0.2.1, on
+  the same 1,952 held-out stretches: log-spectral distance above 12 kHz 11.3 → 7.8 dB, the mid's and the side's
+  band levels 2.0 → 0.9 and 3.0 → 1.2 dB from the master, the level above 16 kHz unchanged at 0.9 dB under it. A
+  lossless file forced through it changes a little more, −65.8 → −62.0 dB, and frames with a band over the
+  masking threshold go from 0.45 to 0.61 % ([docs](docs/neural-restorer.md)).
+- The overload warning names the convolution mode when a long filter is running tap by tap, which is the largest
+  lever there is.
+- The Upscaled band level choices say which band they move: the one above the source's Nyquist frequency, and
+  nothing below it.
+- The live input page says what format the captured application arrives in, which Windows decides, and opens the
+  setting that changes it; it names the collision when the application also plays directly to the output device,
+  and opens the Windows pages that separate the two.
+- The DSP studio says which way Automatic read the playing source ("VORBIS, read as lossy").
+- A long filter running tap by tap on the graphics device keeps its history on the device, and sends it only the
+  new samples of each block.
+
+### Fixed
+
+- Dark horizontal lines across the restored band, the same bins on every track: the 0.2.1 model wrote fourteen
+  bins 2 to 5 dB under their neighbours at 48 kHz, among them 869, 881 and 894, on every input. None now at
+  either rate, and the training scripts measure it (`restorer/bin_lines.py`).
+- The spectrogram and waterfall drew the low octaves as blocks at short transform lengths.
+- A model placed in `%APPDATA%\FUPlayer\models` under the shipped model's own name was ignored in favour of the one
+  beside the program. The newest file of a name is the one used now, as the documentation always said.
+
 ## 0.2.1 — 2026-09-18
 
 ### Added

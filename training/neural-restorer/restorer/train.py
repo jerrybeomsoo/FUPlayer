@@ -2,17 +2,26 @@
 
 Pretraining fits the network with
 
-    L = L_mrstft(L, R) + 0.5 L_mrstft(side) + w_mask L_masked + w_band L_band + w_phase L_phase + w_id L_identity
+    L = L_mrstft(L, R) + 0.5 (L_mrstft(mid) + L_mrstft(side)) + w_mask L_masked + w_band L_band + w_line L_line
+        + w_phase L_phase + w_id L_identity
 
 where the masked term measures the error against the masking threshold the master itself sets, the band term holds
-every 500 Hz band from 4 kHz to its level in the master over the crop, and the identity term keeps lossless crops
-as they came. The adversarial phase adds the upscaler's multi-period and multi-resolution spectral discriminators,
-which is what gives a generated band texture rather than an average.
+every 500 Hz band from 4 kHz of mid and of side to its level in the master over the crop, the line term holds each
+bin's level against its neighbours' to the master's, so that no bin comes out low on every input, and the identity
+term keeps lossless crops as they came. The adversarial phase adds the upscaler's multi-period and multi-resolution
+spectral discriminators, which is what gives a generated band texture rather than an average.
+
+The band term is taken on mid and side rather than on left and right, and the bands a codec emptied count several
+times over. Held to left and right alone, a network satisfies the level it is asked for by writing the band it has
+to invent into the side: every per-channel measurement then reads right while the middle of the picture, which is
+where music keeps most of its top band, stays twenty to thirty decibels short, and the mix of the two channels --
+what an analyser shows and what a centred instrument sounds like -- has nothing in it.
 
 Validation runs on songs held out by title and reports, input against output: log-spectral distance below 4 kHz,
 4 to 12 kHz and 12 kHz to Nyquist; the audible noise, as the mean noise-to-mask ratio above 0 dB; the level above
-16 kHz against the master; the side channel's distance from the master's over 500 Hz bands; and on lossless crops,
-how much the network changed them.
+16 kHz against the master, over both channels and over their mix; mid's and side's distance from the master's over
+500 Hz bands; the lines the network draws, each bin against its neighbours averaged over every crop, from 16 kHz
+up; and on lossless crops, how much the network changed them.
 
     python -m restorer.train [--benchmark 20] [--out work/runs/restorer]
 """
@@ -36,14 +45,21 @@ BANDS = [("0-4k", 0.0, 4_000.0), ("4-12k", 4_000.0, 12_000.0), ("12k-nyq", 12_00
 RESOLUTIONS = [(512, 128), (1024, 256), (2048, 512), (4096, 1024)]
 
 
-def mrstft_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    """Spectral convergence plus log-magnitude L1 at four resolutions, [N, samples]."""
+def mrstft_loss(pred: torch.Tensor, target: torch.Tensor, deficit: torch.Tensor | None = None,
+                rates: torch.Tensor | None = None, relax: float = 1.0) -> torch.Tensor:
+    """Spectral convergence plus log-magnitude L1 at four resolutions, [N, samples].
+
+    With a deficit from `losses.coded_deficit`, bins in the bands a codec emptied count `relax` times, because
+    there the master cannot be predicted bin by bin and holding the network to it writes nothing at all.
+    """
     total = pred.new_zeros(())
     for n_fft, hop in RESOLUTIONS:
         p = stft(pred, n_fft, hop).abs()
         t = stft(target, n_fft, hop).abs()
-        sc = torch.linalg.norm((t - p).flatten(1), dim=1) / torch.linalg.norm(t.flatten(1), dim=1).clamp_min(0.1)
-        log_l1 = (torch.log(t.clamp_min(1e-7)) - torch.log(p.clamp_min(1e-7))).abs().mean(dim=(1, 2))
+        w = (losses.deficit_bin_weight(deficit, n_fft, rates, relax)
+             if deficit is not None and rates is not None and relax != 1.0 else 1.0)
+        sc = torch.linalg.norm((w * (t - p)).flatten(1), dim=1) / torch.linalg.norm((w * t).flatten(1), dim=1).clamp_min(0.1)
+        log_l1 = (w * (torch.log(t.clamp_min(1e-7)) - torch.log(p.clamp_min(1e-7))).abs()).mean(dim=(1, 2))
         total = total + sc.mean() + log_l1.mean()
     return total / len(RESOLUTIONS)
 
@@ -111,6 +127,10 @@ class Validation:
             if not math.isnan(value):
                 sums.setdefault(key, []).append(value)
 
+        # Each bin's level against its neighbours', output less master, summed per rate over every crop: the music's
+        # own fine structure comes to nothing over the lot and a line the network draws on every input does not.
+        profiles: dict[int, list[torch.Tensor]] = {}
+
         for x_np, y_np, rate, label in self.coded:
             x = torch.from_numpy(x_np).to(device)[None]
             y = torch.from_numpy(y_np).to(device)[None]
@@ -125,12 +145,17 @@ class Validation:
                     add(f"{tag}_{band}", value)
                 add(f"{tag}_nmr", losses.audible_noise_db(spec, spec_y, rate))
                 add(f"{tag}_above16k_db", level_above_db(p, p_y, rate))
-            side_in = stft((x[:, 0] - x[:, 1]) * 0.7071)
-            side_out = stft((y_hat[:, 0] - y_hat[:, 1]) * 0.7071)
-            side_y = stft((y[:, 0] - y[:, 1]) * 0.7071)
             rate_t = torch.tensor([rate], device=device)
-            add("in_side_db", 10.0 * float(losses.band_level_loss(side_in, side_y, rate_t)))
-            add("out_side_db", 10.0 * float(losses.band_level_loss(side_out, side_y, rate_t)))
+            for name, sign in (("mid", 1.0), ("side", -1.0)):
+                part_in = stft((x[:, 0] + sign * x[:, 1]) * 0.7071)
+                part_out = stft((y_hat[:, 0] + sign * y_hat[:, 1]) * 0.7071)
+                part_y = stft((y[:, 0] + sign * y[:, 1]) * 0.7071)
+                add(f"in_{name}_db", 10.0 * float(losses.band_level_loss(part_in, part_y, rate_t)))
+                add(f"out_{name}_db", 10.0 * float(losses.band_level_loss(part_out, part_y, rate_t)))
+                if name == "mid":
+                    add("in_above16k_mid_db", level_above_db(part_in.abs().pow(2), part_y.abs().pow(2), rate))
+                    add("out_above16k_mid_db", level_above_db(part_out.abs().pow(2), part_y.abs().pow(2), rate))
+                    profiles.setdefault(rate, []).append(losses.line_profile_db(part_out, part_y)[0])
             family = "opus" if label.startswith("opus") else "mp3" if label.startswith("mp3") else \
                 "vorbis" if label.startswith("vorbis") else "aac"
             add(f"{family}_nmr_in", sums["in_nmr"][-1])
@@ -142,13 +167,36 @@ class Validation:
             change = (y_hat - x).pow(2).sum() / x.pow(2).sum().clamp_min(1e-12)
             add("ll_change_db", float(10.0 * torch.log10(change + 1e-20)))
         model.train()
-        return {k: sum(v) / len(v) for k, v in sums.items()}
+        scores = {k: sum(v) / len(v) for k, v in sums.items()}
+
+        # Lines from 16 kHz up, where the band is mostly the network's own: the rms of the mean profile, and the
+        # deepest bin in it, the worse of the two rates.
+        rms, worst = [], []
+        for rate, rows in profiles.items():
+            mean = torch.stack(rows).mean(dim=0)
+            start = int(math.ceil(LINES_FROM_HZ * N_FFT / rate))
+            top = mean[start:-1]
+            rms.append(float(top.pow(2).mean().sqrt()))
+            worst.append(float(top.min()))
+        if rms:
+            scores["out_lines_db"] = max(rms)
+            scores["out_worst_line_db"] = min(worst)
+        return scores
 
 
 def score(s: dict[str, float]) -> float:
-    """Lower is better: audible noise first, then the two upper bands' distance, and a lossless crop left alone."""
+    """Lower is better: audible noise, the two upper bands' distance, how far mid and side sit from the master's
+    band levels, the lines the network draws, and a lossless crop left alone. Mid counts, because a band written
+    into the side alone scores well on every per-channel measure and is not there in the middle of the picture;
+    lines count, because no other score sees a single bin."""
     return (s.get("out_nmr", 99.0) + 0.25 * (s.get("out_4-12k", 99.0) + s.get("out_12k-nyq", 99.0))
+            + 0.25 * (s.get("out_mid_db", 99.0) + s.get("out_side_db", 99.0))
+            + 0.5 * s.get("out_lines_db", 0.0)
             + 0.2 * max(0.0, s.get("ll_change_db", 0.0) + 30.0))
+
+
+# Lines are measured from here up: below it the band is mostly the codec's, and its fine structure the music's.
+LINES_FROM_HZ = 16_000.0
 
 
 def save(path: Path, **state) -> None:
@@ -158,10 +206,12 @@ def save(path: Path, **state) -> None:
 
 
 LOG_SCORES = ["in_0-4k", "out_0-4k", "in_4-12k", "out_4-12k", "in_12k-nyq", "out_12k-nyq", "in_nmr", "out_nmr",
-              "in_above16k_db", "out_above16k_db", "in_side_db", "out_side_db", "ll_change_db",
+              "in_above16k_db", "out_above16k_db", "in_above16k_mid_db", "out_above16k_mid_db",
+              "in_mid_db", "out_mid_db", "in_side_db", "out_side_db", "out_lines_db", "out_worst_line_db",
+              "ll_change_db",
               "opus_nmr_in", "opus_nmr_out", "aac_nmr_in", "aac_nmr_out", "mp3_nmr_in", "mp3_nmr_out",
               "vorbis_nmr_in", "vorbis_nmr_out"]
-RUNNING = ["loss_g", "stft", "side", "masked", "band", "phase", "identity", "adv", "fm", "loss_d"]
+RUNNING = ["loss_g", "stft", "mid", "side", "masked", "band", "line", "phase", "identity", "adv", "fm", "loss_d"]
 
 
 def main() -> None:
@@ -177,7 +227,15 @@ def main() -> None:
     ap.add_argument("--lr-d", type=float, default=2e-4)
     ap.add_argument("--side-weight", type=float, default=0.5)
     ap.add_argument("--mask-weight", type=float, default=10.0)
-    ap.add_argument("--band-weight", type=float, default=1.0)
+    ap.add_argument("--band-weight", type=float, default=3.0)
+    ap.add_argument("--band-emphasis", type=float, default=1.0,
+                    help="how much more the 500 Hz bands above 16 kHz count in the band-level loss")
+    ap.add_argument("--line-weight", type=float, default=4.0,
+                    help="weight of the term that holds each bin's level to its neighbours' as the master's is")
+    ap.add_argument("--band-deficit-weight", type=float, default=6.0,
+                    help="how much more a 500 Hz band the codec emptied counts in the band-level loss")
+    ap.add_argument("--stft-deficit-relax", type=float, default=1.0,
+                    help="how much the per-bin spectral losses count in the bands the codec emptied (1 = as elsewhere)")
     ap.add_argument("--phase-weight", type=float, default=0.3)
     ap.add_argument("--identity-weight", type=float, default=2.0)
     ap.add_argument("--adv-weight", type=float, default=1.0)
@@ -193,6 +251,7 @@ def main() -> None:
     ap.add_argument("--init-from", default="", help="a fine-tune: the generator from this checkpoint, at step 0 of a new schedule")
     ap.add_argument("--init-discriminators", default="", help="and the discriminators from this one (a run's last.pt)")
     ap.add_argument("--warmup", type=int, default=1000, help="steps the learning rate takes to rise")
+    ap.add_argument("--crop-threads", type=int, default=4, help="threads drawing crops ahead of the training step")
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -245,7 +304,9 @@ def main() -> None:
     # copies added later (restorer.extra) are measured by restorer.evaluate instead.
     original = [dataclasses.replace(i, variants=[v for v in i.variants if ".v" in v[0].name]) for i in held_items]
     validation = None if args.benchmark else Validation(original, coded=160, lossless=40)
-    sampler = data.Sampler(train_items, seed=step + 11, lossless=args.lossless, crop=args.crop)
+    sampler = data.Prefetch(train_items, seed=step + 11, lossless=args.lossless, crop=args.crop,
+                            threads=args.crop_threads)
+    last_scores: dict[str, float] = {}
     log_path = out / "log.csv"
     log_new = not log_path.exists()
     log = log_path.open("a", encoding="utf-8", newline="")
@@ -294,15 +355,32 @@ def main() -> None:
 
             spec_y = stft(y_flat)
             spec_hat = stft(y_hat_flat)
+
+            # Mid and side, because a band written only into the side leaves the middle of the picture empty
+            # while every per-channel measurement of it comes out right. The network works in mid and side, so
+            # this is where a band has to be held to the master's level.
+            mid, mid_hat = (y[:, 0] + y[:, 1]) * 0.7071, (y_hat[:, 0] + y_hat[:, 1]) * 0.7071
             side, side_hat = (y[:, 0] - y[:, 1]) * 0.7071, (y_hat[:, 0] - y_hat[:, 1]) * 0.7071
-            l_stft = mrstft_loss(y_hat_flat, y_flat)
-            l_side = mrstft_loss(side_hat, side)
+            ms_y = torch.cat([stft(mid), stft(side)])
+            ms_hat = torch.cat([stft(mid_hat), stft(side_hat)])
+            ms_in = torch.cat([stft((x[:, 0] + x[:, 1]) * 0.7071), stft((x[:, 0] - x[:, 1]) * 0.7071)])
+
+            deficit = losses.coded_deficit(spec_in, spec_y, rates2)
+            deficit_ms = losses.coded_deficit(ms_in, ms_y, rates2)
+            l_stft = mrstft_loss(y_hat_flat, y_flat, deficit, rates2, args.stft_deficit_relax)
+            l_side = mrstft_loss(side_hat, side, deficit_ms[size:], rates, args.stft_deficit_relax)
+            l_mid = mrstft_loss(mid_hat, mid, deficit_ms[:size], rates, args.stft_deficit_relax)
             l_mask = masked_loss_by_rate(spec_hat, spec_y, rates2)
-            l_band = losses.band_level_loss(spec_hat, spec_y, rates2)
+            l_band = losses.band_level_loss(ms_hat, ms_y, rates2, emphasis=args.band_emphasis,
+                                            deficit=deficit_ms, deficit_weight=args.band_deficit_weight)
+            l_line = (losses.line_loss(ms_hat, ms_y, rates2, deficit=deficit_ms,
+                                       deficit_weight=args.band_deficit_weight)
+                      if args.line_weight > 0.0 else torch.zeros((), device=device))
             l_phase = upscaler_losses.phase_loss(spec_out, spec_y)
             l_identity = identity_loss(spec_out, spec_in, lossless)
-            spectral = (l_stft + args.side_weight * l_side + args.mask_weight * l_mask + args.band_weight * l_band
-                        + args.phase_weight * l_phase + args.identity_weight * l_identity)
+            spectral = (l_stft + args.side_weight * (l_side + l_mid) + args.mask_weight * l_mask
+                        + args.band_weight * l_band + args.line_weight * l_line + args.phase_weight * l_phase
+                        + args.identity_weight * l_identity)
 
             if phase == "gan":
                 real_p, fake_p = mpd(y_d), mpd(y_hat_d)
@@ -322,7 +400,8 @@ def main() -> None:
             step += 1
             window_steps += 1
 
-            for key, value in zip(RUNNING, (loss_g, l_stft, l_side, l_mask, l_band, l_phase, l_identity, l_adv, l_fm, loss_d)):
+            for key, value in zip(RUNNING, (loss_g, l_stft, l_mid, l_side, l_mask, l_band, l_line, l_phase, l_identity,
+                                            l_adv, l_fm, loss_d)):
                 value = float(value.detach())
                 running[key] = running.get(key, value) * 0.98 + value * 0.02
 
@@ -340,6 +419,7 @@ def main() -> None:
                 row = [step, phase] + [f"{running.get(k, 0):.4f}" for k in RUNNING] + [f"{sec:.3f}"]
                 if step % args.validate_every == 0:
                     scores = validation.run(model, device)
+                    last_scores = scores
                     value = score(scores)
                     row += [f"{scores.get(k, float('nan')):.3f}" for k in LOG_SCORES] + [f"{value:.3f}"]
                     marker = ""
@@ -357,13 +437,20 @@ def main() -> None:
                           f"  12k+ {scores['in_12k-nyq']:.2f}->{scores['out_12k-nyq']:.2f}"
                           f" | audible noise {scores['in_nmr']:.2f}->{scores['out_nmr']:.2f} dB"
                           f" | above 16k {scores['in_above16k_db']:+.1f}->{scores['out_above16k_db']:+.1f} dB"
-                          f" | side {scores['in_side_db']:.2f}->{scores['out_side_db']:.2f} dB"
+                          f" (mid {scores['in_above16k_mid_db']:+.1f}->{scores['out_above16k_mid_db']:+.1f})"
+                          f" | mid {scores['in_mid_db']:.2f}->{scores['out_mid_db']:.2f} dB"
+                          f" side {scores['in_side_db']:.2f}->{scores['out_side_db']:.2f} dB"
+                          f" | lines {scores.get('out_lines_db', float('nan')):.2f} dB"
+                          f" (worst {scores.get('out_worst_line_db', float('nan')):.1f})"
                           f" | lossless change {scores['ll_change_db']:.1f} dB | {sec:.2f} s/step{marker}", flush=True)
                 writer.writerow(row)
                 log.flush()
 
             if not args.benchmark and phase == "gan" and args.snapshot_every and (step - phase_start) % args.snapshot_every == 0:
-                save(out / f"gan-{step}.pt", model=model.state_dict(), step=step, dim=args.dim, blocks=args.blocks)
+                # With the scores of the last validation, so a snapshot can be exported and described like the
+                # checkpoints the run kept for being its best.
+                save(out / f"gan-{step}.pt", model=model.state_dict(), step=step, scores=last_scores,
+                     dim=args.dim, blocks=args.blocks)
 
             # A file named STOP in the run folder ends the run at the next hundredth step, after a checkpoint. Killing
             # a process in the middle of a CUDA kernel left the display driver in error, and the machine stopped with

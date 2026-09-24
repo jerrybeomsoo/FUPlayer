@@ -78,11 +78,17 @@ public static class ModelLibrary
         yield return Directory;
     }
 
-    /// <summary>Files matching a pattern across every search folder, newest first, duplicates by name removed.</summary>
+    /// <summary>
+    /// Files matching a pattern across every search folder, newest first, one file per name.
+    ///
+    /// Where two folders hold a file of the same name, the newer one is the one kept. A release ships
+    /// `neural-restorer.onnx` beside the program, and somebody replacing it puts a file of that same name in
+    /// their own models folder, as this page's instructions say to; keeping whichever folder came first would
+    /// hand back the one they meant to replace, and say nothing about it.
+    /// </summary>
     private static List<string> Files(string pattern)
     {
-        var found = new List<string>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var newest = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (string directory in SearchDirectories())
         {
@@ -95,9 +101,11 @@ public static class ModelLibrary
 
                 foreach (string file in System.IO.Directory.EnumerateFiles(directory, pattern))
                 {
-                    if (seen.Add(Path.GetFileName(file)))
+                    string name = Path.GetFileName(file);
+                    if (!newest.TryGetValue(name, out string? kept)
+                        || File.GetLastWriteTimeUtc(file) > File.GetLastWriteTimeUtc(kept))
                     {
-                        found.Add(file);
+                        newest[name] = file;
                     }
                 }
             }
@@ -107,6 +115,7 @@ public static class ModelLibrary
             }
         }
 
+        List<string> found = [.. newest.Values];
         found.Sort((a, b) => File.GetLastWriteTimeUtc(b).CompareTo(File.GetLastWriteTimeUtc(a)));
         return found;
     }

@@ -18,7 +18,7 @@ public sealed class WaterfallView : Control
     private readonly PlotText _text = new();
     private readonly List<double[][]> _histories = [];
     private (int Traces, int Bins, int SampleRate, double TopHz, FrequencyScale Scale) _layout;
-    private (int Start, int End)[] _pointBins = [];
+    private RowSample[] _pointBins = [];
     private AnalyzerFrame? _frame;
     private int _newest = -1;
     private int _filled;
@@ -37,12 +37,12 @@ public sealed class WaterfallView : Control
             Reset();
             _layout = layout;
             FrequencyAxis axis = frame.Axis;
-            _pointBins = new (int, int)[Points];
+            _pointBins = new RowSample[Points];
             for (int p = 0; p < Points; p++)
             {
                 double f0 = axis.ToHz(Math.Max(0.0, (p - 0.5) / (Points - 1)));
                 double f1 = axis.ToHz(Math.Min(1.0, (p + 0.5) / (Points - 1)));
-                _pointBins[p] = FrequencyAxis.BinRange(frame.Bins, frame.Nyquist, f0, f1);
+                _pointBins[p] = FrequencyAxis.SampleRow(frame.Bins, frame.Nyquist, f0, f1);
             }
 
             for (int i = 0; i < frame.Traces.Count; i++)
@@ -65,7 +65,7 @@ public sealed class WaterfallView : Control
             double[] line = _histories[i][_newest];
             for (int p = 0; p < Points; p++)
             {
-                line[p] = FrequencyAxis.Peak(bins, _pointBins[p]);
+                line[p] = FrequencyAxis.Read(bins, _pointBins[p]);
             }
         }
 

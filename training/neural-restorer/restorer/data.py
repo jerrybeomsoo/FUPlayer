@@ -6,7 +6,10 @@ trained on here either, and versions of one song stay on one side of the split.
 from __future__ import annotations
 
 import csv
+import os
+import queue
 import random
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,7 +18,7 @@ import torch
 
 from upscaler import data as upscaler_data
 
-ROOT = Path("work/restorer")
+ROOT = Path(os.environ.get("FUPLAYER_RESTORER_CORPUS", "work/restorer"))
 CROP = 32_768   # samples at either rate: 0.68 s at 48 kHz, twice what the network sees of the past and future
 
 
@@ -100,7 +103,48 @@ class Sampler:
         raise RuntimeError("no crop loud enough after 50 draws")
 
 
-def batch(sampler: Sampler, size: int, device: torch.device):
+class Prefetch:
+    """Draws crops on background threads, so the disk and the graphics card work at the same time.
+
+    A crop is 128 KB of one file and another of its reference, drawn at random from a corpus far too large to sit
+    in memory; on a drive that has to seek for them the training thread spent longer waiting than computing. Each
+    thread has its own sampler, so the draws stay independent, and the queue is small enough that the memory it
+    holds is a few crops rather than a corpus. The order crops arrive in is not the order one sampler would draw
+    them, which is of no consequence to a sampler whose whole purpose is randomness; validation keeps using a
+    plain Sampler, whose order is reproducible.
+    """
+
+    def __init__(self, items: list[Item], seed: int, lossless: float = 0.1, crop: int = CROP,
+                 threads: int = 4, depth: int = 48) -> None:
+        self._queue: queue.Queue = queue.Queue(maxsize=depth)
+        self._stop = threading.Event()
+        self._samplers = [Sampler(items, seed=seed + (9973 * i), lossless=lossless, crop=crop) for i in range(threads)]
+        self._threads = [threading.Thread(target=self._fill, args=(s,), daemon=True, name=f"restorer-crops-{i}")
+                         for i, s in enumerate(self._samplers)]
+        for thread in self._threads:
+            thread.start()
+
+    def _fill(self, sampler: Sampler) -> None:
+        while not self._stop.is_set():
+            try:
+                drawn = sampler.draw()
+            except RuntimeError:
+                continue
+            while not self._stop.is_set():
+                try:
+                    self._queue.put(drawn, timeout=0.5)
+                    break
+                except queue.Full:
+                    continue
+
+    def draw(self) -> tuple[np.ndarray, np.ndarray, int, str]:
+        return self._queue.get()
+
+    def close(self) -> None:
+        self._stop.set()
+
+
+def batch(sampler: Sampler | Prefetch, size: int, device: torch.device):
     """x, y [B, 2, CROP] on the device, rates [B], labels."""
     xs, ys, rates, labels = [], [], [], []
     for _ in range(size):

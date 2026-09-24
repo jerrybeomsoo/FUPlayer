@@ -18,6 +18,11 @@ namespace FUPlayer.Audio.Windows;
 /// the capture keeps every sample while the device plays none of the application's. Measured on this machine:
 /// the session mute took the capture from −72 to −200 dBFS; the endpoint mute left it at −72.
 ///
+/// One case cannot be helped: a shared WASAPI output on the very device the application plays to. The device
+/// cannot be muted without muting the player, and the application's session cannot be muted without silencing
+/// the capture, so the note says so and what silences it instead (an exclusive or ASIO output, or sending the
+/// application to another device in Windows' own per-application setting).
+///
 /// Three endpoints are left alone: the player's own WASAPI device, whose mute would silence the player; any
 /// endpoint whose mute is done in hardware while the output is ASIO, since that hardware may be the ASIO device;
 /// and any the user unmutes while the capture runs. Whatever is muted here is written down before it is muted,
@@ -165,6 +170,7 @@ internal sealed class DirectOutputMuter : IDisposable
 
             collection.GetCount(out int count);
             var notes = new List<string>();
+            bool shared = false;
             for (int i = 0; i < count; i++)
             {
                 if (collection.Item(i, out IMMDevice device) != WasapiConstants.SOk)
@@ -188,7 +194,13 @@ internal sealed class DirectOutputMuter : IDisposable
 
                     if (string.Equals(id, own, StringComparison.OrdinalIgnoreCase))
                     {
-                        notes.Add($"left {name} playing: it is the player's own output");
+                        // Muting it would silence the player too. Under a shared stream the application keeps
+                        // playing to the same device, which is the echo this class exists to stop and the one
+                        // case it cannot.
+                        shared = IsShared;
+                        notes.Add(shared
+                            ? $"left {name} playing: the player shares it, so the application is still heard through it directly"
+                            : $"left {name} playing: it is the player's own output");
                         continue;
                     }
 
@@ -244,7 +256,13 @@ internal sealed class DirectOutputMuter : IDisposable
 
             if (notes.Count > 0)
             {
-                _note = $"So it is heard once, through the player: {string.Join("; ", notes.Distinct())}.";
+                string done = string.Join("; ", notes.Distinct());
+                _note = shared
+                    ? "Heard twice: a shared WASAPI stream leaves the application playing to the same device, and muting that "
+                        + "device would silence the player with it. WASAPI exclusive or ASIO output locks other applications "
+                        + $"out of the device; or send the application to another device under Windows' app volume and "
+                        + $"device preferences, which leaves the capture as it is. ({done}.)"
+                    : $"So it is heard once, through the player: {done}.";
             }
         }
         finally
@@ -255,6 +273,9 @@ internal sealed class DirectOutputMuter : IDisposable
     }
 
     private bool IsAsio => string.Equals(_options.OutputBackendId, AsioBackend.BackendId, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The player's own output is a shared WASAPI stream, which other applications play beside.</summary>
+    private bool IsShared => string.Equals(_options.OutputBackendId, WasapiBackend.SharedId, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The endpoint the player itself renders to, when its output is a WASAPI device.</summary>
     private string? OwnEndpoint(IMMDeviceEnumerator enumerator)

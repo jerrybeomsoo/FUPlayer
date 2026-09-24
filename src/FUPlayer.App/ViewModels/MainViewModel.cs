@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using FUPlayer.App.Controls;
 using FUPlayer.App.Services;
+using FUPlayer.Core.Dsp.Resampling;
 using FUPlayer.Core.Engine;
 using FUPlayer.Core.Metadata;
 using FUPlayer.Core.Playlists;
@@ -437,6 +438,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             General.RefreshFifo(status.FifoBytes, status.FifoSeconds);
         }
+        else if (SelectedNav == DspNav)
+        {
+            Dsp.UpdateStatus(status);
+        }
 
         Queue.SetCurrent(status.CurrentItem?.Id);
         Calibration.IsTonePlaying = active && status.IsTestTone;
@@ -587,9 +592,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         bool calm = recent.Length == 3 && recent.All(s => s.Load < 0.9 && !s.Dropout);
         if ((saturated || dropouts) && !_overloadDismissed)
         {
-            OverloadMessage = status.Plan is { Output.IsDsd: true }
-                ? "Processing cannot keep up with this output, so the sound may drop out. In the DSP studio, lower the highest DSD rate, choose a lighter modulator or filter, or use multi-stage filter staging."
-                : "Processing cannot keep up with this output, so the sound may drop out. In the DSP studio, lower the highest PCM rate, choose a lighter filter, or use multi-stage filter staging.";
+            // Tap by tap first, because it is the largest lever by far: a filter of several thousand taps a phase
+            // costs a multiply-add for every one of them, where the frequency domain costs a transform.
+            string remedies = _services.Settings.Processing.Convolution == ConvolutionMode.TapByTap
+                ? "set Convolution to Frequency domain, which costs a transform rather than a multiply-add for every tap"
+                : status.Plan is { Output.IsDsd: true }
+                    ? "lower the highest DSD rate, choose a lighter modulator or filter, or use multi-stage filter staging"
+                    : "lower the highest PCM rate, choose a lighter filter, or use multi-stage filter staging";
+            OverloadMessage = $"Processing cannot keep up with this output, so the sound may drop out. In the DSP studio, {remedies}.";
         }
         else if (calm)
         {

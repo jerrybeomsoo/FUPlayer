@@ -14,6 +14,11 @@ namespace FUPlayer.Core.Dsp.Acceleration;
 /// onto the device, <see cref="Begin"/> starts the phases it has been given without waiting for them, and
 /// <see cref="Collect"/> is the only step that blocks. The processor convolves the remaining phases of the same
 /// samples in between.
+///
+/// The history stays on the device. A window is the history followed by the block, and two of them alternate: each
+/// new block's history is the tail of the window before, moved there by a copy on the device, so only the block's own
+/// samples cross the bus. Sending the whole window instead sends <c>TapsPerPhase − 1</c> samples of history with every
+/// block, which for a filter of 8,917 taps a phase is 13,012 samples to deliver 4,096.
 /// </remarks>
 internal sealed class GpuDirectConvolver : IDisposable
 {
@@ -27,13 +32,16 @@ internal sealed class GpuDirectConvolver : IDisposable
     private readonly PolyphaseStage _stage;
     private readonly int _element;
     private readonly int _history;
-    private readonly double[] _window;
+    private readonly double[] _silence;
     private readonly double[] _packed;
     private readonly byte[] _transfer;
 
     private nint _queue;
     private nint _kernel;
-    private nint _signal;
+
+    // The two windows, history then block. Two, because a copy between overlapping ranges of one buffer is undefined.
+    private readonly nint[] _windows = new nint[2];
+    private int _current;
     private nint _output;
     private int _count;
     private int _lanes;
@@ -46,23 +54,27 @@ internal sealed class GpuDirectConvolver : IDisposable
         GpuProgram program = filter.Program;
         _element = program.ElementSize;
         _history = _stage.TapsPerPhase - 1;
-        _window = new double[_history + MaxBlock];
+        _silence = new double[_history];
+        long window = (long)_history + MaxBlock;
 
         int outputs = MaxBlock * _stage.Up;
         _packed = new double[outputs];
-        _transfer = program.UsesDouble ? [] : new byte[Math.Max(_window.Length, outputs) * sizeof(float)];
+        _transfer = program.UsesDouble ? [] : new byte[Math.Max(Math.Max(_history, MaxBlock), outputs) * sizeof(float)];
 
         try
         {
             _queue = OpenClApi.CreateQueue(program.Context, program.Device.Handle);
             _kernel = OpenClApi.CreateKernel(program.Program, "direct");
-            _signal = OpenClApi.CreateBuffer(
-                program.Context, OpenClApi.MemReadOnly, (nuint)((long)_window.Length * _element));
+            for (int i = 0; i < _windows.Length; i++)
+            {
+                _windows[i] = OpenClApi.CreateBuffer(program.Context, OpenClApi.MemReadOnly, (nuint)(window * _element));
+            }
+
             _output = OpenClApi.CreateBuffer(
                 program.Context, OpenClApi.MemWriteOnly, (nuint)((long)outputs * _element));
 
             OpenClApi.SetArg(_kernel, 0, filter.Coefficients);
-            OpenClApi.SetArg(_kernel, 1, _signal);
+            OpenClApi.SetArg(_kernel, 1, _windows[0]);
             OpenClApi.SetArg(_kernel, 2, _output);
             OpenClApi.SetLocalArg(_kernel, 3, (nuint)(filter.GroupSize * _element));
             OpenClApi.SetArg(_kernel, 4, _stage.TapsPerPhase);
@@ -79,18 +91,28 @@ internal sealed class GpuDirectConvolver : IDisposable
     /// <summary>Phases the stage has in all; the device may be given any number of them.</summary>
     public int Up => _stage.Up;
 
+    /// <summary>Starts again from silence: the next block is convolved against a history of zeros.</summary>
     public void Reset()
     {
-        Array.Clear(_window, 0, _history);
+        _current = 0;
         _lanes = 0;
         _count = 0;
+        if (_history > 0)
+        {
+            Upload(_silence, _windows[0], 0);
+        }
     }
 
     public void Dispose()
     {
-        OpenClApi.ReleaseMemory(_signal);
+        for (int i = 0; i < _windows.Length; i++)
+        {
+            OpenClApi.ReleaseMemory(_windows[i]);
+            _windows[i] = 0;
+        }
+
         OpenClApi.ReleaseMemory(_output);
-        _signal = _output = 0;
+        _output = 0;
         OpenClApi.ReleaseKernel(_kernel);
         _kernel = 0;
         OpenClApi.ReleaseQueue(_queue);
@@ -98,17 +120,26 @@ internal sealed class GpuDirectConvolver : IDisposable
     }
 
     /// <summary>
-    /// Puts the block, and the history in front of it, onto the device. This happens whether or not the device
-    /// is given any phases of it: the history is what the samples after it are convolved against.
+    /// Puts the block onto the device behind the history it is convolved against. This happens whether or not the
+    /// device is given any phases of it: the history is what the samples after it are convolved against.
     /// </summary>
     public void Accept(ReadOnlySpan<double> block)
     {
-        _count = block.Length;
-        block.CopyTo(_window.AsSpan(_history));
-        Upload(_window.AsSpan(0, _history + _count));
+        // The last TapsPerPhase − 1 samples of the window before (its history and block together) are this block's
+        // history. The queue is in order, so the copy follows the launch that read that window, and the launch below
+        // follows the copy and the write.
+        int next = 1 - _current;
+        if (_history > 0)
+        {
+            OpenClApi.Copy(
+                _queue, _windows[_current], (nuint)((long)_count * _element),
+                _windows[next], 0, (nuint)((long)_history * _element));
+        }
 
-        // The write has taken its copy, so the tail can become the history of the next block straight away.
-        _window.AsSpan(_count, _history).CopyTo(_window);
+        Upload(block, _windows[next], (nuint)((long)_history * _element));
+        OpenClApi.SetArg(_kernel, 1, _windows[next]);
+        _current = next;
+        _count = block.Length;
     }
 
     /// <summary>Starts the given phases of the block last accepted, and returns without waiting for them.</summary>
@@ -163,11 +194,16 @@ internal sealed class GpuDirectConvolver : IDisposable
         }
     }
 
-    private void Upload(ReadOnlySpan<double> values)
+    private void Upload(ReadOnlySpan<double> values, nint buffer, nuint offsetBytes)
     {
+        if (values.IsEmpty)
+        {
+            return;
+        }
+
         if (_element == sizeof(double))
         {
-            OpenClApi.Write(_queue, _signal, 0, MemoryMarshal.AsBytes(values));
+            OpenClApi.Write(_queue, buffer, offsetBytes, MemoryMarshal.AsBytes(values));
             return;
         }
 
@@ -177,7 +213,7 @@ internal sealed class GpuDirectConvolver : IDisposable
             target[i] = (float)values[i];
         }
 
-        OpenClApi.Write(_queue, _signal, 0, _transfer.AsSpan(0, values.Length * sizeof(float)));
+        OpenClApi.Write(_queue, buffer, offsetBytes, _transfer.AsSpan(0, values.Length * sizeof(float)));
     }
 
     private void Download(Span<double> values)

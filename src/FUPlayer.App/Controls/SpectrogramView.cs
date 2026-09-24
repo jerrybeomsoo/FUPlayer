@@ -34,7 +34,7 @@ public sealed class SpectrogramView : Control
     private readonly PlotText _text = new();
     private readonly List<WriteableBitmap> _lanes = [];
     private (int Traces, int Bins, int SampleRate, double TopHz, FrequencyScale Scale, double FloorDb) _layout;
-    private (int Start, int End)[] _rowBins = [];
+    private RowSample[] _rowBins = [];
     private AnalyzerFrame? _frame;
     private int _nextColumn;
 
@@ -52,10 +52,10 @@ public sealed class SpectrogramView : Control
             Reset();
             _layout = layout;
             FrequencyAxis axis = frame.Axis;
-            _rowBins = new (int, int)[Rows];
+            _rowBins = new RowSample[Rows];
             for (int row = 0; row < Rows; row++)
             {
-                _rowBins[row] = FrequencyAxis.BinRange(frame.Bins, frame.Nyquist, axis.ToHz((double)row / Rows), axis.ToHz((row + 1.0) / Rows));
+                _rowBins[row] = FrequencyAxis.SampleRow(frame.Bins, frame.Nyquist, axis.ToHz((double)row / Rows), axis.ToHz((row + 1.0) / Rows));
             }
 
             for (int i = 0; i < frame.Traces.Count; i++)
@@ -80,7 +80,7 @@ public sealed class SpectrogramView : Control
             int stride = target.RowBytes / 4;
             for (int row = 0; row < Rows; row++)
             {
-                double peak = FrequencyAxis.Peak(bins, _rowBins[row]);
+                double peak = FrequencyAxis.Read(bins, _rowBins[row]);
                 uint color = double.IsNaN(peak)
                     ? AboveNyquistColor
                     : HeatColors[(int)(Math.Clamp((peak - floor) / span, 0, 1) * (HeatColors.Length - 1))];

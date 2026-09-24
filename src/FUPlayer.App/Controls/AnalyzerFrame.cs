@@ -104,7 +104,53 @@ internal readonly record struct FrequencyAxis(FrequencyScale Scale, double Maxim
 
         return peak;
     }
+
+    /// <summary>
+    /// How one row of a display reads the bins between <paramref name="f0"/> and <paramref name="f1"/>. A row at
+    /// least a bin wide takes the loudest bin in it, so a tone shows at its own level wherever it falls. A narrower
+    /// row, which is every row of the low octaves on a logarithmic axis at a short transform, reads between the two
+    /// bins either side of its centre instead: rounded to the nearest bin, a run of rows would all show the same one
+    /// and draw it as a block.
+    /// </summary>
+    public static RowSample SampleRow(int bins, double nyquist, double f0, double f1)
+    {
+        if (bins < 2 || f0 > nyquist)
+        {
+            return new RowSample(-1, -1, 0.0);
+        }
+
+        double binWidth = nyquist / (bins - 1);
+        if (Math.Min(f1, nyquist) - f0 >= binWidth)
+        {
+            (int start, int end) = BinRange(bins, nyquist, f0, f1);
+            return new RowSample(start, end, double.NaN);
+        }
+
+        double centre = Math.Clamp(0.5 * (f0 + Math.Min(f1, nyquist)) / binWidth, 0.0, bins - 1);
+        int below = Math.Min((int)Math.Floor(centre), bins - 2);
+        return new RowSample(below, below + 1, centre - below);
+    }
+
+    /// <summary>What a row shows, given the bins in decibels; NaN for a row above Nyquist.</summary>
+    public static double Read(ReadOnlySpan<double> bins, RowSample row)
+    {
+        if (row.Start < 0)
+        {
+            return double.NaN;
+        }
+
+        return double.IsNaN(row.Between)
+            ? Peak(bins, (row.Start, row.End))
+            : bins[row.Start] + ((bins[row.End] - bins[row.Start]) * row.Between);
+    }
 }
+
+/// <summary>
+/// One display row's reading of a spectrum: the loudest of bins <see cref="Start"/> to <see cref="End"/> when
+/// <see cref="Between"/> is NaN, otherwise <see cref="Between"/> of the way from bin <see cref="Start"/> to
+/// <see cref="End"/>. Start is −1 for a row above Nyquist.
+/// </summary>
+internal readonly record struct RowSample(int Start, int End, double Between);
 
 /// <summary>Drawing helpers shared by the analyzer displays.</summary>
 internal static class AnalyzerDrawing

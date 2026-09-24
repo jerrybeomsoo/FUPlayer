@@ -181,7 +181,11 @@ public sealed partial class DspStudioViewModel : ObservableObject
     private bool _neuralUpscaler;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SourceTypeDescription))]
     private Choice? _selectedUpscalerSource;
+
+    /// <summary>What the engine made of the source that is playing, for Automatic; empty when nothing plays.</summary>
+    private string _sourceVerdict = string.Empty;
 
     [ObservableProperty]
     private Choice? _selectedUpscalerBand;
@@ -446,6 +450,33 @@ public sealed partial class DspStudioViewModel : ObservableObject
     /// <summary>Either network is on, so the settings they share are shown.</summary>
     public bool HasNeuralModel => NeuralRestorer || NeuralUpscaler;
 
+    /// <summary>
+    /// What Source type does, and under Automatic what it decided about whatever is playing: the setting says
+    /// how a source is read, and only the engine knows which way it went for this one.
+    /// </summary>
+    public string SourceTypeDescription =>
+        SelectedUpscalerSource?.Value is UpscalerSource.Automatic && _sourceVerdict.Length > 0
+            ? $"{SelectedUpscalerSource.Description} {_sourceVerdict}"
+            : SelectedUpscalerSource?.Description ?? string.Empty;
+
+    /// <summary>Called by the shell while this page is shown, so Automatic can say which way it read the source.</summary>
+    public void UpdateStatus(PlaybackStatus status)
+    {
+        ArgumentNullException.ThrowIfNull(status);
+        string verdict = status.State == EngineState.Stopped || status.Plan is not { } plan
+            ? string.Empty
+            : $"Playing now: {Codec(plan.SourceCodec)}read as {(plan.SourceCoded ? "lossy" : "lossless")}.";
+        if (verdict == _sourceVerdict)
+        {
+            return;
+        }
+
+        _sourceVerdict = verdict;
+        OnPropertyChanged(nameof(SourceTypeDescription));
+    }
+
+    private static string Codec(string? name) => string.IsNullOrWhiteSpace(name) ? string.Empty : name.Trim() + ", ";
+
     /// <summary>Reads the models folder again. Called when the page is opened and when a switch changes.</summary>
     public void RefreshModelStatus()
     {
@@ -464,10 +495,10 @@ public sealed partial class DspStudioViewModel : ObservableObject
 
     public IReadOnlyList<Choice> UpscalerBandChoices { get; } =
     [
-        new("Quiet", -6.0, "−6 dB relative to the model output."),
-        new("Measured", 0.0, "Model output: −0.7 dB against the held-out masters on average."),
-        new("Lifted", 3.0, "+3 dB relative to the model output."),
-        new("Strong", 6.0, "+6 dB relative to the model output."),
+        new("Quiet", -6.0, "−6 dB on the band written above the source's Nyquist frequency. Nothing below it moves."),
+        new("Measured", 0.0, "The model's own level there: −0.7 dB against the held-out masters on average."),
+        new("Lifted", 3.0, "+3 dB on the band written above the source's Nyquist frequency. Nothing below it moves."),
+        new("Strong", 6.0, "+6 dB on the band written above the source's Nyquist frequency. Nothing below it moves."),
     ];
 
     public IReadOnlyList<Choice> ConvolutionLayoutChoices { get; } =

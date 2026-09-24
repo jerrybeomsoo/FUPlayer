@@ -119,12 +119,12 @@
               <Border Classes="divider" Margin="0,10" />
               <TextBlock Classes="h3" Text="Lossy repair" />
               <controls:SettingRow Title="Neural restorer"
-                                   Description="Lossy 44.1/48 kHz stereo (Opus, AAC, MP3, Vorbis at 96–160 kbit/s) → pseudo-lossless at the same rate. Causal STFT ConvNeXt on mid/side with a 6-frame look-ahead: complex-mask correction of coding noise and spectral holes, synthesis above the codec low-pass. ONNX Runtime on CPU; latency ≈ 85 ms; limiter engaged.">
+                                   Description="Coded 44.1/48 kHz stereo (Opus, AAC, MP3, Vorbis) back towards the lossless recording at the same rate. ONNX Runtime on the processor, first in the chain, 91 ms at 48 kHz and 99 at 44.1; the limiter runs with it.">
                 <ToggleSwitch IsChecked="{Binding NeuralRestorer}" OnContent="" OffContent="" />
               </controls:SettingRow>
               <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,4" Text="{Binding RestorerStatus}" IsVisible="{Binding NeuralRestorer}" />
               <controls:SettingRow Title="Neural upscaler"
-                                   Description="44.1/48 kHz PCM → 88.2/96 kHz. STFT-domain ConvNeXt network: complex-mask correction of codec artefacts in the passband, magnitude/phase synthesis above the codec cutoff and the source Nyquist. After the restorer when both are on, reading its output as lossless. ONNX Runtime on CPU; latency ≈ 0.55 s; limiter engaged.">
+                                   Description="44.1/48 kHz sources to 88.2/96 kHz, with the band above the source's own written. ONNX Runtime on the processor, after the restorer and before the filter, about 0.55 s; the limiter runs with it.">
                 <ToggleSwitch IsChecked="{Binding NeuralUpscaler}" OnContent="" OffContent="" />
               </controls:SettingRow>
               <StackPanel Spacing="0" IsVisible="{Binding NeuralUpscaler}">
@@ -134,7 +134,7 @@
                 <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,4" Text="{Binding UpscalerStatus}" />
               </StackPanel>
               <StackPanel Spacing="0" IsVisible="{Binding HasNeuralModel}">
-                <controls:SettingRow Title="Source type" Description="{Binding SelectedUpscalerSource.Description}">
+                <controls:SettingRow Title="Source type" Description="{Binding SourceTypeDescription}">
                   <ComboBox ItemsSource="{Binding UpscalerSourceChoices}" SelectedItem="{Binding SelectedUpscalerSource}" Width="170" MinWidth="170" />
                 </controls:SettingRow>
                 <controls:SettingRow Title="Output delta"

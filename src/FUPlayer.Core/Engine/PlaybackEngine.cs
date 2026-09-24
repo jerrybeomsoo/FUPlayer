@@ -228,6 +228,7 @@ public sealed class PlaybackEngine : IDisposable
             CurrentItem = marker is not null ? marker.Item : index >= 0 ? Queue.Get(index) : null,
             IsTestTone = marker?.IsTestTone ?? false,
             IsCapture = marker?.IsCapture ?? false,
+            CaptureProcessId = marker?.IsCapture == true ? _captureProcessId : 0,
             CaptureNote = marker?.IsCapture == true ? (_decoder as IDiagnosticCapture)?.DirectOutputNote : null,
             Bandwidth = Describe(pipeline),
             Position = position,
@@ -1076,6 +1077,7 @@ public sealed class PlaybackEngine : IDisposable
     internal static PlaybackPlan ApplySource(PlaybackPlan plan, string? codecName, PlayerSettings settings)
     {
         bool coded = LossyCodecs.IsLossy(codecName);
+        plan = plan with { SourceCoded = coded, SourceCodec = codecName };
         if (!plan.Limiter && coded)
         {
             plan = plan with { Limiter = true };

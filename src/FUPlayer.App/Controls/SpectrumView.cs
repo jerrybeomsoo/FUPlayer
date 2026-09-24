@@ -209,7 +209,6 @@ public sealed class SpectrumView : Control
                 {
                     bool started = false;
                     double lastX = plot.Left;
-                    double binWidth = nyquist / (bins.Length - 1);
                     for (int c = 0; c < columns; c++)
                     {
                         double f0 = axis.ToHz((double)c / columns);
@@ -219,19 +218,7 @@ public sealed class SpectrumView : Control
                             break;
                         }
 
-                        double level;
-                        if (f1 - f0 < binWidth)
-                        {
-                            // Narrower than one bin (low frequencies on a logarithmic axis): interpolate between bin
-                            // centres instead of drawing stair steps.
-                            double position = Math.Min((f0 + f1) / 2, nyquist) / binWidth;
-                            int index = Math.Min((int)position, bins.Length - 2);
-                            level = bins[index] + (bins[index + 1] - bins[index]) * (position - index);
-                        }
-                        else
-                        {
-                            level = FrequencyAxis.Peak(bins, FrequencyAxis.BinRange(bins.Length, nyquist, f0, f1));
-                        }
+                        double level = FrequencyAxis.Read(bins, FrequencyAxis.SampleRow(bins.Length, nyquist, f0, f1));
 
                         var point = new Point(plot.Left + plot.Width * c / columns, Y(level));
                         if (!started)

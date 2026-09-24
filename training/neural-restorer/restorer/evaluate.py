@@ -7,8 +7,10 @@ whole on the graphics device; the first half second and the last quarter of each
 every frame measured had its full context. Input (the decoded stream) and output are compared with the master:
 
 - log-spectral distance below 4 kHz, from 4 to 12 kHz and from 12 kHz to Nyquist, dB;
-- the level above 16 kHz against the master's over the stretch, dB;
-- the side channel's distance from the master's, the mean over 500 Hz bands from 4 kHz of |level difference|, dB;
+- the level above 16 kHz against the master's over the stretch, dB, over the two channels and over their mix;
+- mid's and side's distance from the master's, the mean over 500 Hz bands from 4 kHz of |level difference|, dB.
+  Mid is there because a band written into the side alone reads as a band in every per-channel measurement and is
+  missing from the mix, which is where music keeps most of its top octave;
 - the noise-to-mask ratio per frame as PEAQ forms it: noise energy over masking threshold in each Bark band, averaged
   over the bands and then expressed in dB (below 0 dB is inaudible on average), and the share of frames in which any
   band's noise is 1.5 dB or more above its threshold. Noise is the magnitude difference from the master, so a band the
@@ -53,9 +55,19 @@ def nmr(spec_out: torch.Tensor, spec_target: torch.Tensor, rate: int) -> tuple[f
     return float(total_db[loud].mean()), float(100.0 * (worst_db[loud] >= 1.5).float().mean())
 
 
-def side_distance_db(x: torch.Tensor, y: torch.Tensor, rate: int) -> float:
-    sx, sy = stft((x[:, 0] - x[:, 1]) * 0.7071), stft((y[:, 0] - y[:, 1]) * 0.7071)
+def part_distance_db(x: torch.Tensor, y: torch.Tensor, rate: int, sign: float) -> float:
+    """Mid (sign +1) or side (sign -1): the mean over 500 Hz bands of how far its level is from the master's."""
+    sx = stft((x[:, 0] + sign * x[:, 1]) * 0.7071)
+    sy = stft((y[:, 0] + sign * y[:, 1]) * 0.7071)
     return 10.0 * float(losses.band_level_loss(sx, sy, torch.tensor([rate], device=x.device)))
+
+
+def mid_level_above_db(x: torch.Tensor, y: torch.Tensor, rate: int) -> float:
+    """The level above 16 kHz of the two channels mixed, against the master's: a band written into the side alone
+    is missing here and nowhere else."""
+    sx = stft((x[:, 0] + x[:, 1]) * 0.7071)
+    sy = stft((y[:, 0] + y[:, 1]) * 0.7071)
+    return level_above_db(sx.abs().pow(2), sy.abs().pow(2), rate)
 
 
 def measure(x: torch.Tensor, y: torch.Tensor, rate: int) -> dict[str, float]:
@@ -65,7 +77,9 @@ def measure(x: torch.Tensor, y: torch.Tensor, rate: int) -> dict[str, float]:
     px, py = spec_x.abs().pow(2), spec_y.abs().pow(2)
     out = {f"lsd_{k}": v for k, v in lsd_by_band(px, py, rate).items()}
     out["above16k_db"] = level_above_db(px, py, rate)
-    out["side_db"] = side_distance_db(x, y, rate)
+    out["above16k_mid_db"] = mid_level_above_db(x, y, rate)
+    out["mid_db"] = part_distance_db(x, y, rate, 1.0)
+    out["side_db"] = part_distance_db(x, y, rate, -1.0)
     out["nmr_db"], out["disturbed_pct"] = nmr(spec_x, spec_y, rate)
     return out
 
@@ -130,7 +144,8 @@ def main() -> None:
         writer.writerows(rows)
 
     metrics = [("lsd_0-4k", "LSD <4k"), ("lsd_4-12k", "LSD 4-12k"), ("lsd_12k-nyq", "LSD >12k"),
-               ("above16k_db", ">16k level"), ("side_db", "side"), ("nmr_db", "NMR"), ("disturbed_pct", "disturbed %")]
+               ("above16k_db", ">16k level"), ("above16k_mid_db", ">16k mixed"), ("mid_db", "mid"),
+               ("side_db", "side"), ("nmr_db", "NMR"), ("disturbed_pct", "disturbed %")]
 
     def table(group_of) -> None:
         groups: dict[str, list[dict]] = defaultdict(list)

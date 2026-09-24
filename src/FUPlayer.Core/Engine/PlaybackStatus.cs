@@ -26,6 +26,9 @@ public sealed record PlaybackStatus
     /// <summary>True while the source is another application rather than a file.</summary>
     public bool IsCapture { get; init; }
 
+    /// <summary>The captured application's process, or 0 when nothing is being captured.</summary>
+    public int CaptureProcessId { get; init; }
+
     /// <summary>While capturing: what was done about the application's own playback.</summary>
     public string? CaptureNote { get; init; }
 

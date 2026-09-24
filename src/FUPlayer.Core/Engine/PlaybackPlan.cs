@@ -64,6 +64,16 @@ public sealed record PlaybackPlan
     public bool SourceIsLossy { get; init; } = true;
 
     /// <summary>
+    /// What the source itself is, from its codec alone: a perceptual codec or a capture (true), or a lossless
+    /// one (false). This is what Automatic reads; <see cref="SourceIsLossy"/> is what the networks are told,
+    /// which the Source type setting and the restorer can both change.
+    /// </summary>
+    public bool SourceCoded { get; init; }
+
+    /// <summary>The source's codec as the decoder names it, or null before one is open.</summary>
+    public string? SourceCodec { get; init; }
+
+    /// <summary>
     /// Whether the neural restorer runs, at the source rate, on the source's two channels (or its one), before the
     /// per-channel chain. Planned for PCM at 44.1 and 48 kHz; the engine turns it off again for a lossless source.
     /// </summary>

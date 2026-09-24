@@ -100,7 +100,7 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 - Take audio from any running application, Firefox or a music client, and send it through the whole chain
   to your DAC. Windows process loopback, so nothing has to be routed by hand.
 - Lossy repair is two neural networks, both in the release, both run on the processor through ONNX Runtime:
-  - the **neural restorer** takes coded 44.1 and 48 kHz stereo (Opus, AAC, MP3, Vorbis at 96 to 160 kbit/s) back
+  - the **neural restorer** takes coded 44.1 and 48 kHz stereo (Opus, AAC, MP3, Vorbis, 96 kbit/s upwards) back
     towards the lossless recording at the same rate, with about 90 ms of delay: the band above the codec's
     low-pass, the collapsed stereo, the holes of the weaker encoders ([its page](docs/neural-restorer.md));
   - the **neural upscaler** takes 44.1 and 48 kHz files and captures to 88.2 and 96 kHz, correcting coded passbands

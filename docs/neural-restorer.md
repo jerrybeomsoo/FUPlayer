@@ -1,6 +1,6 @@
 # Neural restorer
 
-The neural restorer takes a coded stereo stream at 44.1 or 48 kHz (Opus, AAC, MP3 or Vorbis at 96 to 160 kbit/s,
+The neural restorer takes a coded stereo stream at 44.1 or 48 kHz (Opus, AAC, MP3 or Vorbis, 96 kbit/s upwards,
 from a file or captured from a browser or a music client) back towards the lossless recording at the same rate. It
 rewrites the band above the codec's low-pass, gives back the stereo width the codec collapsed in the upper bands,
 and fills the holes the weaker encoders leave, with a fixed delay of 91 ms at 48 kHz and 99 ms at 44.1 kHz. It is
@@ -75,7 +75,11 @@ The design follows what the two codecs it mostly meets actually do, as their spe
   learned crossover between them.
 - **Mid and side.** Both code stereo as mid and side and, at these rates, reduce the side of the upper bands to a
   level ratio (intensity stereo). The network reads and writes mid and side, one network for both, told which it is
-  writing.
+  writing, and both are held to the master's band levels. Holding left and right to them instead is not the same
+  thing and is what the model before this one was fitted to: it satisfied the level it was asked for by writing
+  the band it has to invent into the side, which reads as a band in each channel and is missing from the mix,
+  where music keeps most of its top octave. A spectrogram of the two channels mixed showed it as a dark stripe
+  from the codec's cutoff to the top of the band.
 - **Pre-echo and look-ahead.** A transient's quantisation noise spreads over the whole block before it. The one layer
   that looks ahead sees six hops, 32 ms at 48 kHz; everything else is causal, which is what keeps the delay under
   100 ms.
@@ -99,109 +103,150 @@ The design follows what the two codecs it mostly meets actually do, as their spe
 
 ## How the reference model was made
 
-**The corpus.** 924 songs from the maintainer's library: the upscaler's 336 screened high-resolution masters,
-brought down with SoX's resampler, and 588 CD-rate ALAC files not already among them. Classical music and
-instrumentals were left out and Japanese pop and anime weighted three times, as for the upscaler. Fifty seconds from
-the middle of each. Each song got one delivery rate:
+**The corpus.** 634 high-resolution masters from the maintainer's library, at 88.2, 96 or 192 kHz, of every genre.
+They are what survived a screen of all 890 high-resolution files in it: each was decoded at its own rate, the loud
+half of its frames averaged, and two numbers taken, the frequency where its spectrum drops for good and the slope
+from 8-16 kHz to 24-32 kHz. 21 files were dropped for a band that ends below 22.05 kHz, which is a CD-rate master
+resampled and sold at 96 kHz, and 235 for a spectrum that hardly falls at all, which is a transfer from a 1-bit
+source: their 20 to 22 kHz is the modulator's noise, and a network taught from it writes hiss. What is left is
+61 hours of music that carries sound to 22.05 kHz because it was recorded that way.
 
-- **48 kHz (511 songs):** what a browser or a streaming application hands Windows. Opus at 96, 112, 128 and
-  160 kbit/s; Apple, FFmpeg and Windows AAC coded at 44.1 kHz and resampled into the mixer, which is Apple Music in a
-  browser; AAC at 48 kHz; and a little Vorbis.
-- **44.1 kHz (413 songs):** files and applications that keep the stream's own rate. AAC from Apple (qaac), FFmpeg and
-  Windows Media Foundation at 96, 128 and 160 kbit/s; MP3 at 128 and 160; Vorbis q2 and q5.
+Every song is prepared at both delivery rates, 90 seconds from the middle of each:
 
-Each song has three coded copies, decoded and lined up with the reference, 32 GB in all at float16. 55 songs are held
-out by title, the upscaler's split, so no song either model was measured on was trained on by the other.
+- **44.1 kHz**, what a file plays at: AAC from Apple (qaac), FFmpeg and Windows Media Foundation, MP3, Vorbis and
+  Opus, 96 to 320 kbit/s.
+- **48 kHz**, what a browser or a music client hands Windows: Opus at its own rate, and AAC, MP3 and Vorbis coded at
+  44.1 kHz and resampled up after decoding, which is Apple Music in a browser.
+
+A fifth of the copies are made at 192 kbit/s and above, where a codec is nearly transparent and the network has to
+leave what it finds alone. Four copies a song at each rate: 1,268 references, 5,072 coded copies, 95 GB at float16.
+122 of the references, 61 songs, are held out by title, the upscaler's split.
+
+**The passband the references come down with** is the point of all this. A reference has to carry music up to the
+delivery rate's own Nyquist frequency, so the resample that makes it uses soxr at 28-bit precision with its passband
+at 0.998 of Nyquist: measured on noise, flat to 23.2 kHz at 48 kHz, with the aliases of a 30 kHz tone 153 dB down.
+An ordinary passband stops at 0.91 of Nyquist, and a corpus built with one teaches a network that the band ends
+there.
 
 **Training.** Crops of 0.68 s, eight a step, one in ten the master against itself so the network learns to leave
-clean audio alone. First 20,000 steps of spectral and perceptual losses: multi-resolution STFT on left and right and
-on the side channel, the masked loss, the level of every 500 Hz band from 4 kHz, a phase loss, and an identity loss
-on the lossless crops. Then 12,000 steps with the upscaler's multi-period and multi-resolution spectral
-discriminators added. That took 4 hours 45 minutes on a 4 GB Quadro M2200 that was also driving the display.
+clean audio alone. 32,000 steps of spectral and perceptual losses — multi-resolution STFT on left and right and on
+mid and side, the masked loss, the level of every 500 Hz band from 4 kHz of mid and of side, a phase loss, and an
+identity loss on the lossless crops — and then 16,000 with the upscaler's multi-period and multi-resolution
+spectral discriminators.
 
-**Fine-tune.** On the held-out songs the first model laid a band on top of Vorbis q5, which reaches 20 kHz on its
-own: 3.0 dB too much above 16 kHz on average, and up to 20 dB on quiet passages. It had also never met a stream above
-160 kbit/s, while Apple Music plays AAC at 256 kbit/s in a browser. One more copy of every training song (Vorbis q4
-to q9, and AAC, Opus and MP3 at 192 to 320 kbit/s) and 3,000 + 3,000 steps from the best checkpoint, 1 hour 16
-minutes, took the Vorbis q5 overshoot to 1.7 dB. They also halved the distance above 12 kHz on 192 kbit/s AAC, and
-took the stretches written more than 3 dB too loud above 16 kHz from 90 to 54 of 2,464. The shipped model is the
-fine-tune's last adversarial checkpoint, 36,000 steps in all.
+The bands a codec emptied count six times over in the band-level term, measured per crop from the master against
+the copy rather than from a fixed frequency, because an encoder's low-pass moves with the bit rate and with the
+music. Averaged over every band from 4 kHz, the handful that have to be invented are a rounding error: a network
+can leave them twenty-five decibels short and pay almost nothing for it.
+
+A line term holds each bin's level over the crop against its neighbours', and the same in the master. The network
+writes every bin through its own row of the head, and nothing else ties one bin to the next, so a row that came out
+a little low draws a dark horizontal line across every track at that bin; one bin 10 dB low moves its 500 Hz band by
+0.4 dB, which the band-level term cannot see. The master's fine structure moves with the music from crop to crop and
+comes to nothing on average, and a row that is low on every input does not, so that is all the term can teach.
+
+From scratch, 7 hours 17 minutes on a 4 GB Quadro M2200 that was also driving the display; then 4 hours 12 for the
+mid, 4,000 spectral steps and 8,000 adversarial ones at a fifth of the learning rate, once the band-level terms were
+moved from left and right onto mid and side; then 3 hours 9 for the lines, 3,000 and 5,000 more the same way with
+the line term added. The shipped model is the last of those, 68,000 steps in all.
+
+**Why from scratch.** The model before it wrote nothing at all in three bins, and a spectrogram showed them as
+narrow dead lines across every track. They were in the weights and not in the music: played something brickwalled
+far below them, with digital silence above, bins 869, 881 and 894 came out 12 to 14 dB under their neighbours at
+44.1 kHz **and** at 48 kHz, the same bin indices at both rates. The first corpus is where they came from. Its
+44.1 kHz references were brought down with an ordinary passband, so they stopped at 20.1 kHz; its 48 kHz ones were
+mostly CD masters resampled up, so they stopped at 20.9. Fitted to references that disagreed about where the band
+ends, the network settled it by writing nothing in a few bins near where they disagreed. A fine-tune inherits
+weights, so it inherits that; only a new fit on a corpus that agrees with itself removes it.
 
 **What went wrong on the way.**
-- The first launch's output path was mangled by the shell that started it, and the run was restarted.
 - A training process killed in the middle of a GPU kernel left the display driver in error, and the machine stopped
   with a bugcheck five minutes later. Runs now end cleanly when a file named `STOP` appears in the run folder.
-- The library drive was not mounted after the reboot, so the extra copies were made from the stored references
-  instead of the original files.
-- The first export of the network's streaming step was a graph of 233 operators, and dispatching them cost 2.7 ms a
-  call whatever the frames. The file now holds only the network's core, the player does the ends, and the
-  convolutions are exported in the two-dimensional form ONNX Runtime runs fastest.
+- The first hours of this run went at a quarter speed. A crop is 128 KB of one file and another of its reference,
+  drawn at random from 95 GB, and drawing them on the training thread left it waiting three quarters of each step.
+  Six threads draw ahead of it now.
+- Its first snapshots carried no validation scores, so the model the player describes had nothing to say about
+  itself. Snapshots carry the last validation's scores now.
 
 ## Does it work
 
-Measured on the 55 held-out songs: four five-second stretches of each coded copy, the first half second and last
-quarter of each left out so every frame measured had its full context; input (the decoded stream) against output,
-both compared with the master.
+Measured on the 61 held-out songs, both rates, 1,952 stretches: four five-second stretches of each coded copy, the
+first half second and last quarter of each left out so every frame measured had its full context; input (the decoded
+stream) against output, both compared with the master.
 
 - **LSD** is the log-spectral distance per frame over the band.
-- **Level above 16 kHz** is the band's energy over the stretch against the master's.
-- **Side** is the mean distance of the side channel's 500 Hz band levels from the master's, from 4 kHz up.
+- **Level above 16 kHz** is the band's energy over the stretch against the master's: over the two channels, and over
+  their mix, which is where a band written into the side alone goes missing.
+- **Mid** and **side** are the mean distance of (L ± R)/√2's 500 Hz band levels from the master's, from 4 kHz up.
 - **NMR** is the noise-to-mask ratio formed as PEAQ (ITU-R BS.1387) forms it: noise over threshold in each Bark band,
   averaged over the bands in each frame. Below 0 dB is inaudible on average.
 - **Disturbed frames** are the share of frames with any band 1.5 dB or more above its threshold.
 
-At the rates it was made for, 96 to 160 kbit/s:
+| Codec | Stretches | LSD 4–12 kHz, dB | LSD above 12 kHz, dB | Level above 16 kHz, dB | Same, mixed, dB | Mid, dB | Side, dB | NMR, dB | Disturbed frames, % |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Opus | 448 | 3.94 → 3.97 | 15.38 → 7.32 | −0.81 → −0.25 | −0.26 → −0.14 | 3.07 → 0.69 | 3.95 → 0.96 | −17.00 → −16.87 | 0.00 → 0.24 |
+| AAC, Apple | 644 | 4.25 → 4.09 | 19.63 → 7.56 | −7.46 → −1.26 | −7.57 → −1.28 | 4.68 → 0.90 | 10.21 → 1.20 | −17.86 → −17.60 | 0.01 → 0.02 |
+| AAC, FFmpeg | 396 | 6.13 → 5.74 | 19.60 → 7.71 | −4.22 → −0.48 | −4.44 → −0.61 | 5.12 → 0.97 | 5.27 → 1.11 | −13.21 → −13.21 | 2.26 → 2.15 |
+| AAC, Windows | 168 | 7.20 → 5.80 | 23.60 → 8.59 | −14.52 → −2.17 | −14.94 → −2.31 | 6.20 → 1.27 | 6.98 → 1.41 | −14.86 → −14.52 | 0.14 → 0.17 |
+| MP3 | 140 | 4.82 → 4.69 | 23.10 → 8.61 | −7.91 → −1.20 | −7.70 → −1.19 | 5.94 → 1.06 | 6.44 → 1.42 | −15.83 → −15.65 | 0.02 → 0.05 |
+| Vorbis | 156 | 6.13 → 5.44 | 18.76 → 8.17 | −2.60 → −0.44 | −1.95 → −0.18 | 3.30 → 1.11 | 5.15 → 1.68 | −14.83 → −14.47 | 0.07 → 1.22 |
+| **All** | 1,952 | 5.00 → 4.69 | 19.17 → 7.75 | −5.53 → −0.88 | −5.45 → −0.88 | 4.51 → 0.93 | 6.82 → 1.20 | −16.07 → −15.89 | 0.48 → 0.61 |
 
-| Codec | Stretches | LSD 4–12 kHz, dB | LSD above 12 kHz, dB | Level above 16 kHz, dB | Side, dB | NMR, dB | Disturbed frames, % |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Opus | 184 | 4.23 → 4.24 | 12.88 → 9.45 | −0.14 → −0.14 | 4.29 → 2.24 | −13.54 → −13.54 | 0.00 → 0.00 |
-| AAC, Apple | 204 | 4.66 → 4.60 | 24.56 → 9.26 | −11.30 → −1.31 | 7.50 → 2.11 | −13.53 → −13.40 | 0.02 → 0.02 |
-| AAC, FFmpeg | 116 | 5.61 → 5.50 | 24.01 → 9.59 | −4.68 → −1.03 | 6.80 → 2.34 | −10.47 → −10.50 | 3.55 → 3.19 |
-| AAC, Windows | 76 | 5.06 → 4.89 | 29.08 → 9.68 | −22.79 → −2.01 | 8.81 → 2.21 | −13.49 → −13.22 | 0.19 → 0.21 |
-| MP3 | 36 | 4.74 → 4.71 | 27.67 → 8.77 | −7.92 → −1.91 | 7.67 → 1.88 | −12.98 → −13.13 | 0.01 → 0.01 |
-| Vorbis | 264 | 4.53 → 4.44 | 16.54 → 9.24 | −0.70 → +0.91 | 4.02 → 2.23 | −13.72 → −13.73 | 0.08 → 0.06 |
-| **All** | 880 | 4.69 → 4.63 | 20.16 → 9.36 | −5.77 → −0.45 | 5.81 → 2.20 | −13.16 → −13.12 | 0.51 → 0.46 |
+**Against the model in release 0.2.1**, measured the same way on the same stretches: log-spectral distance above
+12 kHz 11.26 → 7.75 dB, mid 2.04 → 0.93 dB and side 3.00 → 1.20 dB from the master's band levels, the mixed level above
+16 kHz −0.90 → −0.88 dB, and fourteen lines at 48 kHz, 2 to 5 dB deep, among them bins 869, 881 and 894, down to none.
+A lossless file forced through it changes a little more, −65.8 → −62.0 dB on average, and frames with a band over the
+masking threshold go from 0.45 to 0.61 %.
 
-What moves is the band above the codec's low-pass and the stereo. AAC at 96 kbit/s from Windows Media Foundation
-keeps nothing above 16 kHz (−33 dB against the master); restored, it is 3.7 dB under. The side channel's distance
-from the master falls from 5.8 to 2.2 dB. Below 12 kHz little changes: the weakest encoders gain most (4 to 12 kHz
-from FFmpeg's AAC at 96 kbit/s: 7.27 → 6.85 dB; Windows AAC at 96: 7.67 → 6.74), and Opus, which keeps every band's
-energy, not at all.
+**Against the models between the two**, which were never released. The one just before this drew the lines
+above and was otherwise within a hair of this one: 7.76 dB above 12 kHz, the mid at 0.88 dB and the side at 1.16, the
+mixed level above 16 kHz at −0.46 dB. The line term costs a quarter of a decibel of that level, because it trims the
+bins that stood above their neighbours as well as the ones below: stretch by stretch the median moves from −0.21 to
+−0.44 dB, nine stretches in ten by less than 1.2 dB, and the share more than 10 dB short stays at 0.3 %.
 
-The noise-to-mask ratio hardly moves, and that is a finding rather than a flaw of the table. By the standard masking
-model, the coding noise at these rates is already under threshold on average (−13 dB), which is what the encoders
-are built to achieve. The band above 16 kHz, where the restorer does most, sits near the absolute threshold of
-hearing at ordinary listening levels. The frames with an audible band are few, and fall where there are any: FFmpeg's
-AAC at 96 kbit/s, 11.2 → 10.2 %. Whether the rewritten band and the wider stereo are heard is a matter for a listening
-test, which has not been done.
+The one before that put nothing in the middle. It scored 7.71 dB above 12 kHz, −1.07 dB on the level over the two
+channels and 1.63 on the side, which is why it passed; it left the mixed level above 16 kHz at −5.38 dB where the
+coded input was −5.45, and the mid's band distance at 4.15 dB where the input was 4.51. Against it, this model is
+more than 5 dB short of the master's mixed level above 16 kHz on 3.1 % of stretches where that one was on 31 %.
 
-Near-transparent streams are left nearly as they are, which is what a restorer in front of Apple Music's 256 kbit/s
-AAC has to do:
+**No lines.** A line is a bin the network writes low on every input, so it is measured on many: 30 held-out
+copies at each rate whose codec emptied the top of the band, each bin's level over the stretch against the median of
+the 21 around it, averaged over the copies, where the music's own fine structure comes to nothing
+(`restorer.bin_lines`). At 44.1 kHz this model has no bin 2 dB or more low on average below 21.9 kHz; at 48 kHz two,
+at 18.54 and 18.66 kHz, average −2.1 dB, and they are low on one copy in fifteen and one in thirty, which is two
+songs' own structure rather than a line. The three bins under Nyquist are low at both rates, 3 to 15 dB, and they are the references' own: those were
+resampled with the passband ending at 0.998 of Nyquist, and the network is matching them.
 
-| Stream | Stretches | LSD 4–12 kHz, dB | LSD above 12 kHz, dB | Level above 16 kHz, dB | Side, dB |
-| --- | --- | --- | --- | --- | --- |
-| AAC 256, Apple | 220 | 2.16 → 2.16 | 6.87 → 6.75 | −0.29 → −0.11 | 0.81 → 0.84 |
-| AAC 256, FFmpeg | 220 | 3.20 → 3.20 | 6.59 → 6.63 | −0.32 → −0.22 | 0.79 → 0.84 |
-| AAC 192, Apple | 220 | 2.99 → 3.01 | 15.98 → 8.91 | −0.94 → −0.37 | 3.46 → 1.57 |
-| Opus 192 | 132 | 2.81 → 2.83 | 12.31 → 8.56 | −0.37 → −0.22 | 2.47 → 1.54 |
-| Opus 256 | 132 | 1.83 → 1.87 | 11.98 → 8.19 | −0.38 → −0.19 | 2.23 → 1.50 |
-| MP3 320 | 220 | 1.68 → 1.71 | 13.21 → 9.41 | −0.19 → +0.26 | 2.10 → 1.53 |
-| Vorbis q6 | 220 | 3.68 → 3.66 | 13.91 → 9.71 | −0.34 → +0.59 | 1.60 → 1.79 |
-| Vorbis q9 | 220 | 1.60 → 1.60 | 8.89 → 8.34 | −0.27 → −0.15 | 0.72 → 0.76 |
+The model before this one had forty-odd lines at each rate, 2 to 7 dB deep, at the same bin indices at 44.1 and at
+48 kHz — 818, 819, 841, 856, 869, 881, 888, 913 and others — which is how a line in the weights shows itself: bin 913
+is 19.66 kHz at one rate and 21.40 at the other. Pushing the mid up by twenty-five decibels through terms that only
+see 500 Hz bands moved each bin's row by a different amount. Its release checks passed: the test then was one file
+brickwalled at 9 kHz and a bin 12 dB under its neighbours, which catches a dead bin and passes a line. On
+`setsuna_trip.ogg`, a Vorbis stream cut at 18 kHz, bins between 18 and 23.8 kHz more than 3 dB under their
+neighbours over the track went from 36 to none, and more than 5 dB from 11 to none.
 
-Lossless copies of the same songs, the master against itself: changed by −71.8 dB on average (median −76.9 dB),
-three of 220 stretches by more than −40 dB, the worst by −29.8 dB.
+Lossless copies of the same songs, the master against itself: changed by −62.0 dB on average, the worst stretch by
+−33.0 dB. Under Automatic the restorer never runs on a lossless file.
 
 ## Where it is wrong
 
 - **It has not been listened to in a controlled test.** Everything on this page is measurement.
-- **Vorbis q5 at 44.1 kHz**, which is what Spotify's desktop client plays at 160 kbit/s: the band above 16 kHz comes
-  out 1.7 dB louder than the master on average, down from 3.0 before the fine-tune. It is loudest on quiet passages.
-  Vorbis q6 is 0.6 dB over; resampled to 48 kHz on the way into the mixer, as a browser plays it, Vorbis q5 is right.
-- **Masters with little above 16 kHz get some written anyway.** The worst lossless stretches changed by −30 dB, and a
-  coded copy of such a song gets a band its lossless version never had. Under Automatic the restorer never runs on a
-  lossless file.
-- **The weakest AAC encoders come out a little dull.** Their band above 16 kHz ends 1.5 to 3.7 dB under the master
-  (Windows AAC at 96 and 128 kbit/s, FFmpeg AAC at 96).
-- **One person's music.** 924 songs, Japanese pop and anime weighted three times, no classical, no instrumentals.
+- **Vorbis is the codec it disturbs most**: 1.22 % of its frames have a band over the masking threshold where the
+  input had 0.07 %, the worst of any codec here, though its level lands within 0.5 dB of the master.
+- **Masters with little above 16 kHz get some written anyway.** The worst lossless stretch changed by −33.0 dB, and
+  a coded copy of such a song gets a band its lossless version never had.
+- **It writes a band on every coded stream, including those whose master never had one.** Fitting to
+  high-resolution references is what takes the band to Nyquist, and the cost is the other side of it: a song
+  mastered with nothing above 20 kHz gets something written there anyway, and nothing in a stream cut off at 17 kHz
+  says which kind of master it came from. Output delta plays exactly what was added.
+- **The top three bins are the references' roll-off**, 3 to 15 dB under their neighbours at both rates, because the
+  references were resampled with the passband ending at 0.998 of Nyquist. On a spectrogram that is the last 50 Hz
+  under 22.05 or 24 kHz.
+- **The band it writes is its own texture, not the master's.** Held to the master's level in every 500 Hz band of
+  mid and of side, it lands within about a decibel; bin by bin above 12 kHz it is no closer than the model before
+  it. Nothing can be closer than that: the bins a codec threw away are not recoverable from what is left.
+- **The weakest encoders still come out a little dull.** In the mix, their band above 16 kHz ends 1.5 to 4.2 dB
+  under the master: Windows AAC at 128 through the 48 kHz mixer −4.2, Apple AAC at 96 −2.5, MP3 at 128 −1.5.
+- **One person's music.** 634 high-resolution albums, every genre, a third of them classical, each counting the
+  same.
 - **Stereo and mono at 44.1 and 48 kHz only**, and the delay is fixed at the number above.

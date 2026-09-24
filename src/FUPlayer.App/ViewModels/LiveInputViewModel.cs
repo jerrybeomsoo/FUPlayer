@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -6,6 +7,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using FUPlayer.App.Services;
+using FUPlayer.Core.Audio;
 using FUPlayer.Core.Capture;
 using FUPlayer.Core.Engine;
 
@@ -108,6 +110,16 @@ public sealed partial class LiveInputViewModel : ObservableObject
     public string CapturingLabel => Applications.FirstOrDefault(a => a.ProcessId == CapturedProcessId)?.Name
         ?? $"pid {CapturedProcessId}";
 
+    /// <summary>
+    /// What is arriving, and who chose it. A process loopback is taken after the session mixer, so the rate is the
+    /// device's shared format rather than the application's: Windows has already converted whatever the application
+    /// rendered. The player converts nothing further when its own output rate is the same.
+    /// </summary>
+    public string CaptureFormat => _captureFormat;
+
+    /// <summary>True while a capture is running and its format is known.</summary>
+    public bool HasCaptureFormat => IsCapturing && _captureFormat.Length > 0;
+
     /// <summary>Called by the shell when this page is shown or hidden, so the timer only runs when it matters.</summary>
     public void SetActive(bool active)
     {
@@ -122,10 +134,43 @@ public sealed partial class LiveInputViewModel : ObservableObject
         }
     }
 
-    /// <summary>Reflects what the engine reports, so the page still shows the truth after a device change.</summary>
+    /// <summary>
+    /// Reflects what the engine reports, so the page still shows the truth after a device change, and shows a
+    /// capture this page did not start: <c>FUPlayer.exe --capture &lt;pid&gt;</c> starts one before any page is open,
+    /// and without this the page said nothing was being captured and hid the note that explains what was muted.
+    /// </summary>
     public void Update(PlaybackStatus status)
     {
+        ArgumentNullException.ThrowIfNull(status);
         CaptureNote = status.CaptureNote;
+        string format = status.IsCapture && status.Plan is { Source.IsValid: true } plan
+            ? $"Arriving as {plan.Source.Describe()}: the shared format of the device Windows mixes this application to, "
+                + "which it converts to before the player sees it. The player converts nothing more when its own output "
+                + $"rate is the same one ({AudioRates.Format(plan.Output.SampleRate)} here). That format is the device's "
+                + "Default Format in Windows' sound settings."
+            : string.Empty;
+        if (format != _captureFormat)
+        {
+            _captureFormat = format;
+            OnPropertyChanged(nameof(CaptureFormat));
+            OnPropertyChanged(nameof(HasCaptureFormat));
+        }
+
+        if (status.IsCapture && status.CaptureProcessId != 0)
+        {
+            if (CapturedProcessId != status.CaptureProcessId)
+            {
+                CapturedProcessId = status.CaptureProcessId;
+            }
+
+            foreach (CaptureTargetViewModel item in Applications)
+            {
+                item.IsCaptured = item.ProcessId == CapturedProcessId;
+            }
+
+            return;
+        }
+
         if (!status.IsCapture && CapturedProcessId != 0)
         {
             CapturedProcessId = 0;
@@ -192,6 +237,41 @@ public sealed partial class LiveInputViewModel : ObservableObject
         }
     }
 
+    private string _captureFormat = string.Empty;
+
+    /// <summary>
+    /// Windows' own per-application output setting. It is the way out of the one echo the player cannot mute
+    /// away: a shared output on the very device the application plays to. Sending the application to another
+    /// device there leaves the capture untouched, since a process loopback follows the application and not the
+    /// device.
+    /// </summary>
+    [RelayCommand]
+    private static void OpenWindowsAppVolume()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("ms-settings:apps-volume") { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            // Nothing sensible to do; the page says what the setting is called.
+        }
+    }
+
+    /// <summary>Windows' sound settings, where a device's shared Default Format is set.</summary>
+    [RelayCommand]
+    private static void OpenWindowsSoundSettings()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("ms-settings:sound") { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            // Nothing sensible to do; the page says what the setting is called.
+        }
+    }
+
     [RelayCommand]
     private void Stop()
     {
@@ -208,6 +288,7 @@ public sealed partial class LiveInputViewModel : ObservableObject
         OnPropertyChanged(nameof(IsCapturing));
         OnPropertyChanged(nameof(CapturingLabel));
         OnPropertyChanged(nameof(HasCaptureNote));
+        OnPropertyChanged(nameof(HasCaptureFormat));
     }
 
     partial void OnCaptureNoteChanged(string? value) => OnPropertyChanged(nameof(HasCaptureNote));

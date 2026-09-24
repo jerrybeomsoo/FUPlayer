@@ -344,6 +344,14 @@ internal static unsafe class OpenClApi
     public static void Copy(nint queue, nint source, nint destination, nuint bytes) =>
         Check(ClEnqueueCopyBuffer(queue, source, destination, 0, 0, bytes, 0, null, null), "clEnqueueCopyBuffer");
 
+    /// <summary>
+    /// Copies a range of one buffer into another on the device. The two must be different buffers: OpenCL leaves
+    /// a copy whose source and destination overlap undefined.
+    /// </summary>
+    public static void Copy(nint queue, nint source, nuint sourceOffset, nint destination, nuint destinationOffset, nuint bytes) =>
+        Check(ClEnqueueCopyBuffer(queue, source, destination, sourceOffset, destinationOffset, bytes, 0, null, null),
+            "clEnqueueCopyBuffer");
+
     public static void SetArg(nint kernel, uint index, nint buffer) =>
         Check(ClSetKernelArg(kernel, index, (nuint)sizeof(nint), &buffer), "clSetKernelArg(buffer)");
 

@@ -66,6 +66,11 @@
             <Button Classes="subtle" Command="{Binding StopCommand}" Content="Stop" />
           </StackPanel>
           <TextBlock Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding HasCaptureNote}" Text="{Binding CaptureNote}" />
+          <TextBlock Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding HasCaptureFormat}" Text="{Binding CaptureFormat}" />
+          <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsCapturing}">
+            <Button Classes="subtle" Command="{Binding OpenWindowsSoundSettingsCommand}" Content="Windows sound settings" />
+            <Button Classes="subtle" Command="{Binding OpenWindowsAppVolumeCommand}" Content="App volume and device preferences" />
+          </StackPanel>
 
           <Border Classes="divider" Margin="0,4" />
           <controls:SettingRow Title="Mute the application's own playback"
@@ -84,6 +89,8 @@
                      Text="Set the captured application's own volume to full and use this player's volume instead, so nothing is attenuated before the filtering." />
           <TextBlock Classes="secondary" TextWrapping="Wrap"
                      Text="Do not mute the application in the Windows volume mixer: that silences the capture too. Muting its playback device, which the setting above does, leaves the capture intact." />
+          <TextBlock Classes="secondary" TextWrapping="Wrap"
+                     Text="One device cannot be muted for you: the one the player is playing to. With a shared WASAPI output on the same device as the application, both are heard, the player's copy later by its whole chain. An exclusive or ASIO output locks other applications out of the device; otherwise send the application to another device under Windows' app volume and device preferences, which leaves the capture as it was." />
         </StackPanel>
       </Border>
     </StackPanel>

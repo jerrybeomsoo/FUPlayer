@@ -17,6 +17,7 @@ import argparse
 import csv
 import os
 import random
+import sys
 import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
