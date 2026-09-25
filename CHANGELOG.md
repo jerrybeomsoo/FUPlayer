@@ -20,6 +20,12 @@
 - The DSP studio says which way Automatic read the playing source ("VORBIS, read as lossy").
 - A long filter running tap by tap on the graphics device keeps its history on the device, and sends it only the
   new samples of each block.
+- With the neural upscaler on, the 2× interpolator in front of the network runs 5.4 times faster (8.6 → 1.6 ms
+  per second of audio, per channel), and finding where the source's spectrum ends costs a tenth of what it did
+  (34 → 3.5 ms per second of audio on the engine thread): it was worked out again after every block, a hundred
+  times a second, where the spectrum changes twenty-three times.
+- The limiter costs 40 % less at high output rates (12.7 → 7.5 ms per second of audio per channel at 705.6 kHz),
+  its output unchanged bit for bit.
 
 ### Fixed
 
@@ -29,6 +35,23 @@
 - The spectrogram and waterfall drew the low octaves as blocks at short transform lengths.
 - A model placed in `%APPDATA%\FUPlayer\models` under the shipped model's own name was ignored in favour of the one
   beside the program. The newest file of a name is the one used now, as the documentation always said.
+- Tap by tap on a graphics device: after the device had been let go and taken back, which the check of whether it
+  makes the music quicker does, it was given phases again before the input it convolves against had been
+  refilled, and a few blocks came out wrong, at 44.1 kHz as loud as the music itself. It now waits for a whole
+  filter's worth of samples.
+- The limiter could lose the loudest sample of its look-ahead window when the level had been falling for longer
+  than the window, and steer its gain by a quieter one. It takes a smooth fall, a low tone at a high rate; the
+  music it was measured on never produced one.
+- Changing how many of the phases the graphics device is given closed and reopened the audio device, which on an
+  ASIO interface relocks the DAC. It now rebuilds the processing only.
+- Now playing could, in a narrow window, read the audio device's format while the engine was closing it, and crash
+  the player. Found by reading the code, not in use.
+- The DSP studio's plots kept their progress bar running, with nothing said, when a filter could not be designed
+  for them; they now say why.
+- A damaged AIFF header is reported as damage, so FFmpeg is given the file, rather than failing with an internal
+  error.
+- A WAV render with an odd number of data bytes (24-bit mono, an odd number of frames) ends with the pad byte RIFF
+  requires.
 
 ## 0.2.1 — 2026-09-18
 

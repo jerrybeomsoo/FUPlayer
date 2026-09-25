@@ -46,60 +46,103 @@ public sealed class SoftLimiter
         return value;
     }
 
+    /// <remarks>
+    /// It runs at the output rate, 705.6 kHz and more, so the loop keeps its state in locals and wraps its ring indices
+    /// by comparison rather than by division: four divisions a sample were most of what it cost.
+    /// </remarks>
     public void Process(Span<double> data)
     {
-        int capacity = _queueValue.Length;
+        long[] queueIndex = _queueIndex;
+        double[] queueValue = _queueValue;
+        double[] delay = _delay;
+        int capacity = queueValue.Length;
+        int lookahead = _lookahead;
+        double threshold = _threshold;
+        double attack = _attack;
+        double release = _release;
+        int head = _queueHead;
+        int count = _queueCount;
+        int delayPosition = _delayPosition;
+        long time = _time;
+        double gain = _gain;
+        double minimumGain = _minimumGain;
+        bool limiting = _limiting;
+        long events = 0;
+
         for (int i = 0; i < data.Length; i++)
         {
             double x = data[i];
             double magnitude = Math.Abs(x);
 
-            while (_queueCount > 0)
+            // The window is this sample and the look-ahead before it, and what has left it goes first. Taken the
+            // other way round, a level that had been falling for the whole window left the queue full of it, and
+            // the new sample was written over the oldest entry instead of beside it.
+            long oldest = time - lookahead;
+            while (count > 0 && queueIndex[head] < oldest)
             {
-                int back = (_queueHead + _queueCount - 1) % capacity;
-                if (_queueValue[back] > magnitude)
+                head = head + 1 == capacity ? 0 : head + 1;
+                count--;
+            }
+
+            while (count > 0)
+            {
+                int back = head + count - 1;
+                if (back >= capacity)
+                {
+                    back -= capacity;
+                }
+
+                if (queueValue[back] > magnitude)
                 {
                     break;
                 }
 
-                _queueCount--;
+                count--;
             }
 
-            int slot = (_queueHead + _queueCount) % capacity;
-            _queueIndex[slot] = _time;
-            _queueValue[slot] = magnitude;
-            _queueCount++;
-
-            while (_queueIndex[_queueHead] < _time - _lookahead)
+            int slot = head + count;
+            if (slot >= capacity)
             {
-                _queueHead = (_queueHead + 1) % capacity;
-                _queueCount--;
+                slot -= capacity;
             }
 
-            double peak = _queueValue[_queueHead];
-            double target = peak > _threshold ? _threshold / peak : 1.0;
-            _gain += (target - _gain) * (target < _gain ? _attack : _release);
-            if (_gain < _minimumGain)
+            queueIndex[slot] = time;
+            queueValue[slot] = magnitude;
+            count++;
+
+            double peak = queueValue[head];
+            double target = peak > threshold ? threshold / peak : 1.0;
+            gain += (target - gain) * (target < gain ? attack : release);
+            if (gain < minimumGain)
             {
-                _minimumGain = _gain;
+                minimumGain = gain;
             }
 
-            if (!_limiting && _gain < 0.999)
+            if (!limiting && gain < 0.999)
             {
-                _limiting = true;
-                Events++;
+                limiting = true;
+                events++;
             }
-            else if (_limiting && _gain > 0.9999)
+            else if (limiting && gain > 0.9999)
             {
-                _limiting = false;
+                limiting = false;
             }
 
-            double delayed = _delay[_delayPosition];
-            _delay[_delayPosition] = x;
-            _delayPosition = (_delayPosition + 1) % _lookahead;
-            data[i] = delayed * _gain;
-            _time++;
+            double delayed = delay[delayPosition];
+            delay[delayPosition] = x;
+            delayPosition = delayPosition + 1 == lookahead ? 0 : delayPosition + 1;
+            data[i] = delayed * gain;
+            time++;
         }
+
+        _queueHead = head;
+        _queueCount = count;
+        _delayPosition = delayPosition;
+        _time = time;
+        _gain = gain;
+        _minimumGain = minimumGain;
+        _limiting = limiting;
+        Events += events;
     }
 
     public void Reset()

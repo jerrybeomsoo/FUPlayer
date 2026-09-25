@@ -20,14 +20,21 @@ internal sealed class SplitDirectConvolver : IRateStageState, IDisposable
     private readonly double[] _produced;
     private readonly int _channel;
     private readonly int _up;
-    private readonly int _warmUp;
+    private readonly int _history;
     private readonly int _own;
     private bool _narrowed;
 
     /// <summary>
-    /// Runs the device must still be fed before it may be given a phase again. It convolves each output sample
-    /// against the tail of input before it, so a run it was left out of leaves a hole in that tail.
+    /// Input samples the device must still be fed before it may be given a phase again. It convolves each output
+    /// sample against the <c>TapsPerPhase − 1</c> samples before it, so a run it was left out of leaves a hole in
+    /// that tail, and the hole has passed once that many samples have gone in behind it.
     /// </summary>
+    /// <remarks>
+    /// Counted in samples, not runs. It used to be a number of runs worked out as though every run were as long as
+    /// a launch takes, but a run is whatever the pipeline hands over, often an eighth of that, and the device was
+    /// then given phases again while its tail still reached back past the hole: wrong samples, for a few blocks
+    /// each time the pipeline check took the device back.
+    /// </remarks>
     private int _stale;
 
     /// <param name="channel">Which channel of the stage this is; the balance fills the earlier ones first.</param>
@@ -42,7 +49,7 @@ internal sealed class SplitDirectConvolver : IRateStageState, IDisposable
         _channel = channel;
         _up = filter.Stage.Up;
         _produced = new double[GpuDirectConvolver.MaxBlock * _up];
-        _warmUp = ((filter.Stage.TapsPerPhase + GpuDirectConvolver.MaxBlock - 1) / GpuDirectConvolver.MaxBlock) + 1;
+        _history = filter.Stage.TapsPerPhase - 1;
         _own = own > 0 ? own : parallelism;
     }
 
@@ -64,18 +71,21 @@ internal sealed class SplitDirectConvolver : IRateStageState, IDisposable
             bool detached = _balance.Detached;
             int share = detached ? 0 : _balance.Begin();
             int lanes = detached ? 0 : _balance.LanesOf(share, _channel);
+            bool warming = false;
             if (detached)
             {
                 // The device's tail of past input now has a hole in it; it convolves against that tail.
-                _stale = _warmUp;
+                _stale = _history;
             }
             else
             {
                 _device.Accept(run);
                 if (_stale > 0)
                 {
-                    _stale--;
+                    // Fed again, but this run is convolved against a tail that still reaches back into the hole.
+                    warming = true;
                     lanes = 0;
+                    _stale = Math.Max(0, _stale - take);
                 }
             }
 
@@ -85,7 +95,10 @@ internal sealed class SplitDirectConvolver : IRateStageState, IDisposable
             _device.Begin(0, lanes);
             _processor.Produce(lanes, _up - lanes, _produced);
             _device.Collect(_produced);
-            if (_stale == 0)
+
+            // A run the device was kept out of, for its own sake or because it was let go, says nothing about the
+            // division it was meant to be convolved at.
+            if (!warming && _stale == 0)
             {
                 _balance.Report(share, Stopwatch.GetElapsedTime(started, Stopwatch.GetTimestamp()).TotalSeconds);
             }

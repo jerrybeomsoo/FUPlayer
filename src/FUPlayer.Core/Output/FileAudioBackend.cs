@@ -289,6 +289,14 @@ public sealed class FileAudioBackend : IAudioBackend
                 return;
             }
 
+            if (Format.Kind != OutputSampleKind.NativeDsd && (_dataBytes & 1) != 0)
+            {
+                // A RIFF chunk ends on an even byte. Three-byte samples on one channel leave the data chunk odd after an
+                // odd number of frames, and the byte that pads it counts in the file's size but not in the chunk's.
+                _file.Position = _file.Length;
+                _file.WriteByte(0);
+            }
+
             long end = _file.Length;
             using var writer = new BinaryWriter(_file, Encoding.ASCII, leaveOpen: true);
             if (Format.Kind == OutputSampleKind.NativeDsd)

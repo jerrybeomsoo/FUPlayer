@@ -908,16 +908,25 @@ public sealed partial class DspStudioViewModel : ObservableObject
             }
             else
             {
-                analysis = FilterAnalysis.Analyze(
-                    analysed, analysisRate, output, staging, taps, settings.Processing.Convolution, options: new ConvolutionOptions
-                    {
-                        ThresholdTapsPerPhase = settings.Processing.ConvolutionThresholdTaps,
-                        MaxBlockMilliseconds = settings.Processing.ConvolutionMaxBlockMs,
-                        LayeredBlocks = !settings.Processing.ConvolutionUniformBlocks,
-                    });
-                if (analysed.Family == FilterFamily.None || output == analysisRate)
+                // Designing the filter can refuse (a length past what this build designs) or run out of room for a
+                // very long one. Either is a message for the panel, not a reason for it to wait forever.
+                try
                 {
-                    message = "No rate conversion happens for this source with the current settings.";
+                    analysis = FilterAnalysis.Analyze(
+                        analysed, analysisRate, output, staging, taps, settings.Processing.Convolution, options: new ConvolutionOptions
+                        {
+                            ThresholdTapsPerPhase = settings.Processing.ConvolutionThresholdTaps,
+                            MaxBlockMilliseconds = settings.Processing.ConvolutionMaxBlockMs,
+                            LayeredBlocks = !settings.Processing.ConvolutionUniformBlocks,
+                        });
+                    if (analysed.Family == FilterFamily.None || output == analysisRate)
+                    {
+                        message = "No rate conversion happens for this source with the current settings.";
+                    }
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException or OutOfMemoryException)
+                {
+                    message = $"{analysed.Name} could not be analysed: {ex.Message}";
                 }
             }
         }

@@ -95,16 +95,22 @@ public sealed class CodecBandwidthDetector
     private readonly double[] _sum;
     private readonly double[] _pending = new double[FftSize];
 
+    /// <summary>Power at and above each bin, so any band's is the difference of two entries (<see cref="Average"/>).</summary>
+    private readonly double[] _above;
+
     private readonly int _sampleRate;
     private int _pendingCount;
     private long _frames;
     private long _samples;
+    private long _measuredFrames;
+    private BandwidthEstimate _measured;
 
     public CodecBandwidthDetector(int sampleRate)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sampleRate);
         _sampleRate = sampleRate;
         _sum = new double[_plan.Bins];
+        _above = new double[_plan.Bins + 1];
 
         // Blackman-Harris. Its first sidelobe is 92 dB down and the skirt falls away quickly, which
         // matters here: a Hann window leaks a full-level band across the wall for ten bins, and the
@@ -142,11 +148,36 @@ public sealed class CodecBandwidthDetector
         _samples += samples.Length;
     }
 
+    /// <remarks>
+    /// The pipeline asks after every block it processes, about a hundred times a second, and the spectrum only
+    /// changes when a whole transform has been added, every 2,048 samples; so the answer is worked out again only
+    /// then. Working it out walked a kilohertz of bins either side of every candidate edge, a quarter of a million
+    /// additions each time, and it now costs a pass over the bins and a subtraction per band.
+    /// </remarks>
     public BandwidthEstimate Estimate()
     {
         if (_frames == 0 || Seconds < MinimumSeconds)
         {
             return new BandwidthEstimate(BandwidthVerdict.Unknown, 0.0, 0.0, Seconds);
+        }
+
+        if (_frames != _measuredFrames)
+        {
+            _measured = Measure();
+            _measuredFrames = _frames;
+        }
+
+        return _measured with { Seconds = Seconds };
+    }
+
+    private BandwidthEstimate Measure()
+    {
+        // From the top down, so a band high in the spectrum, where codec walls are, is the difference of two small
+        // numbers rather than of two sums dominated by the bass.
+        _above[^1] = 0.0;
+        for (int bin = _sum.Length - 1; bin >= 0; bin--)
+        {
+            _above[bin] = _above[bin + 1] + _sum[bin];
         }
 
         double nyquist = _sampleRate / 2.0;
@@ -263,6 +294,7 @@ public sealed class CodecBandwidthDetector
         _pendingCount = 0;
         _frames = 0;
         _samples = 0;
+        _measuredFrames = 0;
     }
 
     private void Accumulate()
@@ -292,17 +324,11 @@ public sealed class CodecBandwidthDetector
         _frames++;
     }
 
+    /// <summary>Mean power per frame of the bins between two frequencies, from the sums <see cref="Measure"/> made.</summary>
     private double Average(double lowHz, double highHz, double binHz, int bins)
     {
         int low = Math.Clamp((int)(lowHz / binHz), 0, bins - 1);
         int high = Math.Clamp((int)Math.Ceiling(highHz / binHz), low + 1, bins);
-
-        double total = 0.0;
-        for (int bin = low; bin < high; bin++)
-        {
-            total += _sum[bin] / _frames;
-        }
-
-        return total / (high - low);
+        return Math.Max(0.0, _above[low] - _above[high]) / _frames / (high - low);
     }
 }

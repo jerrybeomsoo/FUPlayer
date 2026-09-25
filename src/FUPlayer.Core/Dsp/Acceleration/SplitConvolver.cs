@@ -94,6 +94,7 @@ internal sealed class SplitConvolver : BlockStageState, IDisposable
 
         // Both sides keep their own spectrum history, so either can be given any phase of any later block, and
         // the device is kept out of it entirely while it is being left out, which is the point.
+        bool warming = false;
         if (detached)
         {
             // Its history now has a hole in it, and every block it convolves is convolved against that history.
@@ -105,6 +106,7 @@ internal sealed class SplitConvolver : BlockStageState, IDisposable
             if (_stale > 0)
             {
                 // Fed again but not yet fed enough: the processor keeps every phase until the hole has passed.
+                warming = true;
                 _stale--;
                 lanes = 0;
             }
@@ -115,8 +117,9 @@ internal sealed class SplitConvolver : BlockStageState, IDisposable
         _processor.Produce(lanes, _up - lanes, Produced);
         _device.Collect(Produced);
 
-        // A block the device was kept out of for its own sake is not a reading about this division.
-        if (_stale == 0)
+        // A block the device was kept out of for its own sake is not a reading about this division, the last block
+        // of the wait included: the processor convolved all of it, whatever division it was meant to be.
+        if (!warming && _stale == 0)
         {
             _balance.Report(share, Stopwatch.GetElapsedTime(started, Stopwatch.GetTimestamp()).TotalSeconds);
         }

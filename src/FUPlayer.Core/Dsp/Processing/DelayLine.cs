@@ -21,11 +21,15 @@ public sealed class DelayLine
             return;
         }
 
+        double[] buffer = _buffer;
+        int position = _position;
         for (int i = 0; i < data.Length; i++)
         {
-            (data[i], _buffer[_position]) = (_buffer[_position], data[i]);
-            _position = (_position + 1) % Delay;
+            (data[i], buffer[position]) = (buffer[position], data[i]);
+            position = position + 1 == buffer.Length ? 0 : position + 1;
         }
+
+        _position = position;
     }
 
     public void Reset()
@@ -59,11 +63,15 @@ public sealed class ByteDelayLine
             return;
         }
 
+        byte[] buffer = _buffer;
+        int position = _position;
         for (int i = 0; i < data.Length; i++)
         {
-            (data[i], _buffer[_position]) = (_buffer[_position], data[i]);
-            _position = (_position + 1) % Delay;
+            (data[i], buffer[position]) = (buffer[position], data[i]);
+            position = position + 1 == buffer.Length ? 0 : position + 1;
         }
+
+        _position = position;
     }
 
     /// <summary>Refills the line with the idle pattern, so a seek does not play the bytes before it.</summary>

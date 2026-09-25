@@ -211,9 +211,13 @@ public sealed class PlaybackEngine : IDisposable
     public PlaybackStatus GetStatus()
     {
         (Marker? marker, TimeSpan position) = ComputePlayback();
+
+        // Each read once: the engine thread closes the stream and swaps the pipeline while this runs on the UI's
+        // timer, and a field read twice can be there the first time and gone the second.
         DspPipeline? pipeline = _pipeline;
         SpscByteRing? ring = _ring;
         RenderSource? render = _render;
+        IAudioStream? stream = _stream;
         CounterBaseline baseline;
         lock (_statusGate)
         {
@@ -245,9 +249,9 @@ public sealed class PlaybackEngine : IDisposable
             DspLoad = Volatile.Read(ref _dspLoad),
             BufferFill = ring is null ? 0.0 : (double)ring.Count / ring.Capacity,
             FifoBytes = ring?.Capacity ?? 0,
-            FifoSeconds = ring is null || _stream is null
+            FifoSeconds = ring is null || stream is null
                 ? 0.0
-                : (double)ring.Capacity / _stream.Format.CanonicalBytesPerFrame / _stream.Format.CanonicalFrameRate,
+                : (double)ring.Capacity / stream.Format.CanonicalBytesPerFrame / stream.Format.CanonicalFrameRate,
             PipelineLatencySeconds = pipeline?.LatencySeconds ?? 0.0,
             FilterBlockSeconds = pipeline?.FilterBlockSeconds ?? 0.0,
             LimiterEvents = pipeline is null ? 0 : pipeline.LimiterEvents - baseline.Limiter,
@@ -276,9 +280,15 @@ public sealed class PlaybackEngine : IDisposable
 
         Post(new ShutdownCommand(), interrupt: true);
         _disposed = true;
-        _thread.Join(5000);
-        _workers.Dispose();
-        _spaceAvailable.Dispose();
+
+        // The worker threads and the wait handle are the engine thread's, and the device thread signals the handle
+        // until the engine thread has closed the stream. An engine thread still inside a driver call when the wait
+        // runs out would fault on them, which is worse at exit than leaving them to the process.
+        if (_thread.Join(5000))
+        {
+            _workers.Dispose();
+            _spaceAvailable.Dispose();
+        }
     }
 
     private static double ClampVolume(VolumeSettings volume, double value) =>
@@ -914,7 +924,7 @@ public sealed class PlaybackEngine : IDisposable
         }
     }
 
-    private static bool OutputChanged(PlayerSettings a, PlayerSettings b) =>
+    internal static bool OutputChanged(PlayerSettings a, PlayerSettings b) =>
         a.Output.BackendId != b.Output.BackendId
         || a.Output.DeviceId != b.Output.DeviceId
         || a.Output.Channels != b.Output.Channels
@@ -923,9 +933,7 @@ public sealed class PlaybackEngine : IDisposable
         || a.Output.LowLatencyFifo != b.Output.LowLatencyFifo
         || a.Output.InstantPause != b.Output.InstantPause
         || a.Output.FileOutputDirectory != b.Output.FileOutputDirectory
-        || a.Processing.FifoMilliseconds != b.Processing.FifoMilliseconds
-        || a.Processing.GpuPhaseShare != b.Processing.GpuPhaseShare
-        || a.Processing.GpuRetimeWhilePlaying != b.Processing.GpuRetimeWhilePlaying;
+        || a.Processing.FifoMilliseconds != b.Processing.FifoMilliseconds;
 
     /// <summary>
     /// Whether anything changed that the running pipeline cannot be told about, and so needs it built
@@ -935,6 +943,10 @@ public sealed class PlaybackEngine : IDisposable
     /// pipeline creates the upscaler and how, and they are read once when it is built, so switching one
     /// while a track played changed the setting, saved it, and did nothing to the sound until the next
     /// track or the next run of the program.
+    ///
+    /// So does the graphics device's division of the phases, which the accelerator reads when the pipeline
+    /// builds it. It used to count as an output change, which closed and reopened the audio device for a
+    /// setting the device never sees: on an ASIO interface, a relock of the DAC for nothing.
     /// </summary>
     internal static bool ProcessingOptionsChanged(PlayerSettings a, PlayerSettings b)
     {
@@ -950,6 +962,8 @@ public sealed class PlaybackEngine : IDisposable
             || a.Processing.GpuDeviceId != b.Processing.GpuDeviceId
             || a.Processing.GpuHighPrecision != b.Processing.GpuHighPrecision
             || a.Processing.GpuForce != b.Processing.GpuForce
+            || a.Processing.GpuPhaseShare != b.Processing.GpuPhaseShare
+            || a.Processing.GpuRetimeWhilePlaying != b.Processing.GpuRetimeWhilePlaying
             || a.Speakers.Enabled != b.Speakers.Enabled)
         {
             return true;

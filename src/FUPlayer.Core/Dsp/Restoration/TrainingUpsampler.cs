@@ -1,3 +1,7 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using FUPlayer.Core.Dsp.Numerics;
+
 namespace FUPlayer.Core.Dsp.Restoration;
 
 /// <summary>
@@ -24,21 +28,25 @@ public sealed class TrainingUpsampler
     private static readonly double[] Even = Kernel(0);
     private static readonly double[] Odd = Kernel(1);
 
-    private readonly double[] _history = new double[Taps];
-    private int _filled;
+    /// <summary>
+    /// The last <c>Taps − 1</c> input samples, then the block being converted, so every window is one run of the array.
+    /// </summary>
+    private double[] _buffer = new double[Taps - 1 + 1024];
 
     /// <summary>Output samples between an input sample and its interpolated copy.</summary>
     public const int Latency = 2 * Width;
 
     public TrainingUpsampler() => Reset();
 
-    public void Reset()
-    {
-        Array.Clear(_history);
-        _filled = 0;
-    }
+    public void Reset() => Array.Clear(_buffer, 0, Taps - 1);
 
     /// <summary>Writes two output samples for every input sample. Returns how many were written.</summary>
+    /// <remarks>
+    /// The window ending at input sample n holds x[n − 130] .. x[n], which is x[n − 65] .. x[n + 65] for the sample
+    /// 65 behind: its value and the one half a sample after it are the two outputs. A block's windows are all in the
+    /// buffer at once, so the two kernels are swept over them the way the player's own long filters are, several
+    /// windows per pass of the coefficients, rather than the history being shifted along one sample at a time.
+    /// </remarks>
     public int Process(ReadOnlySpan<double> input, Span<double> output)
     {
         if (output.Length < 2 * input.Length)
@@ -46,31 +54,25 @@ public sealed class TrainingUpsampler
             throw new ArgumentException("The output needs room for two samples per input sample.", nameof(output));
         }
 
-        int written = 0;
-        foreach (double sample in input)
+        if (input.IsEmpty)
         {
-            // Shift the window along by one input sample; the newest sample sits at the end.
-            Array.Copy(_history, 1, _history, 0, Taps - 1);
-            _history[Taps - 1] = sample;
-            if (_filled < Taps)
-            {
-                _filled++;
-            }
-
-            // The window now holds x[n - 65] .. x[n + 65] for the n that is 65 samples old.
-            double even = 0.0;
-            double odd = 0.0;
-            for (int m = 0; m < Taps; m++)
-            {
-                even += _history[m] * Even[m];
-                odd += _history[m] * Odd[m];
-            }
-
-            output[written++] = even;
-            output[written++] = odd;
+            return 0;
         }
 
-        return written;
+        const int History = Taps - 1;
+        if (_buffer.Length < History + input.Length)
+        {
+            Array.Resize(ref _buffer, History + input.Length);
+        }
+
+        input.CopyTo(_buffer.AsSpan(History));
+        ref double signal = ref MemoryMarshal.GetArrayDataReference(_buffer);
+        ref double results = ref MemoryMarshal.GetReference(output);
+        FirKernel.Convolve(ref MemoryMarshal.GetArrayDataReference(Even), Taps, ref signal, 1, ref results, 2, input.Length);
+        FirKernel.Convolve(ref MemoryMarshal.GetArrayDataReference(Odd), Taps, ref signal, 1, ref Unsafe.Add(ref results, 1), 2, input.Length);
+
+        _buffer.AsSpan(input.Length, History).CopyTo(_buffer);
+        return 2 * input.Length;
     }
 
     /// <summary>

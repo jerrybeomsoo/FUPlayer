@@ -52,6 +52,13 @@ internal sealed class AiffDecoder : UncompressedPcmDecoder
 
             if (id == "COMM")
             {
+                // Channels, frames, bits and the 80-bit rate take 18 bytes; a shorter chunk is damage, and reading
+                // past it would throw something no caller expects of a file that is merely broken.
+                if (size < 18)
+                {
+                    throw new InvalidDataException("AIFF common chunk is too short.");
+                }
+
                 var common = new byte[Math.Min(size, 64u)];
                 stream.ReadExactly(common);
                 channels = BinaryPrimitives.ReadInt16BigEndian(common);
