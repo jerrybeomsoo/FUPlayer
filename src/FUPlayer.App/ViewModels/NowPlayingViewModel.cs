@@ -74,6 +74,11 @@ public sealed partial class NowPlayingViewModel : ObservableObject
     [ObservableProperty]
     private bool _isActive;
 
+    /// <summary>Where a source outside the queue comes from, shown above the title: LIVE INPUT, or UPNP and its controller.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSourceLabel))]
+    private string _sourceLabel = string.Empty;
+
     [ObservableProperty]
     private bool _isTestTone;
 
@@ -189,6 +194,8 @@ public sealed partial class NowPlayingViewModel : ObservableObject
 
     public bool HasCover => Cover is not null;
 
+    public bool HasSourceLabel => SourceLabel.Length > 0;
+
     public bool HasAcceleration => Acceleration.Length > 0;
 
     public bool HasUpscaler => Upscaler.Length > 0;
@@ -204,6 +211,7 @@ public sealed partial class NowPlayingViewModel : ObservableObject
 
     public void SetTrack(TrackMetadata metadata)
     {
+        SourceLabel = string.Empty;
         Title = metadata.DisplayTitle;
         Artist = metadata.DisplayArtist;
         Album = metadata.DisplayAlbum;
@@ -231,13 +239,26 @@ public sealed partial class NowPlayingViewModel : ObservableObject
         Details = string.Join("  ·  ", parts);
     }
 
-    public void SetPlaceholder(string title, string subtitle)
+    public void SetPlaceholder(string title, string subtitle, string sourceLabel = "")
     {
+        SourceLabel = sourceLabel;
         Title = title;
         Artist = subtitle;
         Album = string.Empty;
         Details = string.Empty;
         Cover = null;
+    }
+
+    /// <summary>A captured application or a UPnP stream, with whatever is known about what it is playing.</summary>
+    public void SetLive(LiveTrack track)
+    {
+        ArgumentNullException.ThrowIfNull(track);
+        SourceLabel = track.Source;
+        Title = track.Title;
+        Artist = track.Subtitle;
+        Album = track.Album ?? string.Empty;
+        Details = track.Details;
+        Cover = track.Cover;
     }
 
     public void UpdateStatus(PlaybackStatus status)

@@ -87,6 +87,13 @@ order. The automatic dither setting picks by output rate. See [dsp.md](dsp.md) f
 Gapless playback, ReplayGain (off, track, album), clipping prevention for positive ReplayGain, polarity
 inversion, and the time display format.
 
+### FFmpeg
+
+Shows whether FFmpeg is loaded and from where. When it is not, *Download and build FFmpeg* downloads FFmpeg
+9.0.1's source, builds the LGPL libraries with MSYS2 (the installed one, or a private copy set up in
+`%LOCALAPPDATA%\FUPlayer\ffmpeg-build`), installs them in `%LOCALAPPDATA%\FUPlayer\ffmpeg` and loads them
+without a restart. See [building-ffmpeg.md](building-ffmpeg.md).
+
 ### Processing resources
 
 | Setting | Notes |
@@ -111,6 +118,21 @@ buffer or a block-based filter needs more, and caps the ring at 256 MiB.
 
 A device is never used until it has reproduced the processor's own output for that filter. Overriding the timed
 result does not override that check.
+
+## UPnP input page
+
+Under Live input. See [upnp-input.md](upnp-input.md).
+
+| Setting | Options | Notes |
+| --- | --- | --- |
+| Offer this player as a UPnP renderer | off (default) / on | Announces the player on the network and takes AVTransport and RenderingControl commands on port 58180, or a free one |
+| Name | text | What controllers list it as. Empty means `FUPlayer (<computer name>)` |
+| Take orders from the local network | on (default) / off | Off, it announces nothing and only controllers on this computer can use it. Nothing outside the private address ranges is ever answered |
+| Follow the controller's volume | on (default) / off | The controller's volume and mute move the player's knob |
+
+*Add to foobar2000* appends the player to foobar2000's list of renderers (`foo_out_upnp-config-v2.txt`), so it
+sends FLAC and pauses rather than stopping; set **Bits** to 24 on the player's row of foobar2000's *Output ›
+Devices* page for 24-bit.
 
 ## Live input page
 

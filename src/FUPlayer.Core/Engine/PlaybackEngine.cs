@@ -5,11 +5,13 @@ using FUPlayer.Core.Audio;
 using FUPlayer.Core.Capture;
 using FUPlayer.Core.Dsp.Analysis;
 using FUPlayer.Core.Decoding;
+using FUPlayer.Core.Decoding.Network;
 using FUPlayer.Core.Dsp.Dsd;
 using FUPlayer.Core.Metadata;
 using FUPlayer.Core.Output;
 using FUPlayer.Core.Playlists;
 using FUPlayer.Core.Settings;
+using FUPlayer.Core.Upnp;
 
 namespace FUPlayer.Core.Engine;
 
@@ -20,6 +22,9 @@ namespace FUPlayer.Core.Engine;
 /// </summary>
 public sealed class PlaybackEngine : IDisposable
 {
+    /// <summary>How an error about a network stream that could not be played begins, so its sender can be told.</summary>
+    public const string NetworkStreamErrorPrefix = "The stream from ";
+
     private const int MaxMarkers = 16;
 
     private readonly AudioBackendRegistry _backends;
@@ -65,6 +70,9 @@ public sealed class PlaybackEngine : IDisposable
     private volatile string? _deviceName;
     private volatile EngineState _state;
     private volatile bool _invert;
+    private volatile bool _muted;
+    private volatile NetworkStreamRequest? _network;
+    private volatile StreamMetadata? _networkMetadata;
     private double _volumeDb;
     private double _dspLoad;
     private double _loadWorkSeconds;
@@ -122,6 +130,17 @@ public sealed class PlaybackEngine : IDisposable
         set
         {
             _invert = value;
+            ApplyLiveGain();
+        }
+    }
+
+    /// <summary>Silences the output without touching the volume setting, which is what a controller's mute asks for.</summary>
+    public bool Muted
+    {
+        get => _muted;
+        set
+        {
+            _muted = value;
             ApplyLiveGain();
         }
     }
@@ -189,6 +208,28 @@ public sealed class PlaybackEngine : IDisposable
     /// </summary>
     public void PlayCapture(int processId) => Post(new CaptureCommand(processId), interrupt: true);
 
+    /// <summary>
+    /// Plays a stream from a network address, as a UPnP controller asks for: another source outside the queue, like
+    /// a capture, that runs until the sender stops it or its stream ends.
+    /// </summary>
+    public void PlayNetworkStream(NetworkStreamRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        Post(new NetworkStreamCommand(request), interrupt: true);
+    }
+
+    /// <summary>
+    /// New metadata for the network stream at <paramref name="uri"/>, which a sender streaming continuously sends as
+    /// each track begins. Nothing happens unless that stream is the one playing.
+    /// </summary>
+    public void UpdateNetworkMetadata(string uri, StreamMetadata? metadata)
+    {
+        if (_network is { } network && network.Uri == uri)
+        {
+            _networkMetadata = metadata;
+        }
+    }
+
     /// <summary>Applications whose audio can be captured, or an empty list where that is not possible.</summary>
     public IReadOnlyList<CaptureTarget> CaptureTargets =>
         _capture is { IsSupported: true } ? _capture.List() : [];
@@ -225,6 +266,21 @@ public sealed class PlaybackEngine : IDisposable
         }
 
         int index = marker is not null ? ResolveIndex(marker.Index, marker.Item) : Volatile.Read(ref _reportedIndex);
+        NetworkStreamStatus? network = null;
+        if (marker?.IsStream == true && _network is { } request && _decoder is NetworkStreamDecoder streaming)
+        {
+            network = new NetworkStreamStatus
+            {
+                Uri = request.Uri,
+                Controller = request.Controller,
+                Metadata = _networkMetadata,
+                Container = streaming.CodecName,
+                ContentType = streaming.ContentType,
+                BufferedSeconds = streaming.BufferedSeconds,
+                StarvedReads = streaming.StarvedReads,
+            };
+        }
+
         return new PlaybackStatus
         {
             State = _state,
@@ -234,6 +290,8 @@ public sealed class PlaybackEngine : IDisposable
             IsCapture = marker?.IsCapture ?? false,
             CaptureProcessId = marker?.IsCapture == true ? _captureProcessId : 0,
             CaptureNote = marker?.IsCapture == true ? (_decoder as IDiagnosticCapture)?.DirectOutputNote : null,
+            IsStream = marker?.IsStream ?? false,
+            Stream = network,
             Bandwidth = Describe(pipeline),
             Position = position,
             Duration = marker is { Length: > 0 } ? TimeSpan.FromSeconds((double)marker.Length / marker.SampleRate) : TimeSpan.Zero,
@@ -401,6 +459,9 @@ public sealed class PlaybackEngine : IDisposable
             case CaptureCommand capture:
                 StartCapture(capture.ProcessId);
                 break;
+            case NetworkStreamCommand stream:
+                StartNetworkStream(stream.Request);
+                break;
         }
     }
 
@@ -446,6 +507,19 @@ public sealed class PlaybackEngine : IDisposable
 
         if (count <= 0)
         {
+            if (decoder is ILiveSource { HasEnded: false })
+            {
+                // Nothing has arrived yet, which is not the end of the stream. A device still waiting for a half-full
+                // FIFO starts on what there is, or a large FIFO filled at the sender's pace would keep it waiting.
+                if (!_streamStarted && _ring is { } waiting && waiting.Count >= waiting.Capacity / 8)
+                {
+                    StartStream();
+                }
+
+                _spaceAvailable.WaitOne(5);
+                return;
+            }
+
             BeginNextTrack();
             return;
         }
@@ -562,6 +636,28 @@ public sealed class PlaybackEngine : IDisposable
         }
     }
 
+    /// <summary>Opens a network stream and plays it; an address that cannot be played stops the engine and says why.</summary>
+    private void StartNetworkStream(NetworkStreamRequest request)
+    {
+        DisposeTransition();
+        _draining = false;
+        CloseDecoder();
+        _captureProcessId = 0;
+        try
+        {
+            NetworkStreamDecoder decoder = NetworkStreamDecoder.Open(request.Uri, request.Metadata?.ProtocolInfo);
+            _network = request;
+            _networkMetadata = request.Metadata;
+            StartPipeline(-1, decoder, null, PlanFor(decoder), TimeSpan.Zero, keepPaused: false);
+        }
+        catch (Exception ex) when (IsRecoverable(ex))
+        {
+            _network = null;
+            ReportError($"{NetworkStreamErrorPrefix}{request.Controller} could not be played: {ex.Message}");
+            StopInternal();
+        }
+    }
+
     private void StartTestTone(TestToneMode mode)
     {
         DisposeTransition();
@@ -641,7 +737,8 @@ public sealed class PlaybackEngine : IDisposable
             decoder.Format.SampleRate,
             decoder.Length,
             decoder is TestToneDecoder,
-            _captureProcessId > 0);
+            _captureProcessId > 0,
+            decoder is NetworkStreamDecoder);
 
         lock (_statusGate)
         {
@@ -671,7 +768,7 @@ public sealed class PlaybackEngine : IDisposable
     private void BeginNextTrack()
     {
         int finished = ResolveIndex(_decoderIndex, _decoderItem);
-        bool wasTestTone = _decoder is TestToneDecoder || _captureProcessId > 0;
+        bool wasTestTone = _decoder is TestToneDecoder || _captureProcessId > 0 || _decoder is NetworkStreamDecoder;
         CloseDecoder();
 
         if (!wasTestTone)
@@ -800,7 +897,7 @@ public sealed class PlaybackEngine : IDisposable
         (Marker? marker, _) = ComputePlayback();
         bool paused = _render is { Paused: true };
         int audible = marker?.Index ?? _decoderIndex;
-        if (marker?.IsTestTone == true || marker?.IsCapture == true)
+        if (marker?.IsTestTone == true || marker?.IsCapture == true || marker?.IsStream == true)
         {
             return;
         }
@@ -913,6 +1010,20 @@ public sealed class PlaybackEngine : IDisposable
         else if (marker?.IsCapture == true && _captureProcessId > 0)
         {
             StartCapture(_captureProcessId);
+        }
+        else if (marker?.IsStream == true && _decoder is NetworkStreamDecoder stream && _network is not null)
+        {
+            // The same stream carries on under the new processing: opening it again would ask the sender for a
+            // second stream, which a live one does not have.
+            try
+            {
+                StartPipeline(-1, stream, null, PlanFor(stream), TimeSpan.Zero, keepPaused: paused);
+            }
+            catch (Exception ex) when (IsRecoverable(ex))
+            {
+                ReportError($"The stream could not continue: {ex.Message}");
+                StopInternal();
+            }
         }
         else if ((marker is not null ? ResolveIndex(marker.Index, marker.Item) : ResolveIndex(_decoderIndex, _decoderItem)) is int index and >= 0)
         {
@@ -1307,6 +1418,7 @@ public sealed class PlaybackEngine : IDisposable
     {
         _decoder?.Dispose();
         _decoder = null;
+        _network = null;
     }
 
     private void DisposeTransition()
@@ -1407,6 +1519,11 @@ public sealed class PlaybackEngine : IDisposable
             return 1.0;
         }
 
+        if (_muted)
+        {
+            return 0.0;
+        }
+
         double linear = _settings.Volume.IsBypassed ? 1.0 : Math.Pow(10.0, Volatile.Read(ref _volumeDb) / 20.0);
         return _invert ? -linear : linear;
     }
@@ -1434,7 +1551,8 @@ public sealed class PlaybackEngine : IDisposable
         ErrorOccurred?.Invoke(this, message);
     }
 
-    private sealed record Marker(long WriteBytes, int Index, QueueItem? Item, long SourcePosition, int SampleRate, long Length, bool IsTestTone, bool IsCapture);
+    private sealed record Marker(
+        long WriteBytes, int Index, QueueItem? Item, long SourcePosition, int SampleRate, long Length, bool IsTestTone, bool IsCapture, bool IsStream);
 
     private readonly record struct CounterBaseline(long Limiter, long Apodization, long Clipped, long Resets);
 
@@ -1468,6 +1586,8 @@ public sealed class PlaybackEngine : IDisposable
     private sealed record TestToneCommand(TestToneMode Mode) : Command;
 
     private sealed record CaptureCommand(int ProcessId) : Command;
+
+    private sealed record NetworkStreamCommand(NetworkStreamRequest Request) : Command;
 
     private sealed record ShutdownCommand : Command;
 }

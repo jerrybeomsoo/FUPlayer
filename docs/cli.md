@@ -24,6 +24,8 @@ or, after building, `src/FUPlayer.Cli/bin/Release/net9.0/fuplayer-cli.exe`.
 | `capture --app <name\|pid>` | Record one application's output to a float WAV |
 | `bandwidth <files>` | Where each file's spectrum ends, and whether that looks like a codec |
 | `models` | Installed neural restorers and upscalers, and the folders searched |
+| `upnp` | Be a UPnP renderer that foobar2000 and other controllers play to, until Ctrl+C |
+| `ffmpeg-install` | Download FFmpeg's source, build the LGPL libraries and install them where the player looks |
 
 The release carries one model of each kind in `models` beside the executables. Others are trained with the Python
 scripts in `training/neural-restorer` and `training/neural-upscaler`; see [neural-restorer.md](neural-restorer.md)
@@ -75,6 +77,30 @@ and [neural-upscaler.md](neural-upscaler.md).
 `--gpu-share 0` is worth knowing about: it attaches the device and gives it no work, which measures what the
 round trip costs on its own.
 
+## UPnP renderer options
+
+Only used by `upnp`, which also takes the processing and device options.
+
+| Option | Meaning |
+| --- | --- |
+| `--name <text>` | The name controllers list it under |
+| `--port <n>` | TCP port for its requests. Default 58180, or any free one |
+| `--local-only` | Take orders from this computer only |
+| `--out <dir>` | With `--backend file`, where each received stream is written |
+
+## FFmpeg build options
+
+Only used by `ffmpeg-install`. See [building-ffmpeg.md](building-ffmpeg.md).
+
+| Option | Meaning |
+| --- | --- |
+| `--tools <dir>` | Where the download, the build and a private MSYS2 go. Default `%LOCALAPPDATA%\FUPlayer\ffmpeg-build` |
+| `--msys2 <dir>` | Build with this MSYS2 installation |
+| `--private-msys2` | Set up an MSYS2 of its own even when one is installed |
+| `--install <dir>` | Where the libraries go. Default is where the player looks |
+| `--keep` | Keep the unpacked source and the objects |
+| `--jobs <n>` | Compilers run at once. Default is the number of logical processors |
+
 ## Device options
 
 Only used by `play`.
@@ -113,6 +139,12 @@ differ by no more than the file format's own resolution:
 fuplayer-cli render track.flac --out cpu --rate 352800 --taps 262144 --staging single --bits 32 --dither none
 fuplayer-cli render track.flac --out gpu --rate 352800 --taps 262144 --staging single --bits 32 --dither none \
   --gpu --gpu-share 100
+```
+
+Be a renderer that foobar2000 on this computer plays to, through an ASIO device:
+
+```bash
+fuplayer-cli upnp --local-only --backend asio --device "ASIO MADIface USB"
 ```
 
 Play through a specific ASIO device:

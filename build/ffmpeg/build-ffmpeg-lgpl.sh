@@ -15,6 +15,10 @@
 # Result: build/ffmpeg/out/<rid>/bin (Windows DLLs) or build/ffmpeg/out/<rid>/lib, copied at the
 # end into native/<rid>/ at the top of the repository, which is where the build picks them up.
 #
+# The player's own "Download and build FFmpeg" runs a copy of this script outside the repository and
+# points it elsewhere through the environment: FFMPEG_SRC for the source, FFMPEG_WORK_DIR for the
+# objects, FFMPEG_OUT_DIR for the installed libraries and FFMPEG_STAGE_DIR for the copies it collects.
+#
 # LICENSING: never add --enable-gpl, --enable-nonfree or --enable-version3 here.
 # FUPlayer may only redistribute the LGPL v2.1+ configuration of FFmpeg.
 set -euo pipefail
@@ -120,8 +124,8 @@ if ! command -v nasm >/dev/null 2>&1 && ! command -v yasm >/dev/null 2>&1; then
   EXTRA_ARGS+=(--disable-x86asm)
 fi
 
-WORK_DIR="$SCRIPT_DIR/work/$RID"
-OUT_DIR="$SCRIPT_DIR/out/$RID"
+WORK_DIR="${FFMPEG_WORK_DIR:-$SCRIPT_DIR/work/$RID}"
+OUT_DIR="${FFMPEG_OUT_DIR:-$SCRIPT_DIR/out/$RID}"
 mkdir -p "$WORK_DIR" "$OUT_DIR"
 cd "$WORK_DIR"
 
@@ -205,7 +209,7 @@ fi
 # Stage the libraries where the build expects them. Directory.Build.targets copies anything in
 # native/<rid>/ into an ffmpeg folder next to FUPlayer.exe, which is one of the places
 # FFmpegLibrary looks, so a build after this one picks them up with nothing else to set.
-STAGE_DIR="$REPO_ROOT/native/$RID"
+STAGE_DIR="${FFMPEG_STAGE_DIR:-$REPO_ROOT/native/$RID}"
 mkdir -p "$STAGE_DIR"
 if (( WINDOWS )); then
   cp -f "$OUT_DIR"/bin/*.dll "$STAGE_DIR"/

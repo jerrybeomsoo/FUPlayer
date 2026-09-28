@@ -28,7 +28,22 @@
 
       <StackPanel Grid.Column="1" Margin="30,4,24,0" Spacing="5" VerticalAlignment="Top">
         <Panel>
-          <TextBlock Classes="eyebrow" Text="NOW PLAYING" IsVisible="{Binding IsActive}" />
+          <TextBlock Classes="eyebrow" Text="NOW PLAYING">
+            <TextBlock.IsVisible>
+              <MultiBinding Converter="{x:Static BoolConverters.And}">
+                <Binding Path="IsActive" />
+                <Binding Path="!HasSourceLabel" />
+              </MultiBinding>
+            </TextBlock.IsVisible>
+          </TextBlock>
+          <TextBlock Classes="eyebrow accent" Text="{Binding SourceLabel}">
+            <TextBlock.IsVisible>
+              <MultiBinding Converter="{x:Static BoolConverters.And}">
+                <Binding Path="IsActive" />
+                <Binding Path="HasSourceLabel" />
+              </MultiBinding>
+            </TextBlock.IsVisible>
+          </TextBlock>
           <TextBlock Classes="eyebrow" Text="STOPPED" IsVisible="{Binding !IsActive}" />
         </Panel>
         <TextBlock Classes="display" Text="{Binding Title}" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />

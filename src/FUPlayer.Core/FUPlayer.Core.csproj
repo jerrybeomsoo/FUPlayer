@@ -18,4 +18,13 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="FUPlayer.Core.Tests" />
+  </ItemGroup>
+
+  <!-- The FFmpeg build script, which "Download and build FFmpeg" runs from a copy of its own. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\build\ffmpeg\build-ffmpeg-lgpl.sh" LogicalName="FUPlayer.Core.build-ffmpeg-lgpl.sh" />
+  </ItemGroup>
+
 </Project>

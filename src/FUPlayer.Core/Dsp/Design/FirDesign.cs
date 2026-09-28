@@ -18,6 +18,23 @@ public enum WindowKind
     /// untruncated form is the one function that attains the time-bandwidth lower bound.
     /// </summary>
     Gaussian,
+
+    /// <summary>
+    /// Nuttall's four-term cosine window with a continuous first derivative (Nuttall 1981), coefficients
+    /// 0.355768, 0.487396, 0.144232, 0.012604: the window and its slope both reach zero at the ends, so its
+    /// sidelobes fall 18 dB an octave. It has no parameter. A sinc windowed with it keeps about 112 dB of
+    /// rejection from the edge of its stopband and more the further from it: 142 dB four transition widths
+    /// away, 160 dB at eight, 178 dB at sixteen.
+    /// </summary>
+    Nuttall,
+
+    /// <summary>
+    /// The Blackman–Nuttall window, the four-term cosine window with the lowest sidelobes Nuttall found
+    /// (−98 dB), coefficients 0.3635819, 0.4891775, 0.1365995, 0.0106411. A sinc windowed with it keeps about
+    /// 114 dB near the edge of its stopband, but the window ends on a small step, so its sidelobes fall only
+    /// 6 dB an octave and it stays near 120 to 135 dB further out.
+    /// </summary>
+    BlackmanNuttall,
 }
 
 /// <summary>Phase character of a filter.</summary>
@@ -46,6 +63,24 @@ public static class FirDesign
     /// <summary>Largest FFT used by the minimum-phase transformation (bounds transient memory use).</summary>
     public const int MaxPhaseFftSize = 1 << 22;
 
+    /// <summary>
+    /// Transition width times length of a sinc windowed with either Nuttall window, from where the passband
+    /// strays 110 dB from unity to where the stopband is 110 dB down. Measured at 7.72 for the Nuttall window and
+    /// 7.75 for the Blackman–Nuttall over lengths from 2,001 to 32,001 taps and cut-offs from 0.004 to 0.2 cycles
+    /// per sample; a little is added for margin. Kaiser's formula gives 7.25 at 112 dB.
+    /// </summary>
+    private const double CosineSumTransitionTaps = 7.9;
+
+    private static readonly double[] NuttallCoefficients = [0.355768, 0.487396, 0.144232, 0.012604];
+
+    private static readonly double[] BlackmanNuttallCoefficients = [0.3635819, 0.4891775, 0.1365995, 0.0106411];
+
+    /// <summary>
+    /// The stopband level either Nuttall window keeps from the edge of its stopband. A window without a parameter
+    /// cannot be asked for more; a longer filter only narrows the transition.
+    /// </summary>
+    public const double CosineSumAttenuationDb = 110.0;
+
     public static double KaiserBeta(double attenuationDb)
     {
         if (attenuationDb > 50.0)
@@ -66,9 +101,14 @@ public static class FirDesign
     {
         ValidateSpec(spec);
         double attenuation = Math.Max(spec.AttenuationDb, 21.0);
-        double n = spec.Window == WindowKind.Kaiser
-            ? (attenuation - 7.95) / (14.357 * spec.TransitionWidth) + 1.0
-            : 2.0 * GaussianHalfLength(spec) + 1.0;
+        double n = spec.Window switch
+        {
+            WindowKind.Kaiser => (attenuation - 7.95) / (14.357 * spec.TransitionWidth) + 1.0,
+            WindowKind.Gaussian => 2.0 * GaussianHalfLength(spec) + 1.0,
+
+            // The attenuation is the window's own, so only the transition decides the length.
+            _ => CosineSumTransitionTaps / spec.TransitionWidth,
+        };
 
         if (n > 1 << 28)
         {
@@ -131,6 +171,19 @@ public static class FirDesign
             {
                 double t = center == 0 ? 0.0 : (i - center) / center;
                 double w = SpecialFunctions.BesselI0(beta * Math.Sqrt(Math.Max(0.0, 1.0 - t * t))) * norm;
+                return 2.0 * fc * SpecialFunctions.Sinc(2.0 * fc * (i - center)) * w;
+            }, h);
+        }
+        else if (spec.Window is WindowKind.Nuttall or WindowKind.BlackmanNuttall)
+        {
+            // Spread over n + 1 intervals rather than n − 1: the Nuttall window is zero at its ends, and placed the
+            // usual way its first and last taps would be zeros that cost a multiply each and do nothing.
+            double[] a = spec.Window == WindowKind.Nuttall ? NuttallCoefficients : BlackmanNuttallCoefficients;
+            double step = 2.0 * Math.PI / (n + 1);
+            FillHalf(halfCount, i =>
+            {
+                double phase = step * (i + 1);
+                double w = a[0] - a[1] * Math.Cos(phase) + a[2] * Math.Cos(2.0 * phase) - a[3] * Math.Cos(3.0 * phase);
                 return 2.0 * fc * SpecialFunctions.Sinc(2.0 * fc * (i - center)) * w;
             }, h);
         }

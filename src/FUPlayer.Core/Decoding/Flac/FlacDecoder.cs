@@ -96,6 +96,7 @@ internal sealed class FlacDecoder : IAudioDecoder
 
         Format = StreamFormat.Pcm(_streamRate, channels, _streamBits);
         Length = totalSamples > 0 ? totalSamples : -1;
+        MaxBlockSize = maxBlockSize;
         _seekPoints.Sort((a, b) => a.Sample.CompareTo(b.Sample));
     }
 
@@ -104,6 +105,9 @@ internal sealed class FlacDecoder : IAudioDecoder
     public long Length { get; }
 
     public long Position => _position;
+
+    /// <summary>The largest block the stream's header announces, in samples; a stream read live is decoded a block at a time.</summary>
+    public int MaxBlockSize { get; }
 
     public bool CanSeek => _stream.CanSeek;
 

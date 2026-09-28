@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.3.0 — 2026-09-28
+
+### Added
+
+- **UPnP input.** The player can be a UPnP / DLNA renderer that foobar2000's UPnP output and other controllers
+  play to: FLAC, WAV (RF64 too, and streams of unknown length) and LPCM over HTTP, through the whole processing
+  chain, with the controller's pause, stop, volume and mute. A new *UPnP input* page under Live input turns it on
+  and shows what arrives. *Add to foobar2000* puts the player in foobar2000's list of renderers, so it sends FLAC
+  and pauses rather than stopping; with **Bits** set to 24 on foobar2000's *Output › Devices* page a 24-bit file
+  arrives as 24-bit FLAC ([docs](docs/upnp-input.md)). `fuplayer-cli upnp` is the same renderer without the
+  window. Off until turned on.
+- **Now playing for live sources.** A captured application or a UPnP stream shows what it is playing: the title,
+  artist and cover from the application's Windows media session (foobar2000, Spotify and the browsers publish
+  one), then the stream's own metadata, then the window title, under a LIVE INPUT or UPNP label, with the
+  application's icon when there is no cover. The duration reads LIVE, next and previous are off for a source the
+  player does not queue, and a controller's mute shows as a MUTED badge that unmutes when clicked.
+- **FFmpeg from Settings.** *Settings › FFmpeg › Download and build FFmpeg* downloads FFmpeg 9.0.1's source
+  (checked against its SHA-256), builds the LGPL libraries with MSYS2 (the installed one, or a private copy it
+  sets up, also pinned), installs them in `%LOCALAPPDATA%\FUPlayer\ffmpeg` and loads them without a restart;
+  the library then picks up the files it passed over ([docs](docs/building-ffmpeg.md)). No administrator rights
+  are needed. `fuplayer-cli ffmpeg-install` does the same from a prompt.
+- **Nuttall-windowed sinc filters**: Nuttall's four-term window with smooth ends in compact, balanced and steep
+  versions, and the Blackman–Nuttall window, each in linear and minimum phase. About 110 dB at the edge of the
+  stopband for about 7 % more taps than Kaiser at that level, and the Nuttall window's stopband keeps falling:
+  142 / 160 / 178 dB four, eight and sixteen transition widths further out, where Kaiser's is at 131 / 136 / 142
+  ([docs](docs/dsp.md#filter-design)).
+- A note on trainable windows: where the idea comes from, and what it would and would not do for the player
+  ([docs](docs/trainable-windows.md)).
+
+### Changed
+
+- The player needs Windows 10 version 1809 or later, for the media sessions it reads.
+- Ctrl+1 to Ctrl+8 open the pages in the rail's order, counting top-level pages only.
+- The DSP studio plots a Nuttall filter's magnitude further down, where its stopband goes on falling.
+
 ## 0.2.2 — 2026-09-25
 
 ### Changed

@@ -74,6 +74,43 @@
 
       <Border Classes="card">
         <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+            <StackPanel Spacing="3">
+              <TextBlock Classes="h3" Text="FFmpeg" />
+              <TextBlock Classes="muted small" TextWrapping="Wrap"
+                         Text="MP3, AAC, ALAC, Ogg Vorbis, Opus, WavPack, Monkey's Audio, WMA and the rest play through FFmpeg, an LGPL library the player loads when it finds it. It is kept apart from the player, so any build of the same version can stand in for it." />
+            </StackPanel>
+            <Border Grid.Column="1" Classes="badge" Classes.accent="{Binding IsFfmpegAvailable}" VerticalAlignment="Top">
+              <TextBlock Text="{Binding FfmpegBadge}" />
+            </Border>
+          </Grid>
+          <TextBlock Classes="secondary" TextWrapping="Wrap" Text="{Binding FfmpegStatus}" />
+
+          <StackPanel Spacing="10" IsVisible="{Binding CanBuildFfmpeg}">
+            <TextBlock Classes="muted small" TextWrapping="Wrap" Text="{Binding FfmpegBuildDescription}" />
+            <Button Classes="primary" HorizontalAlignment="Left" Command="{Binding BuildFfmpegCommand}" Content="Download and build FFmpeg" />
+          </StackPanel>
+
+          <StackPanel Spacing="7" IsVisible="{Binding IsFfmpegBuilding}">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+              <TextBlock Text="{Binding FfmpegStage}" FontWeight="Medium" VerticalAlignment="Center" />
+              <Button Grid.Column="1" Classes="subtle" Command="{Binding CancelFfmpegBuildCommand}" Content="Stop" />
+            </Grid>
+            <ProgressBar Minimum="0" Maximum="1" Value="{Binding FfmpegProgress}" IsIndeterminate="{Binding !IsFfmpegProgressKnown}"
+                         MinWidth="0" MinHeight="4" Height="4" />
+            <TextBlock Classes="muted small" Text="{Binding FfmpegLine}" TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+
+          <StackPanel Spacing="8" IsVisible="{Binding HasFfmpegError}">
+            <TextBlock Classes="danger small" TextWrapping="Wrap" Text="{Binding FfmpegError}" />
+            <Button Classes="subtle" HorizontalAlignment="Left" Command="{Binding OpenFfmpegLogCommand}" Content="Open the build log" />
+          </StackPanel>
+          <TextBlock Classes="accent small" TextWrapping="Wrap" IsVisible="{Binding HasFfmpegDone}" Text="{Binding FfmpegDone}" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="10">
           <TextBlock Classes="h3" Text="About FUPlayer" />
           <Grid ColumnDefinitions="170,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
             <TextBlock Text="Version" Classes="muted" Margin="0,4" />

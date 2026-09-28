@@ -1,0 +1,128 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:FUPlayer.App.ViewModels"
+             xmlns:controls="using:FUPlayer.App.Controls"
+             x:Class="FUPlayer.App.Views.UpnpInputView"
+             x:DataType="vm:UpnpInputViewModel">
+  <ScrollViewer Classes="page">
+    <StackPanel Margin="28,22,28,28" Spacing="18" MaxWidth="1000" HorizontalAlignment="Left">
+      <StackPanel Spacing="4">
+        <TextBlock Classes="h1" Text="UPnP input" />
+        <TextBlock Classes="secondary" TextWrapping="Wrap"
+                   Text="Offer the player to foobar2000 and other UPnP or DLNA controllers as a renderer, a device they can play to. What a controller sends plays through the same processing chain as a file, out to the selected output device." />
+      </StackPanel>
+
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+            <StackPanel Spacing="3">
+              <TextBlock Classes="h3" Text="Renderer" />
+              <TextBlock Classes="muted small" TextWrapping="Wrap" Text="{Binding StatusText}" />
+            </StackPanel>
+            <Border Grid.Column="1" Classes="badge" Classes.accent="{Binding IsRunning}" Classes.danger="{Binding HasStartError}">
+              <TextBlock Text="{Binding StatusBadge}" />
+            </Border>
+          </Grid>
+
+          <controls:SettingRow Title="Offer this player as a UPnP renderer"
+                               Description="Controllers find it and can play to it. While this is off it is not announced and takes no orders.">
+            <ToggleSwitch IsChecked="{Binding Enabled}" OnContent="" OffContent="" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Name" Description="What controllers list it as. Leave it empty for the computer's name.">
+            <TextBox x:Name="NameBox" Width="260" Text="{Binding FriendlyName, UpdateSourceTrigger=LostFocus}"
+                     PlaceholderText="{Binding DefaultName}" VerticalContentAlignment="Center" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Take orders from the local network"
+                               Description="Other devices on the network see the player and may play to it. Off, only controllers on this computer, such as foobar2000, can.">
+            <ToggleSwitch IsChecked="{Binding AllowNetworkControl}" OnContent="" OffContent="" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Follow the controller's volume"
+                               Description="A controller's volume and mute set the player's, and its volume slider shows the player's. Off, the volume stays where the knob is.">
+            <ToggleSwitch IsChecked="{Binding FollowControllerVolume}" OnContent="" OffContent="" />
+          </controls:SettingRow>
+          <TextBlock Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding IsRunning}" Text="{Binding AddressesText}" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card" IsVisible="{Binding IsRunning}">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+            <StackPanel Spacing="3">
+              <TextBlock Classes="h3" Text="Receiving" />
+              <TextBlock Classes="muted small" TextWrapping="Wrap" Text="{Binding ReceivingText}" />
+            </StackPanel>
+            <Border Grid.Column="1" Classes="badge" Classes.accent="{Binding IsReceiving}">
+              <TextBlock Text="{Binding TransportBadge}" />
+            </Border>
+          </Grid>
+
+          <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="7" IsVisible="{Binding HasStream}">
+            <TextBlock Classes="muted small" Text="From" />
+            <TextBlock Grid.Column="1" Text="{Binding ControllerText}" TextWrapping="Wrap" />
+            <TextBlock Grid.Row="1" Classes="muted small" Text="Track" />
+            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding TrackText}" TextWrapping="Wrap" />
+            <TextBlock Grid.Row="2" Classes="muted small" Text="Format" />
+            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding FormatText}" TextWrapping="Wrap" />
+            <TextBlock Grid.Row="3" Classes="muted small" Text="Buffer" />
+            <TextBlock Grid.Row="3" Grid.Column="1" Classes="numeric" Text="{Binding BufferText}" TextWrapping="Wrap" />
+            <TextBlock Grid.Row="4" Classes="muted small" Text="Address" />
+            <TextBlock Grid.Row="4" Grid.Column="1" Classes="muted small" Text="{Binding StreamText}" TextWrapping="Wrap" />
+          </Grid>
+
+          <TextBlock Classes="danger small" TextWrapping="Wrap" IsVisible="{Binding HasReceiveError}" Text="{Binding ReceiveError}" />
+          <Button Classes="subtle" HorizontalAlignment="Left" IsVisible="{Binding IsReceiving}" Command="{Binding StopCommand}" Content="Stop" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card" IsVisible="{Binding IsFoobarInstalled}">
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+            <TextBlock Classes="h3" Text="Playing from foobar2000" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Classes="subtle" Command="{Binding OpenFoobarCommand}" Content="Open foobar2000" />
+          </Grid>
+          <TextBlock Classes="secondary" TextWrapping="Wrap" Text="{Binding FoobarText}" />
+          <Border Classes="inset">
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+              <Border Classes="badge" Classes.accent="{Binding IsFoobarConfigured}" VerticalAlignment="Center">
+                <Panel>
+                  <TextBlock Text="FLAC" IsVisible="{Binding IsFoobarConfigured}" />
+                  <TextBlock Text="WAV" IsVisible="{Binding !IsFoobarConfigured}" />
+                </Panel>
+              </Border>
+              <TextBlock Grid.Column="1" Classes="secondary small" TextWrapping="Wrap" VerticalAlignment="Center" Text="{Binding FoobarFormatText}" />
+              <Button Grid.Column="2" Classes="primary" VerticalAlignment="Center" IsVisible="{Binding CanConfigureFoobar}"
+                      Command="{Binding ConfigureFoobarCommand}" Content="Add to foobar2000" />
+            </Grid>
+          </Border>
+          <TextBlock Classes="accent small" TextWrapping="Wrap" IsVisible="{Binding HasFoobarNote}" Text="{Binding FoobarNote}" />
+          <TextBlock Classes="muted small" TextWrapping="Wrap" Text="{Binding FoobarBitsText}" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card" IsVisible="{Binding HasActivity}">
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+            <StackPanel Spacing="3">
+              <TextBlock Classes="h3" Text="Activity" />
+              <TextBlock Classes="muted small" Text="What controllers asked for, newest first." />
+            </StackPanel>
+            <Button Grid.Column="1" Classes="subtle" VerticalAlignment="Center" Command="{Binding OpenLogCommand}" Content="Open the log" />
+          </Grid>
+          <TextBlock Classes="muted small numeric" TextWrapping="Wrap" LineHeight="19" Text="{Binding ActivityText}" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="h3" Text="What to expect" />
+          <TextBlock Classes="secondary" TextWrapping="Wrap"
+                     Text="The player takes FLAC, WAV and LPCM streams, which covers foobar2000 and most controllers that pass their files on as they are. A controller that insists on MP3 or AAC gets an error it can show." />
+          <TextBlock Classes="secondary" TextWrapping="Wrap"
+                     Text="A stream starts after about a second of buffering, plus the processing chain's own delay. Pausing, stopping, seeking and the next track all happen in the controller; the player follows what it sends." />
+          <TextBlock Classes="secondary" TextWrapping="Wrap"
+                     Text="Windows may ask whether to let the player through its firewall the first time the renderer starts. Private networks are enough, and a controller on this computer needs nothing." />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

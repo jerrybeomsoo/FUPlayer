@@ -30,9 +30,9 @@
         <ListBox Grid.Row="1" Classes="nav" ItemsSource="{Binding Navigation}" SelectedItem="{Binding SelectedNav}">
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:NavItem">
-              <StackPanel Orientation="Horizontal" Spacing="12" Margin="12,9">
-                <controls:LineIcon Data="{Binding Icon}" Width="19" Height="19" />
-                <TextBlock Text="{Binding Title}" FontSize="13.5" FontWeight="Medium" VerticalAlignment="Center" />
+              <StackPanel Classes="navrow" Classes.child="{Binding IsChild}" Orientation="Horizontal" Spacing="12">
+                <controls:LineIcon Data="{Binding Icon}" />
+                <TextBlock Text="{Binding Title}" FontWeight="Medium" VerticalAlignment="Center" />
               </StackPanel>
             </DataTemplate>
           </ListBox.ItemTemplate>
@@ -94,6 +94,9 @@
         <Panel IsVisible="{Binding LiveInputNav.IsSelected}">
           <views:LiveInputView DataContext="{Binding LiveInput}" />
         </Panel>
+        <Panel IsVisible="{Binding UpnpInputNav.IsSelected}">
+          <views:UpnpInputView DataContext="{Binding UpnpInput}" />
+        </Panel>
         <Panel IsVisible="{Binding DspNav.IsSelected}">
           <views:DspStudioView DataContext="{Binding Dsp}" />
         </Panel>
@@ -131,7 +134,7 @@
             <Button Classes="icon" Classes.on="{Binding Shuffle}" Command="{Binding ToggleShuffleCommand}" ToolTip.Tip="Shuffle">
               <controls:LineIcon Data="{x:Static controls:Icons.Shuffle}" Width="18" Height="18" />
             </Button>
-            <Button Classes="icon" Command="{Binding PreviousCommand}" ToolTip.Tip="Previous  (Ctrl+Left)">
+            <Button Classes="icon" Command="{Binding PreviousCommand}" IsEnabled="{Binding CanSkip}" ToolTip.Tip="Previous  (Ctrl+Left)">
               <controls:LineIcon Data="{x:Static controls:Icons.Previous}" IsFilled="True" Width="20" Height="20" />
             </Button>
             <Button Classes="play" Command="{Binding PlayPauseCommand}" ToolTip.Tip="Play / pause  (Space)">
@@ -143,7 +146,7 @@
             <Button Classes="icon" Command="{Binding StopCommand}" IsEnabled="{Binding IsActive}" ToolTip.Tip="Stop and release the output device  (Ctrl+Period)">
               <controls:LineIcon Data="{x:Static controls:Icons.Stop}" IsFilled="True" Width="18" Height="18" />
             </Button>
-            <Button Classes="icon" Command="{Binding NextCommand}" ToolTip.Tip="Next  (Ctrl+Right)">
+            <Button Classes="icon" Command="{Binding NextCommand}" IsEnabled="{Binding CanSkip}" ToolTip.Tip="Next  (Ctrl+Right)">
               <controls:LineIcon Data="{x:Static controls:Icons.Next}" IsFilled="True" Width="20" Height="20" />
             </Button>
             <Button Classes="icon" Classes.on="{Binding IsRepeatOn}" Command="{Binding CycleRepeatCommand}" ToolTip.Tip="Repeat: off, all, one">
@@ -185,6 +188,12 @@
           <Border Classes="badge warning" IsVisible="{Binding IsLimiting}" ToolTip.Tip="The soft limiter is catching overs. Lower the volume for a clean signal.">
             <TextBlock Text="LIMIT" FontSize="10" />
           </Border>
+          <Button Classes="tile" VerticalAlignment="Center" CornerRadius="6" IsVisible="{Binding IsMuted}" Command="{Binding UnmuteCommand}"
+                  ToolTip.Tip="A UPnP controller muted the player. Click to unmute it here; the controller is told.">
+            <Border Classes="badge warning">
+              <TextBlock Text="MUTED" FontSize="10" />
+            </Border>
+          </Button>
           <controls:VolumeKnob Width="64" Height="64"
                                Minimum="{Binding VolumeMinimum}" Maximum="{Binding VolumeMaximum}"
                                IsBypassed="{Binding IsVolumeFixed}" IsLimiting="{Binding IsLimiting}"

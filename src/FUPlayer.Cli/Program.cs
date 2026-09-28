@@ -17,6 +17,7 @@ using FUPlayer.Core.Engine;
 using FUPlayer.Core.Output;
 using FUPlayer.Core.Playlists;
 using FUPlayer.Core.Settings;
+using FUPlayer.Core.Upnp;
 
 namespace FUPlayer.Cli;
 
@@ -59,6 +60,8 @@ internal static class Program
                 "render" => Render(options, benchmark: false),
                 "bench" => Render(options, benchmark: true),
                 "play" => Play(options),
+                "upnp" => Renderer(options),
+                "ffmpeg-install" => InstallFFmpeg(options),
                 _ => Fail($"Unknown command '{args[0]}'. Run 'fuplayer-cli help'."),
             };
         }
@@ -87,6 +90,17 @@ internal static class Program
               render <files…> --out <dir>  Process files faster than real time into WAV/DSF
               bench <file>                 Measure how many times faster than real time processing runs
               play <files…>                Play through an audio device (Ctrl+C to stop)
+              upnp                         Be a UPnP renderer that foobar2000 and other controllers play to
+                   --name <text>           The name controllers list it under
+                   --port <n>              TCP port for its requests (default 58180)
+                   --local-only            Take orders from this computer only
+                   --out <dir>             With --backend file: where the received streams are written
+              ffmpeg-install               Download FFmpeg's source, build the LGPL libraries and install them
+                             --tools <dir> Where the download, the build and a private MSYS2 go
+                             --msys2 <dir> Build with this MSYS2 installation
+                             --private-msys2  Set up an MSYS2 of its own even when one is installed
+                             --install <dir>  Where the libraries go (default: where the player looks)
+                             --keep        Keep the unpacked source and the objects
 
             Processing options
               --mode pcm|dsd|follow        Output mode: everything as PCM, everything as DSD,
@@ -190,12 +204,13 @@ internal static class Program
 
     private static int ListFilters()
     {
+        int width = FilterCatalog.All.Max(p => p.Id.Length);
         foreach (IGrouping<string, FilterPreset> group in FilterCatalog.All.GroupBy(p => p.Group))
         {
             Console.WriteLine(group.Key);
             foreach (FilterPreset preset in group)
             {
-                Console.WriteLine($"  {preset.Id,-20} {preset.Name}");
+                Console.WriteLine($"  {preset.Id.PadRight(width)} {preset.Name}");
             }
         }
 
@@ -616,6 +631,125 @@ internal static class Program
         return 0;
     }
 
+    /// <summary>
+    /// Builds FFmpeg the way the player's Settings page does, printing each step, so the build can be watched or run
+    /// where there is no player window. Ctrl+C stops it.
+    /// </summary>
+    private static int InstallFFmpeg(Options options)
+    {
+        bool before = FFmpegLibrary.IsAvailable;
+        Console.WriteLine(before
+            ? $"FFmpeg is already loaded: {FFmpegLibrary.VersionDescription} from {FFmpegLibrary.LoadedFrom ?? "the system"}. Building anyway."
+            : $"FFmpeg is not loaded ({FFmpegLibrary.LoadError})");
+
+        var installOptions = new FFmpegInstallOptions
+        {
+            ToolsRoot = options.Get("tools") is { Length: > 0 } tools ? Path.GetFullPath(tools) : null,
+            Msys2Root = options.Get("msys2") is { Length: > 0 } msys ? Path.GetFullPath(msys) : null,
+            PrivateMsys2 = options.Has("private-msys2"),
+            InstallDirectory = options.Get("install") is { Length: > 0 } install ? Path.GetFullPath(install) : FFmpegLibrary.UserDirectory,
+            KeepBuildFiles = options.Has("keep"),
+            Jobs = options.GetInt("jobs") ?? Environment.ProcessorCount,
+        };
+
+        // Each step once, and each line of the tools as it comes; the percentage rides along on the compile lines.
+        string stage = string.Empty;
+        var progress = new Progress<FFmpegInstallProgress>(p =>
+        {
+            if (p.Stage != stage)
+            {
+                stage = p.Stage;
+                Console.WriteLine($"== {stage}");
+            }
+
+            if (p.Line is { } line)
+            {
+                Console.WriteLine(p.Fraction is { } fraction ? $"[{fraction,4:P0}] {line}" : $"       {line}");
+            }
+        });
+
+        // Libraries installed somewhere of the caller's choosing are loaded from there afterwards.
+        if (options.Has("install"))
+        {
+            FFmpegLibrary.SearchDirectory = installOptions.InstallDirectory;
+        }
+
+        var installer = new FFmpegInstaller(installOptions, progress);
+        Console.WriteLine($"Tools folder: {installer.Root}");
+        Console.WriteLine($"Log: {installer.LogPath}");
+        using var cancel = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            cancel.Cancel();
+        };
+
+        try
+        {
+            installer.RunAsync(cancel.Token).GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            return Fail("Cancelled.");
+        }
+
+        Console.WriteLine($"Installed in {installOptions.InstallDirectory}");
+        Console.WriteLine($"FFmpeg: {FFmpegLibrary.VersionDescription} from {FFmpegLibrary.LoadedFrom ?? "the system"}");
+        return 0;
+    }
+
+    /// <summary>
+    /// Runs the player as a UPnP renderer until Ctrl+C, playing whatever foobar2000's UPnP output or any other controller
+    /// sends it through the whole chain to the chosen device, or to files with the file back-end.
+    /// </summary>
+    private static int Renderer(Options options)
+    {
+        PlayerSettings settings = options.ToSettings(defaultVolume: -3.0);
+        settings.Output.BackendId = options.Get("backend") ?? (OperatingSystem.IsWindows() ? WasapiBackend.ExclusiveId : NullAudioBackend.BackendId);
+        settings.Output.DeviceId = options.Get("device");
+        settings.Output.BufferMilliseconds = options.GetInt("buffer") ?? 0;
+        string name = options.Get("name") ?? $"FUPlayer command line ({Environment.MachineName})";
+
+        // A controller remembers a renderer by its id, so the same name on the same machine keeps the same one.
+        Guid id = new(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes("fuplayer-cli|" + Environment.MachineName + "|" + name)));
+
+        using var engine = new PlaybackEngine(settings, new AudioBackendRegistry(CreateBackends(options.Get("out"))));
+        engine.ErrorOccurred += (_, message) => Console.Error.WriteLine($"error: {message}");
+        using var host = new EngineRendererHost(engine, () => settings.Volume, db => engine.VolumeDb = db);
+        using var renderer = new UpnpRenderer(
+            host,
+            new UpnpRendererOptions(id.ToString("D"), name, options.GetInt("port") ?? 0, !options.Has("local-only"), true, "cli"),
+            Console.WriteLine);
+        renderer.Start();
+        Console.WriteLine($"Renderer \"{name}\" is listening on port {renderer.Port}; {settings.Output.BackendId} output. Ctrl+C to stop.");
+
+        using var stop = new ManualResetEventSlim(false);
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            stop.Set();
+        };
+
+        string? last = null;
+        while (!stop.Wait(1000))
+        {
+            PlaybackStatus status = engine.GetStatus();
+            string line = status.Stream is { } stream && status.Plan is { } plan
+                ? string.Create(CultureInfo.InvariantCulture,
+                    $"{status.State,-7} {status.Position:hh\\:mm\\:ss}  {stream.Container} {plan.Source.DescribeShort()} → {plan.Output.DescribeShort()}  buffered {stream.BufferedSeconds:0.00} s  starved {stream.StarvedReads}  DSP {status.DspLoad * 100:0}%")
+                    + (stream.Metadata is { HasTrack: true } track ? $"  {track.Artist} – {track.Title}" : string.Empty)
+                : $"{renderer.Snapshot.TransportState}";
+            if (line != last)
+            {
+                Console.WriteLine(line);
+                last = line;
+            }
+        }
+
+        engine.Stop();
+        return 0;
+    }
+
     private static int Play(Options options)
     {
         // A capture is not a file, so it goes straight through rather than past the media scanner.
@@ -734,7 +868,7 @@ internal static class Program
         {
             "dop", "pass-through", "remove-ultrasonics", "no-limiter",
             "gpu", "gpu-fast", "gpu-force", "gpu-hold", "probe", "convolution-layered",
-            "neural-upscale", "neural-restore", "output-delta",
+            "neural-upscale", "neural-restore", "output-delta", "local-only", "private-msys2", "keep",
         };
 
         public static Options Parse(IEnumerable<string> args)

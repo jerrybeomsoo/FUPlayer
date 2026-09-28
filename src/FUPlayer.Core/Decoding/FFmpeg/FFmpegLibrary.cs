@@ -23,6 +23,16 @@ public static class FFmpegLibrary
     /// <summary>Loaded library versions, when available.</summary>
     public static string? VersionDescription { get; private set; }
 
+    /// <summary>The folder the libraries were loaded from, or null when they came from the system's search path.</summary>
+    public static string? LoadedFrom { get; private set; }
+
+    /// <summary>
+    /// Where "Download and build FFmpeg" puts the libraries it builds: a folder of the user's own, since the player's
+    /// folder may not be writable. It is searched after the player's own folders.
+    /// </summary>
+    public static string UserDirectory { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FUPlayer", "ffmpeg", RuntimeInformation.RuntimeIdentifier);
+
     public static bool IsAvailable
     {
         get
@@ -32,6 +42,27 @@ public static class FFmpegLibrary
                 _available ??= TryInitialize();
                 return _available.Value;
             }
+        }
+    }
+
+    /// <summary>
+    /// Looks for the libraries again after they failed to load, so ones installed while the player runs are taken up
+    /// without a restart. Libraries already loaded stay as they are: a process cannot swap them.
+    /// </summary>
+    /// <returns>Whether FFmpeg is available now.</returns>
+    public static bool Reload()
+    {
+        lock (Gate)
+        {
+            if (_available == false)
+            {
+                // A failed load leaves nothing behind: the runtime binds an import only once it resolves, so the
+                // next call into FFmpeg asks the resolver again.
+                _available = null;
+            }
+
+            _available ??= TryInitialize();
+            return _available.Value;
         }
     }
 
@@ -63,7 +94,7 @@ public static class FFmpegLibrary
         }
         catch (DllNotFoundException)
         {
-            LoadError = "FFmpeg libraries were not found. See docs/building-ffmpeg.md.";
+            LoadError = "FFmpeg libraries were not found. Settings › FFmpeg builds them, or see docs/Building-FFmpeg.md.";
         }
         catch (EntryPointNotFoundException ex)
         {
@@ -105,6 +136,7 @@ public static class FFmpegLibrary
                 string path = Path.Combine(directory, file);
                 if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr handle))
                 {
+                    LoadedFrom ??= directory;
                     return handle;
                 }
             }
@@ -151,5 +183,6 @@ public static class FFmpegLibrary
         yield return baseDirectory;
         yield return Path.Combine(baseDirectory, "ffmpeg");
         yield return Path.Combine(baseDirectory, "native", RuntimeInformation.RuntimeIdentifier);
+        yield return UserDirectory;
     }
 }

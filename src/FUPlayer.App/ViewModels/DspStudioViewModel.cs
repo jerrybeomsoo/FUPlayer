@@ -999,7 +999,10 @@ public sealed partial class DspStudioViewModel : ObservableObject
                 PlotXScale = PlotAxisScale.Linear;
                 PlotXFormat = PlotAxisFormat.Frequency;
                 PlotYFormat = PlotAxisFormat.Decibels;
-                PlotYMinimum = -Math.Clamp((FocusedFilter?.Preset.AttenuationDb ?? 120) + 40, 100, 280);
+                // A Nuttall window's stopband goes on falling well below where it starts, and that fall is the reason
+                // to choose it, so its plot reaches further down.
+                PlotYMinimum = -Math.Clamp(
+                    (FocusedFilter?.Preset.AttenuationDb ?? 120) + (FocusedFilter?.Preset.Family == FilterFamily.NuttallSinc ? 100 : 40), 100, 280);
                 PlotYMaximum = 10;
                 PlotSeries = [new PlotSeries("Magnitude", analysis.Magnitude.Frequencies, analysis.Magnitude.MagnitudeDb, Palette.Accent)];
                 PlotMarkers = [new PlotMarker(sourceNyquist, "source fs/2", Palette.Warning)];

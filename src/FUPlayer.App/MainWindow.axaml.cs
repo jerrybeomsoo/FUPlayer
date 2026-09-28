@@ -140,8 +140,17 @@ public partial class MainWindow : Window, IDialogService
             case Key.Down when control:
                 viewModel.StepVolume(-1);
                 break;
-            case >= Key.D1 and <= Key.D7 when control:
-                viewModel.NavigateCommand.Execute(viewModel.Navigation[e.Key - Key.D1].Key);
+            // The pages in the rail's order, counting only the top-level ones, so a page added under another does not
+            // move the shortcuts of those after it.
+            case >= Key.D1 and <= Key.D8 when control:
+                NavItem[] pages = viewModel.Navigation.Where(n => !n.IsChild).ToArray();
+                int index = e.Key - Key.D1;
+                if (index >= pages.Length)
+                {
+                    return;
+                }
+
+                viewModel.NavigateCommand.Execute(pages[index].Key);
                 break;
             default:
                 return;

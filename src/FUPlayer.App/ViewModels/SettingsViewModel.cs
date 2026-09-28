@@ -59,7 +59,39 @@ public sealed partial class SettingsViewModel : ObservableObject
     private string _ffmpegStatus = "Checking…";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanBuildFfmpeg), nameof(FfmpegBadge))]
     private bool _isFfmpegAvailable;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanBuildFfmpeg), nameof(FfmpegBadge))]
+    private bool _isFfmpegBuilding;
+
+    [ObservableProperty]
+    private string _ffmpegStage = string.Empty;
+
+    [ObservableProperty]
+    private double _ffmpegProgress;
+
+    [ObservableProperty]
+    private bool _isFfmpegProgressKnown;
+
+    [ObservableProperty]
+    private string _ffmpegLine = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasFfmpegError))]
+    private string? _ffmpegError;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasFfmpegDone))]
+    private string? _ffmpegDone;
+
+    [ObservableProperty]
+    private string _ffmpegBuildDescription = string.Empty;
+
+    private CancellationTokenSource? _ffmpegBuild;
+    private string? _ffmpegLogPath;
+    private bool _ffmpegChecked;
 
     public SettingsViewModel(PlayerServices services)
     {
@@ -207,6 +239,18 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public string SettingsFolder => _services.Store.SettingsDirectory;
 
+    /// <summary>The build is offered once the check has found no FFmpeg, and not while one runs.</summary>
+    public bool CanBuildFfmpeg => _ffmpegChecked && !IsFfmpegAvailable && !IsFfmpegBuilding;
+
+    public string FfmpegBadge => IsFfmpegAvailable ? "LOADED" : IsFfmpegBuilding ? "BUILDING" : "NOT INSTALLED";
+
+    public bool HasFfmpegError => FfmpegError is not null;
+
+    public bool HasFfmpegDone => FfmpegDone is not null;
+
+    /// <summary>Stops a build in progress, for when the player closes.</summary>
+    public void CancelFfmpegBuildOnExit() => _ffmpegBuild?.Cancel();
+
     public string RuntimeDescription => $".NET {Environment.Version}  ·  {RuntimeInformation.OSDescription}  ·  {RuntimeInformation.ProcessArchitecture}";
 
     private PlayerSettings Settings => _services.Settings;
@@ -320,11 +364,118 @@ public sealed partial class SettingsViewModel : ObservableObject
     private async Task CheckFfmpegAsync()
     {
         bool available = await Task.Run(() => FFmpegLibrary.IsAvailable);
+        _ffmpegChecked = true;
         IsFfmpegAvailable = available;
         FfmpegStatus = available
-            ? FFmpegLibrary.VersionDescription ?? "Loaded"
-            : "Not installed. FLAC, WAV, AIFF, DSF and DFF play natively. For MP3, AAC, ALAC, Ogg Vorbis, Opus, "
-              + "WavPack and the rest, build the LGPL FFmpeg libraries: run \"pwsh build/ffmpeg/build-ffmpeg.ps1\" "
-              + "in the source tree, or see docs/building-ffmpeg.md.";
+            ? $"{FFmpegLibrary.VersionDescription ?? "Loaded"}{(FFmpegLibrary.LoadedFrom is { } folder ? $", from {folder}" : string.Empty)}"
+            : "Not installed. FLAC, WAV, AIFF, DSF and DFF play without it; MP3, AAC, ALAC, Ogg Vorbis, Opus, WavPack and "
+              + "the rest need it.";
+        FfmpegBuildDescription = DescribeBuild();
+        OnPropertyChanged(nameof(CanBuildFfmpeg));
+    }
+
+    /// <summary>What pressing the button will do on this computer, before it is pressed.</summary>
+    private static string DescribeBuild()
+    {
+        string source = $"Downloads FFmpeg {FFmpegInstaller.FFmpegVersion}'s source from ffmpeg.org (12 MB) and builds its LGPL libraries on this computer";
+        if (!OperatingSystem.IsWindows())
+        {
+            return $"{source} with the system's own compiler: gcc or clang, make and nasm need to be installed.";
+        }
+
+        return FFmpegInstaller.FindInstalledMsys2() is { } msys
+            ? $"{source} with the MSYS2 installed at {msys}, adding its compiler if it lacks one. It takes a few minutes, and the player keeps playing meanwhile."
+            : $"{source}. The compiler comes from MSYS2, which it sets up for itself in {SafeToolsRoot()}: about 50 MB to download "
+              + "and 1 GB on disk once the compiler is in. The first build takes 10 minutes or more; the player keeps playing meanwhile.";
+    }
+
+    private static string SafeToolsRoot()
+    {
+        try
+        {
+            return FFmpegInstaller.DefaultToolsRoot();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ex.Message;
+        }
+    }
+
+    [RelayCommand]
+    private async Task BuildFfmpegAsync()
+    {
+        if (IsFfmpegBuilding)
+        {
+            return;
+        }
+
+        using var cancellation = new CancellationTokenSource();
+        _ffmpegBuild = cancellation;
+        IsFfmpegBuilding = true;
+        FfmpegError = null;
+        FfmpegDone = null;
+        FfmpegStage = "Starting";
+        FfmpegLine = string.Empty;
+        IsFfmpegProgressKnown = false;
+
+        // Reported on the UI thread, since the Progress was made here.
+        var progress = new Progress<FFmpegInstallProgress>(p =>
+        {
+            if (p.Stage != FfmpegStage)
+            {
+                // A line from the step before says nothing about this one.
+                FfmpegLine = string.Empty;
+            }
+
+            FfmpegStage = p.Stage;
+            IsFfmpegProgressKnown = p.Fraction is not null;
+            FfmpegProgress = p.Fraction ?? 0;
+            if (p.Line is { Length: > 0 } line)
+            {
+                FfmpegLine = line;
+            }
+        });
+
+        try
+        {
+            var installer = new FFmpegInstaller(new FFmpegInstallOptions(), progress);
+            _ffmpegLogPath = installer.LogPath;
+            await Task.Run(() => installer.RunAsync(cancellation.Token));
+            FfmpegDone = "FFmpeg is built and loaded. The files that need it play now, and the library is looking for the ones it passed over.";
+            _services.NotifyFFmpegInstalled();
+        }
+        catch (OperationCanceledException)
+        {
+            FfmpegError = "Stopped. Pressing the button again carries on from the download.";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or InvalidDataException or HttpRequestException)
+        {
+            FfmpegError = ex.Message;
+        }
+        finally
+        {
+            _ffmpegBuild = null;
+            IsFfmpegBuilding = false;
+            await CheckFfmpegAsync();
+        }
+    }
+
+    [RelayCommand]
+    private void CancelFfmpegBuild() => _ffmpegBuild?.Cancel();
+
+    [RelayCommand]
+    private void OpenFfmpegLog()
+    {
+        if (_ffmpegLogPath is { } path && File.Exists(path))
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+            {
+                // Nothing sensible to do; the error above says what went wrong.
+            }
+        }
     }
 }

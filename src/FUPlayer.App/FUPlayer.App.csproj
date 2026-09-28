@@ -1,6 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <!--
+      Windows 10's projection of the Windows Runtime, for one API: the media sessions Windows collects from every player
+      (GlobalSystemMediaTransportControlsSessionManager), which is where Now playing finds what a captured application or
+      foobar2000 is playing. 17763 (Windows 10 1809) is the first version that has it.
+    -->
+    <TargetFramework>$(FuPlayerTargetFramework)-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <OutputType>WinExe</OutputType>
     <RootNamespace>FUPlayer.App</RootNamespace>
     <AssemblyName>FUPlayer</AssemblyName>

@@ -52,6 +52,9 @@ public partial class App : Application
             {
                 _services.Engine.PlayCapture(processId);
             }
+
+            // The UPnP renderer, when the settings have it on.
+            _services.Upnp.Apply();
         }
 
         base.OnFrameworkInitializationCompleted();

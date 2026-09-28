@@ -267,6 +267,28 @@
     <Setter Property="Background" Value="{StaticResource AccentSoftBrush}" />
     <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
   </Style>
+  <Style Selector="StackPanel.navrow">
+    <Setter Property="Margin" Value="12,9" />
+  </Style>
+  <Style Selector="StackPanel.navrow controls|LineIcon">
+    <Setter Property="Width" Value="19" />
+    <Setter Property="Height" Value="19" />
+  </Style>
+  <Style Selector="StackPanel.navrow TextBlock">
+    <Setter Property="FontSize" Value="13.5" />
+  </Style>
+  <!-- A page that belongs to the one above it: indented under its icon, a little smaller. -->
+  <Style Selector="StackPanel.navrow.child">
+    <Setter Property="Margin" Value="30,6,12,7" />
+    <Setter Property="Spacing" Value="10" />
+  </Style>
+  <Style Selector="StackPanel.navrow.child controls|LineIcon">
+    <Setter Property="Width" Value="16" />
+    <Setter Property="Height" Value="16" />
+  </Style>
+  <Style Selector="StackPanel.navrow.child TextBlock">
+    <Setter Property="FontSize" Value="13" />
+  </Style>
 
   <!-- Segmented choice (a horizontal single-selection ListBox) -->
   <Style Selector="ListBox.segmented">

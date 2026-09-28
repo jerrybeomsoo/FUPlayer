@@ -316,6 +316,16 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
         };
         services.Library.Changed += (_, _) => Dispatcher.UIThread.Post(Refilter);
         _watcher.ChangesSettled += (_, _) => Dispatcher.UIThread.Post(OnFoldersChangedOnDisk);
+
+        // Files the scan skipped because nothing could play them are playable once FFmpeg is there, and an ordinary
+        // scan finds them as new.
+        services.FFmpegInstalled += (_, _) =>
+        {
+            if (Folders.Count > 0)
+            {
+                _ = ScanAsync(rescanAll: false);
+            }
+        };
         _ = InitializeAsync();
     }
 

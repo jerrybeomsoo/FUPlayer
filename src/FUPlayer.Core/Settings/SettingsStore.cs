@@ -92,6 +92,7 @@ public sealed class SettingsStore
         settings.Library ??= new LibrarySettings();
         settings.Analyzer ??= new AnalyzerSettings();
         settings.Ui ??= new UiSettings();
+        settings.Upnp ??= new UpnpSettings();
         settings.Version = PlayerSettings.CurrentVersion;
 
         settings.Speakers.Channels ??= [];
@@ -128,6 +129,13 @@ public sealed class SettingsStore
         analyzer.FloorDb = Math.Clamp(analyzer.FloorDb, -240.0, -40.0);
         analyzer.ChannelIndex = Math.Clamp(analyzer.ChannelIndex, 0, 63);
         analyzer.BandHz = Math.Max(0.0, analyzer.BandHz);
+
+        UpnpSettings upnp = settings.Upnp;
+        upnp.FriendlyName = (upnp.FriendlyName ?? string.Empty).Trim();
+        // Left empty rather than made up here: whoever starts the renderer makes one and saves it at once, so a
+        // controller sees the same device from one run to the next even if no other setting is ever changed.
+        upnp.DeviceId = Guid.TryParse(upnp.DeviceId, out Guid id) && id != Guid.Empty ? id.ToString("D") : string.Empty;
+        upnp.Port = upnp.Port is >= 1024 and <= 65535 ? upnp.Port : 0;
         return settings;
     }
 

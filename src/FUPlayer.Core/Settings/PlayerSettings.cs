@@ -151,7 +151,38 @@ public sealed class PlayerSettings
 
     public UiSettings Ui { get; set; } = new();
 
+    /// <summary>The UPnP renderer that lets foobar2000 and other controllers play to the player.</summary>
+    public UpnpSettings Upnp { get; set; } = new();
+
     public PlayerSettings Clone() => SettingsStore.Clone(this);
+}
+
+/// <summary>
+/// The player as a UPnP MediaRenderer: a device other programs on this computer or the local network find and
+/// send a stream to, foobar2000's UPnP output among them. Off until asked for, because it listens on the network.
+/// </summary>
+public sealed class UpnpSettings
+{
+    /// <summary>Advertise the renderer and accept streams.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>The name controllers list the renderer under; empty uses the default, which names this computer.</summary>
+    public string FriendlyName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The device's unique id, made once and kept, so a controller that remembers the renderer by it (foobar2000
+    /// keeps its output device that way) still finds the same one after a restart.
+    /// </summary>
+    public string DeviceId { get; set; } = string.Empty;
+
+    /// <summary>TCP port for the description, control and event requests; 0 uses the default, or a free one.</summary>
+    public int Port { get; set; }
+
+    /// <summary>Accept control from other devices on the local network as well as from this computer.</summary>
+    public bool AllowNetworkControl { get; set; } = true;
+
+    /// <summary>Let a controller's volume and mute set the player's own.</summary>
+    public bool FollowControllerVolume { get; set; } = true;
 }
 
 public sealed class OutputSettings

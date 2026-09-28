@@ -14,7 +14,8 @@ using FUPlayer.Core.Settings;
 namespace FUPlayer.App.ViewModels;
 
 /// <summary>An entry of the navigation rail.</summary>
-public sealed partial class NavItem(string key, string title, Geometry icon, ObservableObject page) : ObservableObject
+/// <param name="isChild">A page that belongs to the entry above it, shown indented under it.</param>
+public sealed partial class NavItem(string key, string title, Geometry icon, ObservableObject page, bool isChild = false) : ObservableObject
 {
     [ObservableProperty]
     private bool _isSelected;
@@ -26,6 +27,8 @@ public sealed partial class NavItem(string key, string title, Geometry icon, Obs
     public Geometry Icon { get; } = icon;
 
     public ObservableObject Page { get; } = page;
+
+    public bool IsChild { get; } = isChild;
 }
 
 /// <summary>The application shell: navigation, transport bar, signal-path summary and the status poll.</summary>
@@ -35,10 +38,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private static readonly TimeSpan ErrorHold = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan LoadSampleLength = TimeSpan.FromSeconds(1);
 
+    private static readonly TimeSpan LiveRefresh = TimeSpan.FromSeconds(1);
+
     private readonly PlayerServices _services;
     private readonly DispatcherTimer _timer;
     private readonly bool _ready;
-    private (Guid? Id, bool TestTone)? _current;
+    private readonly LiveSourceDescriber? _describer =
+        OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763) ? new LiveSourceDescriber() : null;
+    private (Guid? Id, bool TestTone, int Capture, string? Stream)? _current;
+    private DateTime _liveNextUtc;
+    private bool _liveBusy;
     private long _lastLimiterEvents;
     private DateTime _limiterUntilUtc;
     private DateTime _errorUntilUtc;
@@ -101,6 +110,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isLimiting;
 
+    /// <summary>A UPnP controller muted the player.</summary>
+    [ObservableProperty]
+    private bool _isMuted;
+
+    /// <summary>
+    /// Next and previous move through the queue, which a captured application or a UPnP stream is not part of: its
+    /// sender decides what comes next.
+    /// </summary>
+    [ObservableProperty]
+    private bool _canSkip = true;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(RepeatIcon), nameof(IsRepeatOn))]
     private RepeatMode _repeat;
@@ -158,6 +178,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Output = new OutputViewModel(services, dialogs);
         Calibration = new CalibrationViewModel(services);
         LiveInput = new LiveInputViewModel(services);
+        UpnpInput = new UpnpInputViewModel(services);
         General = new SettingsViewModel(services);
 
         NowPlayingNav = new NavItem("NowPlaying", "Now playing", Icons.NowPlaying, NowPlaying);
@@ -166,9 +187,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         DspNav = new NavItem("Dsp", "DSP studio", Icons.Dsp, Dsp);
         OutputNav = new NavItem("Output", "Output", Icons.Output, Output);
         LiveInputNav = new NavItem("LiveInput", "Live input", Icons.LiveInput, LiveInput);
+        UpnpInputNav = new NavItem("UpnpInput", "UPnP input", Icons.Upnp, UpnpInput, isChild: true);
         CalibrationNav = new NavItem("Calibration", "Calibration", Icons.Calibration, Calibration);
         SettingsNav = new NavItem("Settings", "Settings", Icons.Settings, General);
-        Navigation = [NowPlayingNav, QueueNav, LibraryNav, LiveInputNav, DspNav, OutputNav, CalibrationNav, SettingsNav];
+        Navigation = [NowPlayingNav, QueueNav, LibraryNav, LiveInputNav, UpnpInputNav, DspNav, OutputNav, CalibrationNav, SettingsNav];
         SelectedNav = Navigation.FirstOrDefault(n => n.Key == services.Settings.Ui.LastPage) ?? NowPlayingNav;
 
         PlaybackSettings playback = services.Settings.Playback;
@@ -180,6 +202,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         services.SettingsChanged += (_, _) => RefreshVolumeRange();
         services.Engine.ErrorOccurred += (_, message) => Dispatcher.UIThread.Post(() => ShowError(message));
+
+        // A UPnP controller's volume moves the knob, which sets the engine and keeps the setting like any other change.
+        services.Upnp.VolumeRequested += (_, db) => VolumeDb = db;
+        services.Upnp.Changed += (_, _) => IsMuted = services.Engine.Muted;
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
         _timer.Tick += (_, _) => Tick();
@@ -201,6 +227,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public LiveInputViewModel LiveInput { get; }
 
+    public UpnpInputViewModel UpnpInput { get; }
+
     public SettingsViewModel General { get; }
 
     public NavItem NowPlayingNav { get; }
@@ -214,6 +242,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public NavItem OutputNav { get; }
 
     public NavItem LiveInputNav { get; }
+
+    public NavItem UpnpInputNav { get; }
 
     public NavItem CalibrationNav { get; }
 
@@ -244,6 +274,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _timer.Stop();
+        General.CancelFfmpegBuildOnExit();
         Library.Dispose();
     }
 
@@ -263,6 +294,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         // Enumerating audio sessions is cheap but not free, so it only runs while the page is shown.
         LiveInput.SetActive(newValue == LiveInputNav);
+        UpnpInput.SetActive(newValue == UpnpInputNav);
 
         if (newValue == DspNav)
         {
@@ -357,6 +389,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    private void Unmute() => _services.Upnp.Unmute();
+
+    [RelayCommand]
     private void DismissError() => ErrorMessage = null;
 
     [RelayCommand]
@@ -413,6 +448,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         IsPlaying = status.State == EngineState.Playing;
 
         UpdateCurrent(status);
+        CanSkip = !(active && (status.IsCapture || status.IsStream));
+        if (active && (status.IsCapture || status.IsStream) && DateTime.UtcNow >= _liveNextUtc)
+        {
+            _ = RefreshLiveAsync(status);
+        }
+
         UpdateTimes(status, active);
         UpdateSignalPath(status, active);
 
@@ -442,6 +483,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             Dsp.UpdateStatus(status);
         }
+        else if (SelectedNav == UpnpInputNav)
+        {
+            UpnpInput.Update(status);
+        }
 
         Queue.SetCurrent(status.CurrentItem?.Id);
         Calibration.IsTonePlaying = active && status.IsTestTone;
@@ -452,7 +497,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void UpdateCurrent(PlaybackStatus status)
     {
-        (Guid? Id, bool TestTone) key = (status.CurrentItem?.Id, status.IsTestTone);
+        (Guid? Id, bool TestTone, int Capture, string? Stream) key =
+            (status.CurrentItem?.Id, status.IsTestTone, status.IsCapture ? status.CaptureProcessId : 0, status.IsStream ? status.Stream?.Uri : null);
         if (_current == key)
         {
             return;
@@ -461,7 +507,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _current = key;
         Cover = null;
         NowPlaying.Cover = null;
-        if (status.IsTestTone)
+        _liveNextUtc = DateTime.MinValue;
+        if (status.IsCapture && status.CaptureProcessId > 0)
+        {
+            // The application's name and track follow as soon as they have been looked up.
+            TrackTitle = "Live input";
+            TrackSubtitle = $"Process {status.CaptureProcessId}";
+            NowPlaying.SetPlaceholder(TrackTitle, TrackSubtitle, "LIVE INPUT");
+        }
+        else if (status.IsStream && status.Stream is { } stream)
+        {
+            TrackTitle = "UPnP stream";
+            TrackSubtitle = stream.Controller;
+            NowPlaying.SetPlaceholder(TrackTitle, TrackSubtitle, "UPNP");
+        }
+        else if (status.IsTestTone)
         {
             TrackTitle = "Pink noise test signal";
             TrackSubtitle = "Calibration  ·  −20 dBFS RMS";
@@ -479,6 +539,39 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             TrackTitle = "Nothing playing";
             TrackSubtitle = "Pick an album in the library or drop files anywhere";
             NowPlaying.SetPlaceholder(TrackTitle, "Pick an album in the library, or drop music files anywhere in this window.");
+        }
+    }
+
+    /// <summary>
+    /// Looks up what a captured application or a UPnP stream is playing, once a second while it plays, so a track
+    /// change in the source shows here too.
+    /// </summary>
+    private async Task RefreshLiveAsync(PlaybackStatus status)
+    {
+        if (_describer is null || _liveBusy)
+        {
+            return;
+        }
+
+        _liveBusy = true;
+        _liveNextUtc = DateTime.UtcNow + LiveRefresh;
+        var key = _current;
+        try
+        {
+            LiveTrack? track = await _describer.DescribeAsync(status);
+            if (track is null || _current != key)
+            {
+                return;
+            }
+
+            TrackTitle = track.Title;
+            TrackSubtitle = track.Album is { } album ? $"{track.Subtitle}  ·  {album}" : track.Subtitle;
+            Cover = track.Cover;
+            NowPlaying.SetLive(track);
+        }
+        finally
+        {
+            _liveBusy = false;
         }
     }
 
@@ -518,7 +611,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             TimeDisplayMode.Remaining when duration > TimeSpan.Zero => "−" + Formatting.Time(duration - position),
             TimeDisplayMode.QueueRemaining when duration > TimeSpan.Zero && status.CurrentItem is { } item =>
                 "−" + Formatting.Time(duration - position + Queue.DurationAfter(item.Id)),
-            _ => duration > TimeSpan.Zero ? Formatting.Time(duration) : status.IsTestTone && active ? "∞" : "0:00",
+            _ when duration > TimeSpan.Zero => Formatting.Time(duration),
+            _ when active && status.IsTestTone => "∞",
+
+            // A captured application or a stream has no length; its position is the time since it began.
+            _ when active && (status.IsCapture || status.IsStream) => "LIVE",
+            _ => "0:00",
         };
     }
 

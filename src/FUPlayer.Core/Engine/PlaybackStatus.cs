@@ -32,6 +32,12 @@ public sealed record PlaybackStatus
     /// <summary>While capturing: what was done about the application's own playback.</summary>
     public string? CaptureNote { get; init; }
 
+    /// <summary>True while the source is a stream a network controller sent, such as foobar2000's UPnP output.</summary>
+    public bool IsStream { get; init; }
+
+    /// <summary>The network stream, while one is playing.</summary>
+    public NetworkStreamStatus? Stream { get; init; }
+
     public TimeSpan Position { get; init; }
 
     public TimeSpan Duration { get; init; }

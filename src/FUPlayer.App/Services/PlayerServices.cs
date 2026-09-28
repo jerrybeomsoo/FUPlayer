@@ -52,6 +52,10 @@ public sealed class PlayerServices : IDisposable
             _commitTimer.Stop();
             Commit();
         };
+
+        // The renderer follows its settings: turned on, renamed or opened to the network, it starts again as asked.
+        Upnp = new UpnpService(this);
+        SettingsChanged += (_, _) => Upnp.Apply();
     }
 
     private static readonly object LogGate = new();
@@ -84,6 +88,11 @@ public sealed class PlayerServices : IDisposable
     /// <summary>Raised after <see cref="SettingsChanged"/> for changes that affect how the engine plays (not volume or display options).</summary>
     public event EventHandler? EngineSettingsChanged;
 
+    /// <summary>Raised on the UI thread once FFmpeg has been built and loaded while the player runs.</summary>
+    public event EventHandler? FFmpegInstalled;
+
+    public void NotifyFFmpegInstalled() => FFmpegInstalled?.Invoke(this, EventArgs.Empty);
+
     public SettingsStore Store { get; }
 
     /// <summary>The UI's working copy of the settings (UI thread only). The engine receives clones.</summary>
@@ -99,6 +108,9 @@ public sealed class PlayerServices : IDisposable
     public MusicLibrary Library { get; }
 
     public CoverArtCache Covers { get; }
+
+    /// <summary>The UPnP renderer foobar2000 and other controllers play to.</summary>
+    public UpnpService Upnp { get; }
 
     public static string DefaultRenderDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyMusic), "FUPlayer renders");
@@ -212,6 +224,7 @@ public sealed class PlayerServices : IDisposable
 
         _disposed = true;
         _commitTimer.Stop();
+        Upnp.Dispose();
         _savePending = true;
         _applyPending = false;
         Commit();

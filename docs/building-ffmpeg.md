@@ -9,6 +9,39 @@ FUPlayer's bindings match **FFmpeg 9.0.x** exactly (libavformat 63, libavcodec 6
 The struct offsets were verified against the 9.0.1 headers in this repository; other major versions are
 rejected at start-up.
 
+## From the player
+
+*Settings › FFmpeg › Download and build FFmpeg* does the whole job for a player that came without
+FFmpeg, which is every release package: nothing needs the source tree, a prompt, or administrator
+rights. It
+
+1. downloads `ffmpeg-9.0.1.tar.xz` from ffmpeg.org and checks it against its SHA-256;
+2. finds MSYS2 (`C:\msys64`, `C:\msys2`, `%LOCALAPPDATA%\Programs\msys64` or `MSYS2_ROOT`) and adds
+   the five packages below to it if they are missing. With no MSYS2 on the machine it unpacks MSYS2's
+   dated base archive (again pinned by SHA-256) into its own folder, lets it set up its package keys,
+   updates it, and installs the compiler there;
+3. runs the same `build-ffmpeg-lgpl.sh` as below, from a copy carried inside the player, in a work folder
+   of its own;
+4. copies the four DLLs, FFmpeg's `COPYING.LGPLv2.1` and a README saying where they came from to
+   `%LOCALAPPDATA%\FUPlayer\ffmpeg\win-x64`, which the player searches after its own folders;
+5. loads them in the running player and has the library scan again, since the files it passed over as
+   unplayable are playable now.
+
+The work folder is `%LOCALAPPDATA%\FUPlayer\ffmpeg-build`: the download, the log (`build.log`), and a
+private MSYS2 when one was needed (about 1 GB once the compiler is in). The source and the objects are
+deleted once the libraries are installed. FFmpeg's `configure` refuses a path with a space in it, so
+when the user folder has one (or letters outside ASCII) the short 8.3 form of the path is used, and
+failing that `%ProgramData%\FUPlayer\ffmpeg-build`. Stopping a build leaves the downloads in place, so
+the next attempt carries on from there.
+
+`fuplayer-cli ffmpeg-install` does the same from a prompt and prints every line the tools do.
+`--private-msys2` sets up MSYS2 of its own even when one is installed, `--msys2 <folder>` names one,
+`--tools <folder>` moves the work folder, `--install <folder>` puts the libraries somewhere else, and
+`--keep` keeps the source and the objects.
+
+To remove it, delete `%LOCALAPPDATA%\FUPlayer\ffmpeg` (the libraries) and
+`%LOCALAPPDATA%\FUPlayer\ffmpeg-build` (everything else).
+
 ## Windows
 
 From an ordinary PowerShell prompt at the top of the repository:
@@ -71,9 +104,10 @@ on it, and `avcodec` loads it from its own folder, so it has to travel with them
 `dotnet run --project src/FUPlayer.Cli -- info` prints the loaded version, and so does the Settings
 page in the player.
 
-At run time the libraries are looked for next to the executable, in `ffmpeg/` beside it, in
-`native/<rid>/` beside it, and in the directory named by the `FUPLAYER_FFMPEG_PATH` environment
-variable, in that order, before the system library path. Set `FuPlayerFFmpegDirectory` to build
+At run time the libraries are looked for in the directory named by the `FUPLAYER_FFMPEG_PATH`
+environment variable, next to the executable, in `ffmpeg/` beside it, in `native/<rid>/` beside it, and
+in `%LOCALAPPDATA%\FUPlayer\ffmpeg\<rid>` where the player's own build puts them, in that order, before
+the system library path. Set `FuPlayerFFmpegDirectory` to build
 against a copy kept somewhere else, or `FuPlayerSkipFFmpegCopy=true` to leave them out of a build.
 
 ### Using the MSVC toolchain instead

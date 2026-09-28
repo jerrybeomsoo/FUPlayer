@@ -8,6 +8,9 @@ public enum FilterFamily
     None,
     Sinc,
     GaussianSinc,
+
+    /// <summary>A sinc under one of Nuttall's cosine windows, which have no parameter (see <see cref="FilterPreset.Window"/>).</summary>
+    NuttallSinc,
     Halfband,
     LowRinging,
     Polynomial,
@@ -56,13 +59,21 @@ public sealed record FilterPreset
 
     public PolynomialKind Polynomial { get; init; }
 
-    public WindowKind Window => Family == FilterFamily.GaussianSinc ? WindowKind.Gaussian : WindowKind.Kaiser;
+    /// <summary>The window of a windowed sinc: set for the Nuttall family, which has two, and given by the family otherwise.</summary>
+    public WindowKind Window
+    {
+        get => _window ?? (Family == FilterFamily.GaussianSinc ? WindowKind.Gaussian : WindowKind.Kaiser);
+        init => _window = value;
+    }
 
     /// <summary>
     /// Whether an explicit filter length applies. A windowed sinc can be made as long as one likes, but a filter
     /// whose character is its short impulse, an interpolating polynomial and an IIR cascade all keep their own length.
     /// </summary>
-    public bool SupportsCustomLength => Family is FilterFamily.Sinc or FilterFamily.GaussianSinc or FilterFamily.Halfband;
+    public bool SupportsCustomLength =>
+        Family is FilterFamily.Sinc or FilterFamily.GaussianSinc or FilterFamily.NuttallSinc or FilterFamily.Halfband;
+
+    private readonly WindowKind? _window;
 
     public string PhaseLabel => Phase switch
     {
@@ -145,6 +156,22 @@ public static class FilterCatalog
             "For files above 48 kHz: starts rolling off far below the source Nyquist frequency, with a very short impulse. Removes recorded high-frequency noise. 44.1/48 kHz files use the balanced Gaussian filter instead.",
             PhaseResponse.Linear, PhaseResponse.Minimum);
 
+        // Nuttall's windows have no parameter: they keep their own stopband level, about 110 dB from the edge of the
+        // stopband, and the steepness only sets the length. The four-term window with a continuous slope is the one
+        // whose rejection keeps growing away from the edge, which is where the images of most of the music land.
+        AddNuttall(list, "nuttall-compact", "Nuttall sinc · compact", 0.84, WindowKind.Nuttall,
+            "Nuttall's four-term cosine window, whose ends and slope both reach zero: 110 dB of rejection at the edge of the stopband and more further out, 160 dB eight transition widths away. Short, with the response falling inside the top octave.",
+            PhaseResponse.Linear, PhaseResponse.Minimum);
+        AddNuttall(list, "nuttall-balanced", "Nuttall sinc · balanced", 0.905, WindowKind.Nuttall,
+            "Nuttall window with a flat audio band: 110 dB at the edge of the stopband, 142 dB four transition widths above it and 178 dB sixteen above, where a Kaiser window starting at the same level reaches 142 dB.",
+            PhaseResponse.Linear, PhaseResponse.Minimum);
+        AddNuttall(list, "nuttall-steep", "Nuttall sinc · steep", 0.95, WindowKind.Nuttall,
+            "Nuttall window closed at the source's Nyquist frequency with a narrow transition; the stopband goes on falling at 18 dB an octave from 110 dB.",
+            PhaseResponse.Linear, PhaseResponse.Minimum);
+        AddNuttall(list, "blackman-nuttall-steep", "Blackman–Nuttall sinc · steep", 0.95, WindowKind.BlackmanNuttall,
+            "The four-term cosine window with the lowest sidelobes: about 114 dB right from the edge of the stopband, but it falls only 6 dB an octave from there, so it stays near 120 to 135 dB where the Nuttall window reaches 150 dB and more.",
+            PhaseResponse.Linear, PhaseResponse.Minimum);
+
         list.Add(new FilterPreset
         {
             Id = "halfband-compact", Name = "Half-band · compact", Group = "Half-band", Family = FilterFamily.Halfband,
@@ -222,6 +249,20 @@ public static class FilterCatalog
             {
                 Id = id + Suffix(phase), Name = name + NameSuffix(phase), Group = "Gaussian-windowed sinc", Family = FilterFamily.GaussianSinc, Phase = phase,
                 PassbandFraction = pass, StopbandFraction = stop, AttenuationDb = attenuation, Apodizing = apodizing, EarlyRollOff = early,
+                Description = description + PhaseNote(phase),
+            });
+        }
+    }
+
+    private static void AddNuttall(List<FilterPreset> list, string id, string name, double pass, WindowKind window, string description, params PhaseResponse[] phases)
+    {
+        foreach (PhaseResponse phase in phases)
+        {
+            list.Add(new FilterPreset
+            {
+                Id = id + Suffix(phase), Name = name + NameSuffix(phase), Group = "Nuttall-windowed sinc", Family = FilterFamily.NuttallSinc,
+                Window = window, Phase = phase, PassbandFraction = pass, StopbandFraction = 1.0,
+                AttenuationDb = FirDesign.CosineSumAttenuationDb,
                 Description = description + PhaseNote(phase),
             });
         }

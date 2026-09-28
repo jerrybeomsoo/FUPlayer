@@ -70,7 +70,7 @@ bypasses the DAC's modulator as well.
 
 ## Status
 
-Version 0.2, early but working. The playback engine, the DSP chain, the decoders, both Windows audio back-ends
+Version 0.3, early but working. The playback engine, the DSP chain, the decoders, both Windows audio back-ends
 and the desktop interface are all functional, and PCM-to-DSD playback has been confirmed on real hardware over
 ASIO. Expect rough edges, and expect settings to move between versions.
 
@@ -80,7 +80,7 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 
 - Integer-ratio polyphase resampling to any rate the device supports, up to 1.536 MHz PCM.
 - Filter lengths from a few hundred taps up to **33,554,432 taps**, counted at the output rate.
-- 29 filters: Kaiser and Gaussian windowed sinc in several steepnesses, apodizing, early roll-off, half-band,
+- 36 filters: Kaiser-, Gaussian- and Nuttall-windowed sinc in several steepnesses, apodizing, early roll-off, half-band,
   short low-ringing FIR, linear and cubic interpolation, and elliptic IIR.
 - Linear, minimum and intermediate phase variants where the design allows them.
 - Single-stage conversion, or a cascade with half-band stages for a fraction of the cost.
@@ -95,10 +95,16 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 - 16 to 32 bit PCM with eleven dither and noise-shaping options.
 - Six delta-sigma modulators from 5th to 9th order, and five low-pass filters for DSD to PCM conversion.
 
-**Live input and lossy repair**
+**Live input, UPnP input and lossy repair**
 
 - Take audio from any running application, Firefox or a music client, and send it through the whole chain
   to your DAC. Windows process loopback, so nothing has to be routed by hand.
+- Play from foobar2000 and other UPnP or DLNA controllers: the player is a UPnP renderer they list as an output
+  device, and FLAC, WAV or LPCM they send goes through the whole chain, with their pause, volume and mute
+  ([UPnP input](docs/upnp-input.md)). One button adds the player to foobar2000's list of renderers, so it sends
+  FLAC rather than 16-bit WAV.
+- Now playing shows what a captured application or a UPnP stream is playing, from the application's Windows
+  media session, with its icon when there is no cover.
 - Lossy repair is two neural networks, both in the release, both run on the processor through ONNX Runtime:
   - the **neural restorer** takes coded 44.1 and 48 kHz stereo (Opus, AAC, MP3, Vorbis, 96 kbit/s upwards) back
     towards the lossless recording at the same rate, with about 90 ms of delay: the band above the codec's
@@ -134,7 +140,8 @@ ASIO. Expect rough edges, and expect settings to move between versions.
   (`+artist:bach album:cello`).
 - Watches its folders and rescans quietly in the background.
 - Gapless playback, ReplayGain, queue with drag reordering, speaker distance and level calibration.
-- FLAC, WAV, AIFF, DSF and DFF decoded natively. Anything else through optional FFmpeg libraries.
+- FLAC, WAV, AIFF, DSF and DFF decoded natively. Anything else through optional FFmpeg libraries, which
+  Settings can download and build for you.
 
 ## Screenshots
 
@@ -175,7 +182,7 @@ an application container has its `%APPDATA%` redirected into the container.
 | **Runtime** | None for the release zip, which bundles .NET 9. Building from source needs the [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) |
 | **CPU** | Any x64 with AVX2 for comfortable use. A 4-core laptop plays 1M taps to 705.6 kHz in real time |
 | **DAC** | Anything with a WASAPI or ASIO driver. ASIO is required for native DSD |
-| **Optional** | An OpenCL 1.2 device for GPU offload; FFmpeg LGPL builds for formats beyond FLAC, WAV, AIFF, DSF and DFF (`pwsh build/ffmpeg/build-ffmpeg.ps1` builds them) |
+| **Optional** | An OpenCL 1.2 device for GPU offload; FFmpeg LGPL builds for formats beyond FLAC, WAV, AIFF, DSF and DFF (*Settings › FFmpeg* builds them, or `pwsh build/ffmpeg/build-ffmpeg.ps1`) |
 
 ### Download
 
@@ -344,6 +351,9 @@ fuplayer-cli render *.flac --out ./rendered --rate 705600 --taps 1048576 --stagi
 
 # How many times faster than real time does this conversion run
 fuplayer-cli bench track.flac --mode dsd --dsd 256 --gpu
+
+# Be a UPnP renderer that foobar2000 plays to
+fuplayer-cli upnp --backend asio
 ```
 
 Every processing setting in the interface has a command line equivalent. See [docs/cli.md](docs/cli.md).
@@ -380,7 +390,9 @@ build/ffmpeg/                 script that builds LGPL FFmpeg libraries
 | [docs/settings.md](docs/settings.md) | Every setting, what it changes, and what it costs |
 | [docs/neural-restorer.md](docs/neural-restorer.md) | The neural restorer: how it runs, how its model was trained, and what it measures |
 | [docs/neural-upscaler.md](docs/neural-upscaler.md) | The neural upscaler: how it runs, how its model was trained, and what it measures |
-| [docs/building-ffmpeg.md](docs/building-ffmpeg.md) | Building the LGPL FFmpeg DLLs from source |
+| [docs/building-ffmpeg.md](docs/building-ffmpeg.md) | Building the LGPL FFmpeg DLLs, from the player or from source |
+| [docs/upnp-input.md](docs/upnp-input.md) | Playing from foobar2000 and other UPnP controllers |
+| [docs/trainable-windows.md](docs/trainable-windows.md) | Trainable windows: where the idea comes from, and what it would do here |
 
 ## Contributing
 

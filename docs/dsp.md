@@ -42,12 +42,21 @@ path.
 ## Filter design
 
 Every windowed-sinc filter here is described by four numbers: a passband edge, a stopband edge, a stopband
-attenuation, and a window (Kaiser or Gaussian). `FirDesign.Lowpass` produces exact coefficient symmetry by
-computing half of them and mirroring.
+attenuation, and a window (Kaiser, Gaussian, or one of Nuttall's cosine windows). `FirDesign.Lowpass` produces
+exact coefficient symmetry by computing half of them and mirroring.
 
 The catalogue spans steepness rather than character: `kaiser-compact` starts falling inside the top octave,
 `kaiser-extreme` has the narrowest transition available. Gaussian windows give no ripple in the transition band
 at the cost of a wider one for the same length.
+
+Nuttall's windows have no parameter: they keep their own stopband level, about 110 dB from the edge of the
+stopband, and a longer filter only narrows the transition. The four-term window with smooth ends (Nuttall, 1981:
+0.355768, 0.487396, 0.144232, 0.012604) reaches zero with its slope at its ends, so its stopband keeps falling
+at 18 dB an octave: 142, 160 and 178 dB four, eight and sixteen transition widths from the edge, where a Kaiser
+window starting at the same level is at 131, 136 and 142 dB, for about 7 % more taps. That is where the images
+of most music land. The Blackman–Nuttall window, the four-term window with the lowest sidelobes, starts a
+little lower, near 114 dB, and stays between 120 and 135 dB further out. The window is laid over n + 1
+intervals, so its zero end values do not become taps that do nothing.
 
 When you ask for more taps than the specification needs, the window is stretched over the extra length rather
 than padded with zeros, so the extra taps buy a narrower transition. Roughly:
