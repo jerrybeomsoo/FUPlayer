@@ -37,11 +37,12 @@ public sealed class NeuralRestorerModel : IDisposable
     private readonly string[] _inputNames;
     private readonly string[] _outputNames;
 
-    private NeuralRestorerModel(InferenceSession session, string path, (int Channels, int Frames)[] states)
+    private NeuralRestorerModel(InferenceSession session, string path, (int Channels, int Frames)[] states, double[] window)
     {
         _session = session;
         Path = path;
         StateShapes = states;
+        WindowCoefficients = window;
         _inputNames = ["features", "rate48", .. Enumerable.Range(0, states.Length).Select(i => $"state{i}")];
         _outputNames = ["heads", .. Enumerable.Range(0, states.Length).Select(i => $"new_state{i}")];
     }
@@ -50,6 +51,25 @@ public sealed class NeuralRestorerModel : IDisposable
 
     /// <summary>Channels and frames of each state tensor, the batch dimension of one left out: the look-ahead layer's first.</summary>
     public IReadOnlyList<(int Channels, int Frames)> StateShapes { get; }
+
+    /// <summary>
+    /// The window the network's frames are cut and rebuilt with, as the coefficients of a periodic cosine sum
+    /// a0 − a1·cos(2πn/N) + a2·cos(4πn/N) − …: Hann, (0.5, 0.5), unless the description beside the network names another.
+    /// </summary>
+    public IReadOnlyList<double> WindowCoefficients { get; }
+
+    /// <summary>The window's value at <paramref name="n"/> of <paramref name="size"/> points.</summary>
+    public double Window(int n, int size)
+    {
+        double value = 0.0;
+        for (int k = 0; k < WindowCoefficients.Count; k++)
+        {
+            double term = WindowCoefficients[k] * Math.Cos(2.0 * Math.PI * k * n / size);
+            value += k % 2 == 0 ? term : -term;
+        }
+
+        return value;
+    }
 
     /// <summary>Opens a restorer. Inference uses the processor, on as many threads as asked for.</summary>
     public static NeuralRestorerModel Load(string path, int threads = 1)
@@ -95,13 +115,45 @@ public sealed class NeuralRestorerModel : IDisposable
                 throw new InvalidDataException($"{name}: its state is not laid out as a restorer's with a look-ahead of {Lookahead} frames.");
             }
 
-            return new NeuralRestorerModel(session, path, [.. states]);
+            return new NeuralRestorerModel(session, path, [.. states], ReadWindow(path));
         }
         catch
         {
             session.Dispose();
             throw;
         }
+    }
+
+    /// <summary>
+    /// The window the description beside the network names, or Hann when it names none: every restorer before the
+    /// window could be chosen was trained with Hann, and its description does not say so.
+    /// </summary>
+    private static double[] ReadWindow(string path)
+    {
+        string description = System.IO.Path.ChangeExtension(path, ".json");
+        if (!File.Exists(description))
+        {
+            return [0.5, 0.5];
+        }
+
+        using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(description));
+        if (!document.RootElement.TryGetProperty("window_coefficients", out System.Text.Json.JsonElement values))
+        {
+            return [0.5, 0.5];
+        }
+
+        double[] coefficients = values.EnumerateArray().Select(v => v.GetDouble()).ToArray();
+
+        // A cosine sum that is one at its centre and not negative anywhere: that is what a frame window is, and what
+        // the training's softmax keeps a trained one to.
+        if (coefficients.Length is < 2 or > 8 || coefficients.Any(c => !double.IsFinite(c) || c < 0.0)
+            || Math.Abs(coefficients.Sum() - 1.0) > 1e-4)
+        {
+            throw new InvalidDataException(
+                $"{System.IO.Path.GetFileName(path)}: its description names a window that is not a cosine sum peaking at one.");
+        }
+
+        return coefficients;
     }
 
     /// <summary>

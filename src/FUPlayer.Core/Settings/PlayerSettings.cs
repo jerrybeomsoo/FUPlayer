@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 using FUPlayer.Core.Dsp.Analysis;
 using FUPlayer.Core.Dsp.Dsd;
 using FUPlayer.Core.Dsp.Modulation;
@@ -322,6 +322,13 @@ public sealed class RestorationSettings
 
     /// <summary>The restorer model file, or null for the newest one in the models folders.</summary>
     public string? NeuralRestorerPath { get; set; }
+
+    /// <summary>
+    /// With the restorer, write the music's own harmonics into the band above the codec's edge, in the share of it
+    /// the music's partials call for (<see cref="Dsp.Restoration.HarmonicExciter"/>). Nothing to set: it follows the
+    /// edge and the music by itself.
+    /// </summary>
+    public bool NeuralRestorerExciter { get; set; } = true;
 
     /// <summary>Whether the network treats the source as coded or lossless.</summary>
     public UpscalerSource SourceType { get; set; } = UpscalerSource.Automatic;

@@ -45,6 +45,7 @@ internal sealed class DspPipeline : IDisposable
 
     /// <summary>The restorer, when it runs: over the source's channels together, before the per-channel chains.</summary>
     private readonly NeuralRestorer? _restorer;
+    private readonly HarmonicExciter? _exciter;
     private double[][] _restored = [];
 
     /// <summary>For the output delta: the source delayed by the restorer's latency, which is what its output is compared with.</summary>
@@ -132,13 +133,18 @@ internal sealed class DspPipeline : IDisposable
             else
             {
                 _restorer = new NeuralRestorer(restorerModel, plan.Source.SampleRate);
+                if (settings.Restoration.NeuralRestorerExciter)
+                {
+                    _exciter = new HarmonicExciter(plan.Source.SampleRate);
+                }
+
                 RestorerStatus = Loc.F(
                     "Neural restorer: {0} at {1}, {2:0} ms", Path.GetFileName(restorerModel.Path), AudioRates.Format(plan.Source.SampleRate),
                     1000.0 * _restorer.Latency / plan.Source.SampleRate);
                 _restored = [new double[InputBlock], new double[InputBlock]];
                 if (settings.Restoration.OutputDelta)
                 {
-                    _restorerDryDelays = Enumerable.Range(0, _sourceChannels).Select(_ => new DelayLine(_restorer.Latency)).ToArray();
+                    _restorerDryDelays = Enumerable.Range(0, _sourceChannels).Select(_ => new DelayLine(RestoreLatency)).ToArray();
                     _restorerDry = Enumerable.Range(0, _sourceChannels).Select(_ => new double[InputBlock]).ToArray();
                 }
             }
@@ -217,9 +223,9 @@ internal sealed class DspPipeline : IDisposable
 
         RestorationSettings restore = settings.Restoration;
 
-        // Where the source's spectrum ends, reported in Now playing while lossy repair is on: measurement only,
-        // on one channel, for the PCM rates the upscaler serves.
-        if (restore.NeuralUpscaler && !plan.Source.IsDsd && plan.ConversionRate <= 48_000)
+        // Where the source's spectrum ends, reported in Now playing while lossy repair is on and followed by the
+        // exciter: measured on one channel of the source as it arrived, for the PCM rates the networks serve.
+        if ((restore.NeuralUpscaler || _exciter is not null) && !plan.Source.IsDsd && plan.ConversionRate <= 48_000)
         {
             _detector = new CodecBandwidthDetector(plan.ConversionRate);
             for (int c = 0; c < _outputChannels && _detectorChannel < 0; c++)
@@ -337,7 +343,7 @@ internal sealed class DspPipeline : IDisposable
 
         if (_restorer is not null)
         {
-            latency += (double)_restorer.Latency / plan.Source.SampleRate;
+            latency += (double)RestoreLatency / plan.Source.SampleRate;
         }
 
         if (plan.UpscaleRate > 0 && !plan.PassThrough)
@@ -406,6 +412,19 @@ internal sealed class DspPipeline : IDisposable
 
     /// <summary>True while the restorer's network is running.</summary>
     public bool IsRestoring => _restorer is not null;
+
+    /// <summary>What the exciter after the restorer is doing just now, or null when it does not run.</summary>
+    public string? ExciterStatus => _exciter is null
+        ? null
+        : _exciter.EdgeHz > 0.0
+            ? Loc.F("Oversampling exciter: the music's harmonics above {0:0.0} kHz, {1:0} % of that band just now",
+                _exciter.EdgeHz / 1000.0, 100.0 * _exciter.Mix)
+            : _bandwidth.Verdict == BandwidthVerdict.Unknown
+                ? Loc.T("Oversampling exciter: waiting for the codec's edge to be measured")
+                : Loc.T("Oversampling exciter: no codec edge, so nothing to add");
+
+    /// <summary>The restorer's delay and the exciter's after it, in samples at the source rate.</summary>
+    private int RestoreLatency => (_restorer?.Latency ?? 0) + (_exciter?.Latency ?? 0);
 
     private static double BlockSecondsOf(ResamplerChain? chain) =>
         chain is null ? 0.0 : chain.FlushInputSamples / (double)Math.Max(1, chain.InputRate);
@@ -574,6 +593,7 @@ internal sealed class DspPipeline : IDisposable
         }
 
         _restorer?.Reset();
+        _exciter?.Reset();
         foreach (DelayLine delay in _restorerDryDelays)
         {
             delay.Reset();
@@ -672,6 +692,14 @@ internal sealed class DspPipeline : IDisposable
         }
 
         _restorer!.Process(_restored[0].AsSpan(0, frames), _restored[1].AsSpan(0, frames));
+        if (_exciter is not null)
+        {
+            // Above the codec's edge as the detector has it so far: nothing until it has been measured, and then
+            // wherever it settles.
+            _exciter.SetEdge(HarmonicExciter.EdgeFor(_bandwidth));
+            _exciter.Process(_restored[0].AsSpan(0, frames), _restored[1].AsSpan(0, frames));
+        }
+
         return _sourceChannels > 1 ? _restored : [_restored[0]];
     }
 

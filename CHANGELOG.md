@@ -1,8 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-09-29
 
 ### Added
+
+- **Oversampling exciter** after the neural restorer, on unless turned off. The restorer fills the band above a
+  codec's edge at the master's level but with a fine structure of its own: a violin's partials stopped at the edge.
+  The exciter continues them: the octave below the edge goes through a second- and third-degree polynomial at four
+  times the rate, whose products of one note's partials lie on that note's own series, and it is analysed there, so
+  nothing folds back below Nyquist. In each twelfth of an octave above the edge the harmonics take the restorer's
+  level, read through a window that keeps the louder band below the edge out of the reading, and a share of its
+  band: the more of the octave below the edge is in partials, the larger the share. Below the edge nothing changes,
+  and a partial the restorer's output already has above it is left alone. The edge comes from the codec detector
+  and everything else from the music; there is nothing to set. On held-out songs with partials above the edge, the
+  fine-structure correlation with the masters there went from 0.00 to 0.04 and the share of their partials matched
+  within a bin from 37 to 41 %, the level within 0.2 dB. 26 to 28 ms of delay, a few per cent of one core.
+  `--no-exciter` leaves it out ([docs](docs/neural-restorer.md#the-oversampling-exciter)).
 
 - **Korean interface** (한국어). Every page, message, filter, dither and modulator description, and the notes
   the planner and engine write, in English or Korean. The player follows Windows' language when there is a
@@ -11,8 +24,17 @@
 - **Glossary**, a page under Settings: 58 terms explained in plain words, in either language, with a search box.
   The DSP studio and Output pages link to it.
 
+### Changed
+
+- A restorer's description can name the window its frames were cut with (`window_coefficients`); the player uses
+  it, and a restorer that names none is the Hann one it always was. The training scripts can train with Nuttall's
+  window or a trainable cosine sum (`--window`).
+
 ### Fixed
 
+- The restorer's first call of the network, a few hundred milliseconds while ONNX Runtime prepared itself, fell
+  after playback had begun and could empty the output buffer; the restorer and the exciter now run once on silence
+  when they are set up.
 - The Output page's capability labels had a fixed width that a longer label ran past.
 
 ## 0.3.0 — 2026-09-28

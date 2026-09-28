@@ -100,7 +100,7 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     state = torch.load(args.checkpoint, map_location=device, weights_only=False)
     dim, blocks = state.get("dim", 256), state.get("blocks", 8)
-    model = Restorer(dim=dim, intermediate=dim * 3, blocks=blocks).to(device).eval()
+    model = Restorer(dim=dim, intermediate=dim * 3, blocks=blocks, window=state.get("window", "hann")).to(device).eval()
     model.load_state_dict(state["model"])
     out_path = Path(args.out) if args.out else Path(args.checkpoint).with_name(f"eval-{Path(args.checkpoint).stem}.csv")
 

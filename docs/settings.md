@@ -57,6 +57,7 @@ Every setting, what it changes, and what it costs. Settings are stored in `%APPD
 | Setting | Options | Notes |
 | --- | --- | --- |
 | Neural restorer | on / off | Coded 44.1/48 kHz stereo back towards lossless at the same rate; 91 ms at 48 kHz, 99 ms at 44.1. See [neural-restorer.md](neural-restorer.md) |
+| Oversampling exciter | on (default) / off | Shown with the restorer on. Continues the music's own harmonics into the band above the codec's edge that the restorer fills, made at four times the rate so nothing folds back, in the share the music's partials call for and at the restorer's level. Nothing to adjust; 26 ms more at 48 kHz, 28 at 44.1. See [neural-restorer.md](neural-restorer.md#the-oversampling-exciter) |
 | Neural upscaler | on / off | 44.1/48 kHz to 88.2/96 kHz; about 0.55 s. With the restorer on, it runs after it and reads its output as lossless. See [neural-upscaler.md](neural-upscaler.md) |
 | Upscaled band level | Quiet −6 dB, Measured, Lifted +3 dB, Strong +6 dB | Gain on what the upscaler writes above the source Nyquist |
 | Source type | Automatic, Lossy, Lossless | Automatic treats lossy codecs and captures as coded and PCM, FLAC and ALAC as lossless. The restorer runs only on coded sources |

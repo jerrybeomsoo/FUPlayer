@@ -40,7 +40,8 @@ def main() -> None:
     print(f"{item.title} ({args.label}, {rate} Hz, {args.seconds:.0f} s)")
 
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-    model = Restorer(dim=state.get("dim", 256), intermediate=state.get("dim", 256) * 3, blocks=state.get("blocks", 8))
+    model = Restorer(dim=state.get("dim", 256), intermediate=state.get("dim", 256) * 3, blocks=state.get("blocks", 8),
+                     window=state.get("window", "hann"))
     model.load_state_dict(state["model"])
     model.eval()
     with torch.no_grad():

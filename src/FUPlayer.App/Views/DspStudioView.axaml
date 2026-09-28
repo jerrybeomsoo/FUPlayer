@@ -133,6 +133,10 @@
                 <ToggleSwitch IsChecked="{Binding NeuralRestorer}" OnContent="" OffContent="" />
               </controls:SettingRow>
               <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,4" Text="{Binding RestorerStatus}" IsVisible="{Binding NeuralRestorer}" />
+              <controls:SettingRow Title="Oversampling exciter" IsVisible="{Binding NeuralRestorer}"
+                                   Description="Continues the music's own harmonics into the band above the codec's edge that the restorer fills, made at four times the rate so nothing folds back. It follows the edge and the music by itself: the more the octave below the edge is in partials, the more of the band goes to their harmonics, at the level the restorer set. It adds 26 ms at 48 kHz and 28 at 44.1.">
+                <ToggleSwitch IsChecked="{Binding RestorerExciter}" OnContent="" OffContent="" />
+              </controls:SettingRow>
               <controls:SettingRow Title="Neural upscaler"
                                    Description="44.1/48 kHz sources to 88.2/96 kHz, with the band above the source's own written. ONNX Runtime on the processor, after the restorer and before the filter, about 0.55 s; the limiter runs with it.">
                 <ToggleSwitch IsChecked="{Binding NeuralUpscaler}" OnContent="" OffContent="" />

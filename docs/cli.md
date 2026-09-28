@@ -57,6 +57,7 @@ and [neural-upscaler.md](neural-upscaler.md).
 | `--no-limiter` | Leave peaks above full scale alone |
 | `--neural-restore` | Neural restorer: coded 44.1/48 kHz stereo back towards lossless at the same rate, about 90 ms |
 | `--restorer <file>` | Which `*restorer.onnx` model. Default is the newest installed |
+| `--no-exciter` | Leave out the oversampling exciter that follows the restorer |
 | `--neural-upscale` | Neural upscaler: 44.1/48 kHz PCM to 88.2/96 kHz; after the restorer when both are given |
 | `--upscaler <file>` | Which `.onnx` model. Default is the newest installed |
 | `--source-type auto\|lossy\|lossless` | How the models read the source. Default `auto` |

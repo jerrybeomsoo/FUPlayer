@@ -61,6 +61,9 @@ public sealed record PlaybackStatus
     /// <summary>True while the restorer's network is running.</summary>
     public bool IsRestoring { get; init; }
 
+    /// <summary>What the exciter after the restorer is doing just now, or null when it does not run.</summary>
+    public string? Exciter { get; init; }
+
     public string? BackendName { get; init; }
 
     public string? DeviceName { get; init; }

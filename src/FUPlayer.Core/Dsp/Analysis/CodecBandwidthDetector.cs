@@ -1,4 +1,5 @@
 using FUPlayer.Core.Dsp.Numerics;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Analysis;
 
@@ -43,9 +44,9 @@ public readonly record struct BandwidthEstimate(
     /// </summary>
     public string Describe() => Verdict switch
     {
-        BandwidthVerdict.FullBand => $"no codec edge; spectrum runs to {CutoffHz / 1000.0:0.#} kHz",
-        BandwidthVerdict.BandLimited => $"band-limited at {CutoffHz / 1000.0:0.#} kHz, {EdgeDropDb:0} dB edge",
-        _ => "measuring",
+        BandwidthVerdict.FullBand => Loc.F("no codec edge; spectrum runs to {0:0.#} kHz", CutoffHz / 1000.0),
+        BandwidthVerdict.BandLimited => Loc.F("band-limited at {0:0.#} kHz, {1:0} dB edge", CutoffHz / 1000.0, EdgeDropDb),
+        _ => Loc.T("measuring"),
     };
 }
 

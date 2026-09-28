@@ -12,6 +12,10 @@ the stereo it reduced to a level ratio. What the network writes there is its est
 usually carries at that point, learned from lossless recordings and coded copies of them. It is measured against the
 masters it came from below, and **Output delta** plays what it changed on its own.
 
+Behind it, unless turned off, runs the **oversampling exciter**: it continues the music's own harmonics into the band
+above the codec's edge, which the network fills at the right level but as a texture of its own (see
+[below](#the-oversampling-exciter)).
+
 The release carries the model this page measures, `neural-restorer.onnx` and `neural-restorer.json`, in the `models`
 folder next to `FUPlayer.exe`. To use another, train it with the scripts in
 [training/neural-restorer](../training/neural-restorer/README.md) and put its two files in that folder or in
@@ -23,6 +27,7 @@ upscaler; the newest of each kind is used unless the settings name one.
 | Setting | Values | Effect | Command line |
 | --- | --- | --- | --- |
 | Neural restorer | on, off | Runs the network on coded 44.1 and 48 kHz stereo and mono sources. | `--neural-restore`, `--restorer <file>` |
+| Oversampling exciter | on (default), off | With the restorer: writes the music's own harmonics into the band above the codec's edge, in the share of that band the music's partials call for, at the level the network set. Nothing to adjust. | `--no-exciter` |
 | Source type | Automatic, Lossy, Lossless | Shared with the upscaler. Automatic restores lossy codecs and application captures and leaves PCM, FLAC, ALAC and the other lossless formats alone; Lossy restores everything; Lossless nothing. | `--source-type auto\|lossy\|lossless` |
 | Output delta | on, off | Shared with the upscaler. Outputs what the networks changed: their output minus the latency-aligned input. For monitoring. | `--output-delta` |
 
@@ -50,8 +55,9 @@ scale with it.
 | 6 | Network | frames | Four frames a call, with the state the last call left; each answer is for the frame six hops back. |
 | 7 | Masks | frames | Per bin of mid and of side: w·e^g·e^(iθ)·X + (1 − w)·e^m·e^(iφ), w = sigmoid(u). |
 | 8 | Left and right, overlap-add | fs | Back to L and R, windowed overlap-add over the window's envelope. Fixed delay of 4,351 samples. |
-| 9 | Output delta (optional) | fs | Subtracts the source delayed by the same 4,351 samples; with the upscaler on, at its rate after both networks. |
-| 10 | Everything after | | The upscaler if it is on, the filter, volume and limiter, dither or modulation. |
+| 9 | Oversampling exciter (on unless turned off) | fs, 4·fs inside | Above the codec's edge only: the octave below it through a polynomial at four times the rate, mixed into the network's band at its level. Fixed delay of 1,214 samples at 44.1 kHz and 1,228 at 48 kHz. |
+| 10 | Output delta (optional) | fs | Subtracts the source delayed by the same 4,351 samples and the exciter's; with the upscaler on, at its rate after both networks. |
+| 11 | Everything after | | The upscaler if it is on, the filter, volume and limiter, dither or modulation. |
 
 The file holds only stage 6, the network between its features and its heads; the player does the rest. On the test
 fixture the player's stages 3 to 8 match PyTorch's whole-signal answer to better than −60 dB from the first sample,
@@ -89,6 +95,94 @@ The design follows what the two codecs it mostly meets actually do, as their spe
   threshold of hearing), so the network is pushed hardest where the difference would be audible.
 - **The rate.** A bin is 21.5 Hz wide at 44.1 kHz and 23.4 Hz at 48, and every codec's band edges sit at
   frequencies, not bins, so the network is told which rate it is hearing.
+
+## The oversampling exciter
+
+The network fills the band above the codec's edge at about the master's level, but with a fine structure of its own.
+Measured on held-out stretches against their masters, the fine structure above the edge (each bin's level against
+its neighbours', which is where a partial shows) does not correlate with the master's at all: 0.00, where the octave
+below the edge, which the codec kept, correlates 0.46. A violin's partials stop at the edge, and above it the band is
+noise at the right level.
+
+The exciter continues them:
+
+1. **The edge** is the codec detector's cutoff, where the source's spectrum as it arrived has fallen 6 dB. Until the
+   detector has a second or so of music to go on, and for a source it finds no edge in, the exciter adds nothing.
+   It is not the start of the fall, which the network works from: an encoder that rolls off gently leaves real
+   partials in its roll-off, and on held-out songs with a roll-off 600 Hz or wider, starting there took the
+   fine-structure correlation inside the roll-off from 0.27 down to 0.19 for no gain above.
+2. **The drive** is the octave below the edge, from half the edge to 200 Hz under it, taken out of the network's
+   output by a 70 dB band-pass.
+3. **Harmonics:** the drive is raised to four times the rate (a 257-tap interpolator, 90 dB) and put through
+   u² + u³/2σ, σ being the drive's RMS, so the mixture does not change with loudness. The sum of two partials of one
+   note is another partial of it, so what comes out above the edge lies on the note's own series and bends with its
+   vibrato. A polynomial of the third degree reaches three times the highest frequency it is fed, at most 1.38 times
+   the sample rate, which four times the rate holds without folding anything back; at the sample rate itself a
+   square law's sums above Nyquist fold down into the very band being written, as tones the music never had.
+4. **Nothing is brought back down.** The oversampled signal is analysed at four times the rate with a 4,096-point
+   transform, whose first 513 bins are the bins of the 1,024-point transform the mixing works in. There is no
+   decimation filter to leak.
+5. **The mix:** in every twelfth of an octave above the edge, frame by frame (1,024 points, hop 256), the harmonics
+   are scaled to the power the network put there, and they replace a share w of it:
+   Z = √(1 − w)·Y + √w·g·E. The network's power is read through a Blackman-Harris window, whose sidelobes are
+   92 dB down: through the Hann window of the mixing transform, the band under the edge, often 20 to 40 dB louder,
+   leaks a dozen bins across it and would pass for level the network never wrote. The gains are interpolated
+   between the bands' centres, and each band is then brought to the network's power exactly. The share is twice the
+   part of the drive octave's power that stands in partials (bins 10 dB over their neighbourhood) rather than in
+   noise, held under 90 %, rising within a frame or two and falling back over about a tenth of a second, and ramped
+   in over the 600 Hz above the edge.
+6. **What is already there stays.** A partial the network's output already has above the edge is kept, with five
+   bins either side, and left out of the band's level: an encoder that rolls off gently leaves some there, and so
+   does a spectrum of sparse partials, whose fall the detector can find in the gap under the last one. So is any
+   bin standing 10 dB over the middle of its twelfth of an octave: a step in the band, such as the codec's own cliff
+   above an edge found too low, spills into the first bins past it through any window, and read as level it lifted
+   that band's harmonics by 3 to 4 dB in the tests; the network's texture puts a bin that high about one time in a
+   thousand. A band the harmonics reach only 50 dB under everything the polynomial made keeps the network's
+   texture.
+
+So the edge, the drive band, the share and the band's level and shape all follow the music by themselves; there is
+no setting but on and off. Below the edge nothing changes, and with nothing to do the exciter is a plain delay,
+sample for sample (`HarmonicExciterTests`).
+
+**Measured**, on 27 held-out stretches with a codec edge (the full-band ones have nothing to excite), master against
+the network's output and against the network's output with the exciter, from 200 Hz above the edge to 300 Hz under
+Nyquist:
+
+| | Network | Network and exciter |
+| --- | --- | --- |
+| Fine-structure correlation, the 5 stretches with partials above the edge | 0.001 | 0.039 |
+| Master's partials matched within a bin, same 5 | 36.8 % | 41.3 % |
+| Partials added that match one of the master's, same 5 | 18.0 % | 20.4 % |
+| Log-spectral distance, same 5 | 12.07 dB | 12.18 dB |
+| Level against the master, same 5 | +0.73 dB | +0.62 dB |
+| Fine-structure correlation, the other 22 | 0.004 | 0.006 |
+| Log-spectral distance, the other 22 | 9.48 dB | 9.55 dB |
+| Level against the master, the other 22 | −1.73 dB | −1.86 dB |
+
+**Around the edge**, through a 4,096-point Blackman-Harris transform so the louder band below cannot pass for level
+above it: below the edge the output is the network's to 108 dB or better on every stretch, and over the 600 Hz
+above it the level stays within about half a decibel of the network's on every stretch, 0.2 dB on average.
+
+"Partials above the edge" means an exciter fed the master itself could predict them (correlation over 0.04): Brahms's
+violin concerto through two codecs, a Rachmaninoff variation, two band songs; not a piano concerto whose master has
+nothing above 16 kHz. On those five an exciter fed the master reaches 0.04 to 0.16, so the player's gets most of
+what the method can give.
+Without the oversampling the correlation it adds is about a sixth smaller. On a spectrogram the difference is
+plain: over a coded violin the network's band is a haze with vertical streaks, and the exciter's is the violin's
+partials going on up to 22 kHz, vibrato and all.
+
+**Its costs:** 1,214 samples of delay at 44.1 kHz (27.5 ms) and 1,228 at 48 kHz (25.6 ms), on top of the network's;
+4.2 % of one core of the i7-7820HQ laptop while it writes, 1 % while it waits, on one thread.
+
+**Where it is wrong:**
+
+- **Chords.** A product of partials of two different notes lands between their series. Of the peaks the exciter
+  adds on the tonal stretches, about four in five are not at one of the master's partials (chance is 18 %). The
+  share rule keeps them under the network's texture where the music is not clearly tonal, but a dense tonal chord
+  gets some.
+- **Bin by bin it is not closer.** A partial in the right place at the wrong height costs more in log-spectral
+  distance than a smooth guess does, and the distance rises by 0.1 dB where the exciter works.
+- **It has not been listened to in a controlled test**, and most people do not hear much above 16 kHz.
 
 ## What it costs
 

@@ -28,6 +28,8 @@ the frames the player gathers per call: 3,584 samples, 75 ms at 48 kHz, for one 
 """
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -40,15 +42,63 @@ FLOOR_BELOW_PEAK = 10.0 ** (-85.0 / 20.0)
 SQRT_HALF = 0.7071067811865476
 
 
-def stft(wave: torch.Tensor, n_fft: int = N_FFT, hop: int = HOP) -> torch.Tensor:
-    """[B, samples] -> complex [B, bins, frames]: periodic Hann, centred, as the player does it."""
-    window = torch.hann_window(n_fft, periodic=True, device=wave.device, dtype=wave.dtype)
-    return torch.stft(wave, n_fft, hop, n_fft, window, center=True, pad_mode="constant", return_complex=True)
+#: The frame windows, as the coefficients of a periodic cosine sum w[n] = a0 - a1 cos(2 pi n / N) + a2 cos(4 pi n / N)
+#: - a3 cos(6 pi n / N), which is how the player builds them: Hann, and Nuttall's four-term window with a continuous
+#: first derivative, whose sidelobes start at -93 dB where Hann's start at -31.
+HANN = (0.5, 0.5)
+NUTTALL = (0.355768, 0.487396, 0.144232, 0.012604)
+WINDOWS = {"hann": HANN, "nuttall": NUTTALL}
 
 
-def istft(spec: torch.Tensor, length: int, n_fft: int = N_FFT, hop: int = HOP) -> torch.Tensor:
-    window = torch.hann_window(n_fft, periodic=True, device=spec.device, dtype=torch.float32)
-    return torch.istft(spec, n_fft, hop, n_fft, window, center=True, length=length)
+def cosine_window(coefficients: torch.Tensor, n_fft: int) -> torch.Tensor:
+    """The periodic cosine-sum window of `n_fft` points with these coefficients, in their dtype and on their device."""
+    n = torch.arange(n_fft, device=coefficients.device, dtype=coefficients.dtype) * (2.0 * math.pi / n_fft)
+    k = torch.arange(coefficients.shape[0], device=coefficients.device, dtype=coefficients.dtype)
+    signs = torch.where(k % 2 == 0, 1.0, -1.0).to(coefficients.dtype)
+    return (torch.cos(n[:, None] * k[None, :]) * (signs * coefficients)[None, :]).sum(dim=1)
+
+
+class FrameWindow(nn.Module):
+    """The window the network's frames are cut with and put back together with.
+
+    Fixed (`hann`, `nuttall`), or trained with the network (`cosine`): the coefficients of a four-term cosine sum,
+    kept positive and summing to one by a softmax, so the window stays bell-shaped with its peak at one, and started
+    at Hann. A trained window only ever shapes the network's own frames; every loss and every score is measured on a
+    fixed Hann analysis, or the optimiser could lower them by reshaping the window instead of improving the audio.
+    """
+
+    def __init__(self, kind: str = "hann", terms: int = 4) -> None:
+        super().__init__()
+        self.kind = kind
+        if kind == "cosine":
+            start = torch.tensor(list(HANN) + [1e-3] * (terms - 2), dtype=torch.float32)
+            self.logits = nn.Parameter(torch.log(start / start.sum()))
+        elif kind in WINDOWS:
+            self.register_buffer("fixed", torch.tensor(WINDOWS[kind], dtype=torch.float32), persistent=False)
+        else:
+            raise ValueError(f"unknown window '{kind}'")
+
+    def coefficients(self) -> torch.Tensor:
+        return torch.softmax(self.logits, dim=0) if self.kind == "cosine" else self.fixed
+
+    def forward(self, n_fft: int = N_FFT) -> torch.Tensor:
+        return cosine_window(self.coefficients(), n_fft)
+
+
+def stft(wave: torch.Tensor, n_fft: int = N_FFT, hop: int = HOP, window: torch.Tensor | None = None) -> torch.Tensor:
+    """[B, samples] -> complex [B, bins, frames]: periodic Hann unless another window is given, centred, as the
+    player does it."""
+    if window is None:
+        window = torch.hann_window(n_fft, periodic=True, device=wave.device, dtype=wave.dtype)
+    return torch.stft(wave, n_fft, hop, n_fft, window.to(wave.dtype), center=True, pad_mode="constant",
+                      return_complex=True)
+
+
+def istft(spec: torch.Tensor, length: int, n_fft: int = N_FFT, hop: int = HOP,
+          window: torch.Tensor | None = None) -> torch.Tensor:
+    if window is None:
+        window = torch.hann_window(n_fft, periodic=True, device=spec.device, dtype=torch.float32)
+    return torch.istft(spec, n_fft, hop, n_fft, window.to(torch.float32), center=True, length=length)
 
 
 def to_mid_side(left: torch.Tensor, right: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -120,11 +170,12 @@ class CausalConvNeXtBlock(nn.Module):
 
 class Restorer(nn.Module):
     def __init__(self, dim: int = 256, intermediate: int = 768, blocks: int = 8, bins: int = BINS,
-                 lookahead: int = LOOKAHEAD) -> None:
+                 lookahead: int = LOOKAHEAD, window: str = "hann") -> None:
         super().__init__()
         self.bins = bins
         self.dim = dim
         self.lookahead = lookahead
+        self.window = FrameWindow(window)
         self.embed = nn.Conv1d(2 * bins, dim, kernel_size=1)
         self.embed_norm = nn.LayerNorm(dim, eps=1e-6)
         # 44.1 kHz (0) or 48 kHz (1).

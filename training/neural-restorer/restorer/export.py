@@ -153,7 +153,7 @@ def main() -> None:
 
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     dim, blocks = state.get("dim", 256), state.get("blocks", 8)
-    model = Restorer(dim=dim, intermediate=dim * 3, blocks=blocks)
+    model = Restorer(dim=dim, intermediate=dim * 3, blocks=blocks, window=state.get("window", "hann"))
     model.load_state_dict(state["model"])
     out = Path(args.out)
     error = export(model, out)
@@ -162,7 +162,12 @@ def main() -> None:
     if error > 1e-4:
         raise SystemExit("the exported network does not reproduce the model")
 
-    meta = {"kind": "restorer", "n_fft": N_FFT, "hop": HOP, "bins": BINS, "window": "hann-periodic",
+    # The frame window, for the player to build: the name it had in training, and a periodic cosine sum's
+    # coefficients, a0 - a1 cos(2 pi n / N) + a2 cos(4 pi n / N) - ..., which Hann is (0.5, 0.5).
+    coefficients = [round(float(c), 9) for c in model.window.coefficients()]
+    window = "hann-periodic" if model.window.kind == "hann" else f"{model.window.kind}-periodic"
+    meta = {"kind": "restorer", "n_fft": N_FFT, "hop": HOP, "bins": BINS, "window": window,
+            "window_coefficients": coefficients,
             "feature_floor_below_peak_db": FLOOR_BELOW_PEAK_DB, "lookahead_frames": LOOKAHEAD,
             "rates": [44100, 48000], "state_shapes": [list(s) for s in model.core_state_shapes()],
             "head_clamps": {"g": [-8.0, 4.0], "m": [-20.0, 8.0]},

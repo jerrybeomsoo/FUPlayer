@@ -176,6 +176,8 @@ public sealed partial class GlossaryViewModel : ObservableObject
         Group("Neural processing",
             ("Neural restorer",
                 "A neural network trained to bring lossy-coded music (MP3, AAC, Opus, Vorbis) back towards the lossless original: it rebuilds high frequencies and stereo detail the codec removed. It runs on the processor with ONNX Runtime."),
+            ("Exciter",
+                "A process that adds harmonics to a sound. The oversampling exciter after the neural restorer continues the music's own harmonics into the band a codec cut off, and makes them at four times the sample rate, so that none of them fold back below Nyquist as tones the music never had."),
             ("Neural upscaler",
                 "A neural network that doubles the sample rate of 44.1 and 48 kHz music and writes plausible content above the original Nyquist frequency, where plain resampling leaves silence."),
             ("LSD (log-spectral distance)",

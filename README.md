@@ -108,7 +108,9 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 - Lossy repair is two neural networks, both in the release, both run on the processor through ONNX Runtime:
   - the **neural restorer** takes coded 44.1 and 48 kHz stereo (Opus, AAC, MP3, Vorbis, 96 kbit/s upwards) back
     towards the lossless recording at the same rate, with about 90 ms of delay: the band above the codec's
-    low-pass, the collapsed stereo, the holes of the weaker encoders ([its page](docs/neural-restorer.md));
+    low-pass, the collapsed stereo, the holes of the weaker encoders ([its page](docs/neural-restorer.md)),
+    and an **oversampling exciter** behind it continues the music's own harmonics into the band above the codec's
+    edge, which the network fills at the right level but as a texture of its own;
   - the **neural upscaler** takes 44.1 and 48 kHz files and captures to 88.2 and 96 kHz, correcting coded passbands
     and synthesising the band above the source Nyquist, with about half a second of delay
     ([its page](docs/neural-upscaler.md)).

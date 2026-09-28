@@ -178,6 +178,9 @@ public sealed partial class DspStudioViewModel : ObservableObject
     private bool _neuralRestorer;
 
     [ObservableProperty]
+    private bool _restorerExciter;
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNeuralModel))]
     private bool _neuralUpscaler;
 
@@ -695,6 +698,9 @@ public sealed partial class DspStudioViewModel : ObservableObject
         OnPropertyChanged(nameof(RestorerStatus));
     }
 
+    partial void OnRestorerExciterChanged(bool value) =>
+        Update(value, (bool v) => Settings.Restoration.NeuralRestorerExciter = v);
+
     partial void OnSelectedUpscalerSourceChanged(Choice? value) =>
         Update(value, (UpscalerSource source) => Settings.Restoration.SourceType = source);
 
@@ -785,6 +791,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
                 Choice.Find(ConvolutionLayoutChoices, s.Processing.ConvolutionUniformBlocks) ?? ConvolutionLayoutChoices[0];
             RemoveUltrasonics = s.Processing.RemoveUltrasonics;
             NeuralRestorer = s.Restoration.NeuralRestorer;
+            RestorerExciter = s.Restoration.NeuralRestorerExciter;
             NeuralUpscaler = s.Restoration.NeuralUpscaler;
             SelectedUpscalerSource = Choice.Find(UpscalerSourceChoices, s.Restoration.SourceType) ?? UpscalerSourceChoices[0];
             SelectedUpscalerBand = Choice.Find(UpscalerBandChoices, s.Restoration.UpscalerBandDb) ?? UpscalerBandChoices[1];

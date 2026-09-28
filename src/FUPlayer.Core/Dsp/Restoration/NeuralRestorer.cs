@@ -7,7 +7,8 @@ namespace FUPlayer.Core.Dsp.Restoration;
 /// Runs a <see cref="NeuralRestorerModel"/> over a stereo stream at 44.1 or 48 kHz, at the rate it arrives.
 ///
 /// Both channels are cut into Fourier frames exactly as the network was trained on them: 2,048 points, a hop of 256,
-/// a periodic Hann window, the first frame centred on the first sample. Each frame is turned into mid and side, and
+/// the network's window (periodic Hann unless its description names another), the first frame centred on the first
+/// sample. Each frame is turned into mid and side, and
 /// the network is given their log magnitudes, floored together 85 dB under the frame's loudest bin, <see cref="FramesPerCall"/>
 /// frames at a time with the state the last call left. What comes back for each bin of mid and of side is a mask on
 /// the spectrum that went in <see cref="NeuralRestorerModel.Lookahead"/> frames earlier and a component of its own,
@@ -93,7 +94,7 @@ public sealed class NeuralRestorer
 
         for (int i = 0; i < N; i++)
         {
-            _window[i] = 0.5 - (0.5 * Math.Cos(2.0 * Math.PI * i / N));
+            _window[i] = model.Window(i, N);
         }
 
         // The window-square envelope: constant once eight frames overlap, smaller at the very start where the first
@@ -139,6 +140,16 @@ public sealed class NeuralRestorer
         Latency = N + ((Lookahead - 1 + framesPerCall) * H) - 1;
         int readySize = Latency + N + (framesPerCall * H);
         _ready = [new double[readySize], new double[readySize]];
+
+        // One call of each size the stream will make, on silence, before there is a stream. ONNX Runtime prepares a
+        // shape the first time it sees it, and a first call that took a few hundred milliseconds once playback had
+        // begun left the output buffer, still filling, to run dry.
+        _model.Run(_features, Lookahead, _rate48, _state, _heads, _nextState);
+        if (framesPerCall != Lookahead)
+        {
+            _model.Run(_features, framesPerCall, _rate48, _state, _heads, _nextState);
+        }
+
         Reset();
     }
 

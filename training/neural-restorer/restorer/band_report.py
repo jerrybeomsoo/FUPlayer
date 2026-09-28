@@ -65,7 +65,8 @@ def main() -> None:
     wanted = int(args[1]) if len(args) > 1 else 14
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     state = torch.load(checkpoint, map_location="cpu", weights_only=False)
-    model = Restorer(dim=state.get("dim", 256), blocks=state.get("blocks", 8)).to(device).eval()
+    model = Restorer(dim=state.get("dim", 256), blocks=state.get("blocks", 8),
+                     window=state.get("window", "hann")).to(device).eval()
     model.load_state_dict(state["model"])
     print(f"{checkpoint}, step {state.get('step')}, "
           f"{'every held-out song' if every else f'masters with a band within {TOP_WITHIN_DB:.0f} dB of 8-12 kHz'}")

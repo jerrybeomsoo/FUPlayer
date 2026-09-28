@@ -65,11 +65,19 @@ def mrstft_loss(pred: torch.Tensor, target: torch.Tensor, deficit: torch.Tensor 
 
 
 def restore(model: Restorer, x: torch.Tensor, rates: torch.Tensor):
-    """x [B, 2, samples] -> restored waveform [B, 2, samples], and the input and output spectra [2B, bins, frames]."""
-    left, right = stft(x[:, 0]), stft(x[:, 1])
+    """x [B, 2, samples] -> restored waveform [B, 2, samples], and the input and output spectra [2B, bins, frames]
+    in the network's own frames, cut with its window."""
+    window = model.window()
+    left, right = stft(x[:, 0], window=window), stft(x[:, 1], window=window)
     out_left, out_right = model(left, right, (rates == 48_000).float())
-    y_hat = torch.stack([istft(out_left, x.shape[2]), istft(out_right, x.shape[2])], dim=1)
+    y_hat = torch.stack([istft(out_left, x.shape[2], window=window), istft(out_right, x.shape[2], window=window)], dim=1)
     return y_hat, torch.cat([left, right]), torch.cat([out_left, out_right])
+
+
+def reference(wave: torch.Tensor) -> torch.Tensor:
+    """[B, 2, samples] -> [2B, bins, frames], left channels first: the fixed Hann analysis every loss and score is
+    taken on, whatever window the network cuts its own frames with."""
+    return torch.cat([stft(wave[:, 0]), stft(wave[:, 1])])
 
 
 def masked_loss_by_rate(spec_out: torch.Tensor, spec_target: torch.Tensor, rates: torch.Tensor) -> torch.Tensor:
@@ -135,7 +143,8 @@ class Validation:
             x = torch.from_numpy(x_np).to(device)[None]
             y = torch.from_numpy(y_np).to(device)[None]
             rates = torch.tensor([rate], device=device)
-            y_hat, spec_in, _ = restore(model, x, rates)
+            y_hat, _, _ = restore(model, x, rates)
+            spec_in = reference(x)
             spec_y = torch.cat([stft(y[:, 0]), stft(y[:, 1])])
             spec_hat = torch.cat([stft(y_hat[:, 0]), stft(y_hat[:, 1])])
             p_y = spec_y.abs().pow(2)
@@ -252,6 +261,8 @@ def main() -> None:
     ap.add_argument("--init-discriminators", default="", help="and the discriminators from this one (a run's last.pt)")
     ap.add_argument("--warmup", type=int, default=1000, help="steps the learning rate takes to rise")
     ap.add_argument("--crop-threads", type=int, default=4, help="threads drawing crops ahead of the training step")
+    ap.add_argument("--window", default="hann", choices=["hann", "nuttall", "cosine"],
+                    help="the frame window: Hann, Nuttall's four-term window, or a four-term cosine sum trained with the network")
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -264,10 +275,17 @@ def main() -> None:
     print(f"{len(items)} songs: {len(train_items)} to train on, {len(held_items)} held out by title "
           f"({sum(i.japanese for i in held_items)} Japanese)", flush=True)
 
-    model = Restorer(dim=args.dim, intermediate=args.dim * 3, blocks=args.blocks).to(device)
+    model = Restorer(dim=args.dim, intermediate=args.dim * 3, blocks=args.blocks, window=args.window).to(device)
     mpd = upscaler_losses.MultiPeriodDiscriminator().to(device)
     msd = upscaler_losses.MultiResolutionSpectralDiscriminator().to(device)
-    opt_g = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.8, 0.99), weight_decay=0.01)
+    # A trained window's coefficients take no weight decay, which would pull them towards a flat four-way split, and
+    # ten times the learning rate: four numbers that start at Hann have a long way to go in a run that is short.
+    window_params = list(model.window.parameters())
+    window_ids = {id(p) for p in window_params}
+    groups = [{"params": [p for p in model.parameters() if id(p) not in window_ids], "lr_scale": 1.0}]
+    if window_params:
+        groups.append({"params": window_params, "weight_decay": 0.0, "lr_scale": 10.0})
+    opt_g = torch.optim.AdamW(groups, lr=args.lr, betas=(0.8, 0.99), weight_decay=0.01)
     opt_d = torch.optim.AdamW(list(mpd.parameters()) + list(msd.parameters()), lr=args.lr_d, betas=(0.8, 0.99))
     total_steps = args.pretrain_steps + args.gan_steps
 
@@ -326,13 +344,13 @@ def main() -> None:
         phase_end = phase_start + steps
         while step < phase_end:
             for group in opt_g.param_groups:
-                group["lr"] = lr_at(step)
+                group["lr"] = lr_at(step) * group.get("lr_scale", 1.0)
             size = args.gan_batch if phase == "gan" else args.batch
             x, y, rates, labels = data.batch(sampler, size, device)
             lossless = torch.tensor([label == "lossless" for label in labels], device=device).repeat(2)
             rates2 = rates.repeat(2)
 
-            y_hat, spec_in, spec_out = restore(model, x, rates)
+            y_hat, _, _ = restore(model, x, rates)
             y_flat, y_hat_flat = y.transpose(0, 1).reshape(-1, y.shape[2]), y_hat.transpose(0, 1).reshape(-1, y.shape[2])
 
             if phase == "gan":
@@ -353,8 +371,12 @@ def main() -> None:
             else:
                 loss_d = torch.zeros((), device=device)
 
+            # Every spectrum a loss sees is the fixed Hann analysis of a waveform, the network's input and output
+            # included, so the terms mean the same whatever window the network cuts its frames with.
             spec_y = stft(y_flat)
             spec_hat = stft(y_hat_flat)
+            spec_in = reference(x)
+            spec_out = spec_hat
 
             # Mid and side, because a band written only into the side leaves the middle of the picture empty
             # while every per-channel measurement of it comes out right. The network works in mid and side, so
@@ -426,11 +448,11 @@ def main() -> None:
                     if value < best:
                         best, marker = value, "  <- best"
                         save(out / "best.pt", model=model.state_dict(), step=step, scores=scores, dim=args.dim,
-                             blocks=args.blocks)
+                             blocks=args.blocks, window=args.window)
                     if phase == "gan" and value < best_gan:
                         best_gan, marker = value, marker + "  <- best adversarial"
                         save(out / "best-gan.pt", model=model.state_dict(), step=step, scores=scores, dim=args.dim,
-                             blocks=args.blocks)
+                             blocks=args.blocks, window=args.window)
                     print(f"step {step} [{phase}] stft {running['stft']:.3f} masked {running['masked']:.3f} "
                           f"band {running['band']:.3f} | LSD in->out 0-4k {scores['in_0-4k']:.2f}->{scores['out_0-4k']:.2f}"
                           f"  4-12k {scores['in_4-12k']:.2f}->{scores['out_4-12k']:.2f}"
@@ -443,6 +465,9 @@ def main() -> None:
                           f" | lines {scores.get('out_lines_db', float('nan')):.2f} dB"
                           f" (worst {scores.get('out_worst_line_db', float('nan')):.1f})"
                           f" | lossless change {scores['ll_change_db']:.1f} dB | {sec:.2f} s/step{marker}", flush=True)
+                    if args.window == "cosine":
+                        coefficients = ", ".join(f"{float(c):.5f}" for c in model.window.coefficients())
+                        print(f"    window coefficients {coefficients}", flush=True)
                 writer.writerow(row)
                 log.flush()
 
@@ -450,7 +475,7 @@ def main() -> None:
                 # With the scores of the last validation, so a snapshot can be exported and described like the
                 # checkpoints the run kept for being its best.
                 save(out / f"gan-{step}.pt", model=model.state_dict(), step=step, scores=last_scores,
-                     dim=args.dim, blocks=args.blocks)
+                     dim=args.dim, blocks=args.blocks, window=args.window)
 
             # A file named STOP in the run folder ends the run at the next hundredth step, after a checkpoint. Killing
             # a process in the middle of a CUDA kernel left the display driver in error, and the machine stopped with
@@ -459,7 +484,7 @@ def main() -> None:
             if not args.benchmark and (stop or time.time() - last_checkpoint > args.checkpoint_minutes * 60 or step == phase_end):
                 save(last_path, model=model.state_dict(), mpd=mpd.state_dict(), msd=msd.state_dict(),
                      opt_g=opt_g.state_dict(), opt_d=opt_d.state_dict(), step=step, best=best, best_gan=best_gan,
-                     dim=args.dim, blocks=args.blocks)
+                     dim=args.dim, blocks=args.blocks, window=args.window)
                 last_checkpoint = time.time()
             if stop:
                 (out / "STOP").unlink(missing_ok=True)

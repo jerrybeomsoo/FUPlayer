@@ -1,4 +1,4 @@
-﻿<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:FUPlayer.App.ViewModels"
              xmlns:controls="using:FUPlayer.App.Controls"
@@ -230,6 +230,7 @@
             <TextBlock Text="{Binding Resampler}" Classes="muted small" TextWrapping="Wrap" />
             <TextBlock Text="{Binding Acceleration}" Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding HasAcceleration}" />
             <TextBlock Text="{Binding Restorer}" Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding HasRestorer}" />
+            <TextBlock Text="{Binding Exciter}" Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding HasExciter}" />
             <TextBlock Text="{Binding Upscaler}" Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding HasUpscaler}" />
             <TextBlock Text="{Binding Notes}" Classes="warning small" TextWrapping="Wrap" IsVisible="{Binding HasNotes}" />
           </StackPanel>

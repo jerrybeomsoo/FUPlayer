@@ -55,7 +55,8 @@ def main() -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-    model = Restorer(dim=state.get("dim", 256), blocks=state.get("blocks", 8)).to(device).eval()
+    model = Restorer(dim=state.get("dim", 256), blocks=state.get("blocks", 8),
+                     window=state.get("window", "hann")).to(device).eval()
     model.load_state_dict(state["model"])
     print(f"{args.checkpoint}, step {state.get('step')}")
 

@@ -10,7 +10,11 @@ identity. Then, from PyTorch:
   out48_left/right.f32           torch.stft, the whole network and torch.istft over all of it, flagged 48 kHz
   out44_left/right.f32           the same, flagged 44.1 kHz
   tiny.onnx                      the network between its features and its heads, exported as the player loads it
+  tiny.json                      with --window other than hann: the window, as the export describes it
   shape.json                     sizes, the look-ahead, and the state the network carries
+
+With --window nuttall the network cuts and rebuilds its frames with Nuttall's window, and the player has to take the
+window from the description to match.
 
 Little-endian float32 throughout. No music is involved.
 """
@@ -30,11 +34,12 @@ from .model import BINS, HOP, LOOKAHEAD, N_FFT, Restorer, istft, stft
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out", type=Path)
+    ap.add_argument("--window", default="hann", choices=["hann", "nuttall"])
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(20260917)
 
-    model = Restorer(dim=16, intermediate=48, blocks=2).eval()
+    model = Restorer(dim=16, intermediate=48, blocks=2, window=args.window).eval()
     with torch.no_grad():
         model.head.weight.normal_(0.0, 0.05)
         bias = model.head.bias.view(5, BINS)
@@ -55,13 +60,15 @@ def main() -> None:
     right = (0.25 * torch.sin(2 * torch.pi * 1_499 * t) + 0.04 * torch.sin(2 * torch.pi * 9_001 * t)
              + 0.01 * torch.randn(samples, dtype=torch.float64, generator=gen)).float()
 
-    sl, sr = stft(left[None]), stft(right[None])
+    with torch.no_grad():
+        window = model.window()
+    sl, sr = stft(left[None], window=window), stft(right[None], window=window)
     outputs = {}
     with torch.no_grad():
         for name, flag in (("out48", 1.0), ("out44", 0.0)):
             ol, orr = model(sl, sr, torch.tensor([flag]))
-            outputs[f"{name}_left"] = istft(ol, samples)[0]
-            outputs[f"{name}_right"] = istft(orr, samples)[0]
+            outputs[f"{name}_left"] = istft(ol, samples, window=window)[0]
+            outputs[f"{name}_right"] = istft(orr, samples, window=window)[0]
 
     error = export(model, args.out / "tiny.onnx", check_seconds=1.0)
     print(f"streaming check: {error:.2e}")
@@ -75,6 +82,12 @@ def main() -> None:
         write(name, values)
     changed = float((outputs["out48_left"] - left).pow(2).mean() / left.pow(2).mean())
     print(f"the network changes the left channel by {10 * np.log10(changed):.1f} dB relative")
+
+    if args.window != "hann":
+        (args.out / "tiny.json").write_text(json.dumps({
+            "kind": "restorer", "window": f"{args.window}-periodic",
+            "window_coefficients": [round(float(c), 9) for c in model.window.coefficients()],
+        }, indent=2))
 
     (args.out / "shape.json").write_text(json.dumps({
         "samples": samples, "rate": rate, "n_fft": N_FFT, "hop": HOP, "bins": BINS, "lookahead_frames": LOOKAHEAD,

@@ -304,6 +304,7 @@ public sealed class PlaybackEngine : IDisposable
             Upscaler = pipeline?.UpscalerStatus,
             IsUpscaling = pipeline?.IsUpscaling ?? false,
             Restorer = pipeline?.RestorerStatus,
+            Exciter = pipeline?.ExciterStatus,
             IsRestoring = pipeline?.IsRestoring ?? false,
             BackendName = _backend?.DisplayName,
             DeviceName = _deviceName,
