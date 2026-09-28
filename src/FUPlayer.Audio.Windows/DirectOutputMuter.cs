@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using FUPlayer.Audio.Windows.Interop;
 using FUPlayer.Core.Capture;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Audio.Windows;
 
@@ -186,7 +187,7 @@ internal sealed class DirectOutputMuter : IDisposable
                     {
                         if (_muted.ContainsKey(id))
                         {
-                            notes.Add($"muted {name}");
+                            notes.Add(Loc.F("muted {0}", name));
                         }
 
                         continue;
@@ -199,8 +200,8 @@ internal sealed class DirectOutputMuter : IDisposable
                         // case it cannot.
                         shared = IsShared;
                         notes.Add(shared
-                            ? $"left {name} playing: the player shares it, so the application is still heard through it directly"
-                            : $"left {name} playing: it is the player's own output");
+                            ? Loc.F("left {0} playing: the player shares it, so the application is still heard through it directly", name)
+                            : Loc.F("left {0} playing: it is the player's own output", name));
                         continue;
                     }
 
@@ -219,7 +220,7 @@ internal sealed class DirectOutputMuter : IDisposable
                             }
                             else
                             {
-                                notes.Add($"muted {name}");
+                                notes.Add(Loc.F("muted {0}", name));
                             }
 
                             continue;
@@ -233,7 +234,7 @@ internal sealed class DirectOutputMuter : IDisposable
                         volume.QueryHardwareSupport(out uint hardware);
                         if (IsAsio && (hardware & HardwareMute) != 0)
                         {
-                            notes.Add($"left {name} playing: its mute is in hardware, which may be the ASIO device's");
+                            notes.Add(Loc.F("left {0} playing: its mute is in hardware, which may be the ASIO device's", name));
                             continue;
                         }
 
@@ -241,7 +242,7 @@ internal sealed class DirectOutputMuter : IDisposable
                         Persist();
                         Guid context = Context;
                         volume.SetMute(true, ref context);
-                        notes.Add($"muted {name}");
+                        notes.Add(Loc.F("muted {0}", name));
                     }
                     finally
                     {
@@ -258,11 +259,10 @@ internal sealed class DirectOutputMuter : IDisposable
             {
                 string done = string.Join("; ", notes.Distinct());
                 _note = shared
-                    ? "Heard twice: a shared WASAPI stream leaves the application playing to the same device, and muting that "
-                        + "device would silence the player with it. WASAPI exclusive or ASIO output locks other applications "
-                        + $"out of the device; or send the application to another device under Windows' app volume and "
-                        + $"device preferences, which leaves the capture as it is. ({done}.)"
-                    : $"So it is heard once, through the player: {done}.";
+                    ? Loc.F(
+                        "Heard twice: a shared WASAPI stream leaves the application playing to the same device, and muting that device would silence the player with it. WASAPI exclusive or ASIO output locks other applications out of the device; or send the application to another device under Windows' app volume and device preferences, which leaves the capture as it is. ({0}.)",
+                        done)
+                    : Loc.F("So it is heard once, through the player: {0}.", done);
             }
         }
         finally

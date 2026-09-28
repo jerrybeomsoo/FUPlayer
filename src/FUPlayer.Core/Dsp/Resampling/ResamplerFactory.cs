@@ -1,6 +1,7 @@
 using FUPlayer.Core.Audio;
 using FUPlayer.Core.Dsp.Design;
 using FUPlayer.Core.Dsp.Filters;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Resampling;
 
@@ -145,7 +146,7 @@ public static class ResamplerFactory
 
         if (inputRate == outputRate)
         {
-            return new ResamplerChain(inputRate, outputRate, [], "No rate conversion");
+            return new ResamplerChain(inputRate, outputRate, [], Loc.T("No rate conversion"));
         }
 
         if (preset.Family == FilterFamily.None)
@@ -158,7 +159,7 @@ public static class ResamplerFactory
         {
             string chosen = preset.Name;
             preset = FilterCatalog.Get(FilterCatalog.EarlyRollOffSubstituteId);
-            notes.Add($"{chosen} is meant for files above 48 kHz; {preset.Name} used");
+            notes.Add(Loc.F("{0} is meant for files above 48 kHz; {1} used", chosen, preset.Name));
         }
 
         var stages = new List<IRateStage>();
@@ -222,7 +223,7 @@ public static class ResamplerFactory
             return preset;
         }
 
-        notes.Add($"{preset.Name} cannot perform this ratio; {FilterCatalog.Get(FilterCatalog.FallbackId).Name} used");
+        notes.Add(Loc.F("{0} cannot perform this ratio; {1} used", preset.Name, FilterCatalog.Get(FilterCatalog.FallbackId).Name));
         return FilterCatalog.Get(FilterCatalog.FallbackId);
     }
 
@@ -236,7 +237,7 @@ public static class ResamplerFactory
 
         if (taps > 0 && !preset.SupportsCustomLength)
         {
-            notes.Add($"{preset.Name} is defined by its own impulse, so the filter length setting does not apply to it");
+            notes.Add(Loc.F("{0} is defined by its own impulse, so the filter length setting does not apply to it", preset.Name));
             taps = 0;
         }
 
@@ -259,20 +260,21 @@ public static class ResamplerFactory
             if (length > MaxPrototypeLength)
             {
                 throw new NotSupportedException(
-                    $"{preset.Name} would need {length:N0} prototype taps for {AudioRates.Format(inputRate)} → {AudioRates.Format(outputRate)}. " +
-                    "Choose a shorter filter or multi-stage processing.");
+                    Loc.F(
+                        "{0} would need {1:N0} prototype taps for {2} → {3}. Choose a shorter filter or multi-stage processing.",
+                        preset.Name, length, AudioRates.Format(inputRate), AudioRates.Format(outputRate)));
             }
 
             if (wanted > 0 && wanted < estimated)
             {
-                notes.Add($"{wanted:N0} taps is shorter than this filter needs ({estimated:N0}), so its stopband will not reach {preset.AttenuationDb:0} dB");
+                notes.Add(Loc.F("{0:N0} taps is shorter than this filter needs ({1:N0}), so its stopband will not reach {2:0} dB", wanted, estimated, preset.AttenuationDb));
             }
 
             PhaseResponse phase = preset.Phase;
             if (phase != PhaseResponse.Linear && length > MaxPhaseTransformLength)
             {
                 phase = PhaseResponse.Linear;
-                notes.Add("linear phase used because the prototype is too long for a phase transform");
+                notes.Add(Loc.T("linear phase used because the prototype is too long for a phase transform"));
             }
 
             prototype = FirDesign.DesignLowpass(spec, up, phase, length: wanted);
@@ -282,7 +284,7 @@ public static class ResamplerFactory
         return convolution == ConvolutionMode.Automatic && FftPolyphaseStage.Suits(inputRate, outputRate, prototype.Length, options)
             ? FrequencyDomain(inputRate, outputRate, prototype, name, options)
             : new PolyphaseStage(inputRate, outputRate, prototype,
-                $"{name} ({prototype.Length:N0} taps, {(prototype.Length + up - 1) / up:N0} per phase, tap by tap)");
+                Loc.F("{0} ({1:N0} taps, {2:N0} per phase, tap by tap)", name, prototype.Length, (prototype.Length + up - 1) / up));
     }
 
     /// <summary>
@@ -338,13 +340,14 @@ public static class ResamplerFactory
         if (scaled != taps)
         {
             notes.Add(
-                $"{taps:N0} taps at {AudioRates.FormatShort(finalRate)} is {scaled:N0} at " +
-                $"{AudioRates.FormatShort(stageOutputRate)}, where this filter runs");
+                Loc.F(
+                    "{0:N0} taps at {1} is {2:N0} at {3}, where this filter runs",
+                    taps, AudioRates.FormatShort(finalRate), scaled, AudioRates.FormatShort(stageOutputRate)));
         }
 
         if (scaled > MaxPrototypeLength)
         {
-            notes.Add($"{scaled:N0} taps is longer than this build will design, so {MaxPrototypeLength:N0} were used");
+            notes.Add(Loc.F("{0:N0} taps is longer than this build will design, so {1:N0} were used", scaled, MaxPrototypeLength));
             scaled = MaxPrototypeLength;
         }
 
@@ -359,7 +362,7 @@ public static class ResamplerFactory
         double stopband = Math.Min(preset.StopbandFraction * nyquist / outputRate, 0.49);
         Biquad[] sections = EllipticDesign.Lowpass(passband, stopband, Math.Max(preset.PassbandRippleDb, 1e-4), preset.AttenuationDb, out int order);
         return new IirInterpolatorStage(inputRate, factor, sections,
-            $"{preset.Name} ×{factor} {AudioRates.FormatShort(inputRate)}→{AudioRates.FormatShort(outputRate)} (order {order})");
+            Loc.F("{0} ×{1} {2}→{3} (order {4})", preset.Name, factor, AudioRates.FormatShort(inputRate), AudioRates.FormatShort(outputRate), order));
     }
 
     /// <summary>Short rational stage moving an already oversampled signal between the 44.1 k and 48 k families.</summary>
@@ -371,8 +374,9 @@ public static class ResamplerFactory
         var spec = new LowpassSpec(bandHz / prototypeRate, stopHz / prototypeRate, attenuation);
         double[] prototype = FirDesign.Lowpass(spec, up);
         return new PolyphaseStage(inputRate, outputRate, prototype,
-            $"Family bridge {AudioRates.FormatShort(inputRate)}→{AudioRates.FormatShort(outputRate)} " +
-            $"({prototype.Length:N0} taps, {(prototype.Length + up - 1) / up:N0} per phase)");
+            Loc.F(
+                "Family bridge {0}→{1} ({2:N0} taps, {3:N0} per phase)",
+                AudioRates.FormatShort(inputRate), AudioRates.FormatShort(outputRate), prototype.Length, (prototype.Length + up - 1) / up));
     }
 
     private static double[] PolynomialPrototype(PolynomialKind kind, int up)

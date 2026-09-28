@@ -1,5 +1,6 @@
 using FUPlayer.Core.Dsp.Design;
 using FUPlayer.Core.Dsp.Resampling;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Processing;
 
@@ -23,7 +24,7 @@ public static class ProcessingFilters
 
         var spec = new LowpassSpec(20_000.0 / sampleRate, 23_000.0 / sampleRate, 150.0, WindowKind.Gaussian);
         double[] h = FirDesign.Lowpass(spec);
-        var stage = new PolyphaseStage(sampleRate, sampleRate, h, $"20 kHz filter ({h.Length} taps)");
+        var stage = new PolyphaseStage(sampleRate, sampleRate, h, Loc.F("20 kHz filter ({0} taps)", h.Length));
         return new ResamplerChain(sampleRate, sampleRate, [stage], stage.Description);
     }
 }

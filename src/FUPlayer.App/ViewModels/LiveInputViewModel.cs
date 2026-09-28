@@ -10,6 +10,7 @@ using FUPlayer.App.Services;
 using FUPlayer.Core.Audio;
 using FUPlayer.Core.Capture;
 using FUPlayer.Core.Engine;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.App.ViewModels;
 
@@ -30,7 +31,7 @@ public sealed partial class CaptureTargetViewModel(CaptureTarget target) : Obser
 
     public string Detail => $"pid {ProcessId}";
 
-    public string State => IsCaptured ? "CAPTURING" : IsPlaying ? "PLAYING" : "IDLE";
+    public string State => IsCaptured ? Loc.T("CAPTURING") : IsPlaying ? Loc.T("PLAYING") : Loc.T("IDLE");
 
     partial void OnIsPlayingChanged(bool value) => OnPropertyChanged(nameof(State));
 
@@ -60,7 +61,7 @@ public sealed partial class LiveInputViewModel : ObservableObject
         _services = services;
         IsSupported = services.Capture is { IsSupported: true };
         UnsupportedReason = services.Capture?.UnsupportedReason
-            ?? "Capturing another application is a Windows feature.";
+            ?? Loc.T("Capturing another application is a Windows feature.");
 
         Refresh();
 
@@ -144,10 +145,9 @@ public sealed partial class LiveInputViewModel : ObservableObject
         ArgumentNullException.ThrowIfNull(status);
         CaptureNote = status.CaptureNote;
         string format = status.IsCapture && status.Plan is { Source.IsValid: true } plan
-            ? $"Arriving as {plan.Source.Describe()}: the shared format of the device Windows mixes this application to, "
-                + "which it converts to before the player sees it. The player converts nothing more when its own output "
-                + $"rate is the same one ({AudioRates.Format(plan.Output.SampleRate)} here). That format is the device's "
-                + "Default Format in Windows' sound settings."
+            ? Loc.F(
+                "Arriving as {0}: the shared format of the device Windows mixes this application to, which it converts to before the player sees it. The player converts nothing more when its own output rate is the same one ({1} here). That format is the device's Default Format in Windows' sound settings.",
+                plan.Source.Describe(), AudioRates.Format(plan.Output.SampleRate))
             : string.Empty;
         if (format != _captureFormat)
         {

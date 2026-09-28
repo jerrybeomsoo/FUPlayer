@@ -1,3 +1,5 @@
+using FUPlayer.Core.Localization;
+
 namespace FUPlayer.Core.Dsp.Quantization;
 
 /// <summary>Word-length reduction method.</summary>
@@ -28,11 +30,15 @@ public enum DitherKind
 /// <summary>A selectable dither / noise-shaping algorithm.</summary>
 public sealed record DitherPreset
 {
+    private readonly string _name = string.Empty;
+    private readonly string _description = string.Empty;
+
     public required string Id { get; init; }
 
-    public required string Name { get; init; }
+    /// <summary>The name in the interface's language.</summary>
+    public required string Name { get => Loc.T(_name); init => _name = value; }
 
-    public required string Description { get; init; }
+    public required string Description { get => Loc.T(_description); init => _description = value; }
 
     public DitherKind Kind { get; init; }
 
@@ -44,7 +50,9 @@ public sealed record DitherPreset
     public bool OptimizeZeros { get; init; } = true;
 
     /// <summary>Output rates the preset is designed for.</summary>
-    public string RecommendedFor { get; init; } = string.Empty;
+    public string RecommendedFor { get => Loc.T(_recommendedFor); init => _recommendedFor = value; }
+
+    private readonly string _recommendedFor = string.Empty;
 }
 
 /// <summary>Built-in dither and noise-shaping presets.</summary>

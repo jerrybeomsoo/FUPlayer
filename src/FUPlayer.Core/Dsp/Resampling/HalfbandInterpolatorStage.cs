@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using FUPlayer.Core.Audio;
 using FUPlayer.Core.Dsp.Design;
 using FUPlayer.Core.Dsp.Numerics;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Resampling;
 
@@ -45,7 +46,7 @@ public sealed class HalfbandInterpolatorStage : IRateStage
         }
 
         Taps = length;
-        Description = $"Half-band ×2 {AudioRates.FormatShort(inputRate)}→{AudioRates.FormatShort(OutputRate)} ({length} taps)";
+        Description = Loc.F("Half-band ×2 {0}→{1} ({2} taps)", AudioRates.FormatShort(inputRate), AudioRates.FormatShort(OutputRate), length);
         DelayOutputSamples = center;
     }
 

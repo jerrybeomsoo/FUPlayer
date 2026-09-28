@@ -6,6 +6,7 @@ using FUPlayer.App.Services;
 using FUPlayer.Core.Audio;
 using FUPlayer.Core.Dsp.Analysis;
 using FUPlayer.Core.Engine;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Metadata;
 using FUPlayer.Core.Output;
 
@@ -56,10 +57,10 @@ public sealed partial class MeterChannelViewModel(string label) : ObservableObje
 public sealed partial class NowPlayingViewModel : ObservableObject
 {
     [ObservableProperty]
-    private string _title = "Nothing playing";
+    private string _title = Loc.T("Nothing playing");
 
     [ObservableProperty]
-    private string _artist = "Pick an album in the library, or drop music files anywhere in this window.";
+    private string _artist = Loc.T("Pick an album in the library, or drop music files anywhere in this window.");
 
     [ObservableProperty]
     private string _album = string.Empty;
@@ -98,7 +99,7 @@ public sealed partial class NowPlayingViewModel : ObservableObject
     private string _filterName = "-";
 
     [ObservableProperty]
-    private string _quantizerLabel = "DITHER";
+    private string _quantizerLabel = Loc.T("DITHER");
 
     [ObservableProperty]
     private string _quantizerName = "-";
@@ -272,10 +273,10 @@ public sealed partial class NowPlayingViewModel : ObservableObject
             OutputNote = DescribeTransport(plan.Output);
             HasOutputNote = OutputNote.Length > 0;
             FilterName = plan.Filter is { } filter && !plan.PassThrough ? $"{filter.Name}  ·  {filter.PhaseLabel}" : plan.FilterName;
-            QuantizerLabel = plan.Output.IsDsd ? "MODULATOR" : "DITHER";
+            QuantizerLabel = plan.Output.IsDsd ? Loc.T("MODULATOR") : Loc.T("DITHER");
             QuantizerName = plan.QuantizerName;
             IsDsdOutput = plan.Output.IsDsd;
-            Processing = plan.ProcessingRate > 0 ? "DSP at " + AudioRates.Format(plan.ProcessingRate) : "Bit-perfect DSD path";
+            Processing = plan.ProcessingRate > 0 ? Loc.F("DSP at {0}", AudioRates.Format(plan.ProcessingRate)) : Loc.T("Bit-perfect DSD path");
             Notes = string.Join(Environment.NewLine, plan.Notes);
             HasNotes = plan.Notes.Count > 0;
         }
@@ -342,10 +343,11 @@ public sealed partial class NowPlayingViewModel : ObservableObject
     private static string DescribeTransport(OutputFormat output) => output.Kind switch
     {
         OutputSampleKind.Dop =>
-            $"DoP packs DSD{AudioRates.DsdMultiplier(output.DsdRate)} ({AudioRates.Format(output.DsdRate)}) into 24-bit PCM frames at 1/16 of that rate, " +
-            $"so drivers and many DAC displays report {AudioRates.Format(output.SampleRate)}. The DAC plays DSD once it recognises the DoP markers.",
+            Loc.F(
+                "DoP packs DSD{0} ({1}) into 24-bit PCM frames at 1/16 of that rate, so drivers and many DAC displays report {2}. The DAC plays DSD once it recognises the DoP markers.",
+                AudioRates.DsdMultiplier(output.DsdRate), AudioRates.Format(output.DsdRate), AudioRates.Format(output.SampleRate)),
         OutputSampleKind.NativeDsd =>
-            $"Native DSD: the driver receives the 1-bit stream directly at {AudioRates.Format(output.SampleRate)}.",
+            Loc.F("Native DSD: the driver receives the 1-bit stream directly at {0}.", AudioRates.Format(output.SampleRate)),
         _ => string.Empty,
     };
 

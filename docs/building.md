@@ -107,7 +107,8 @@ FUPlayer.exe --settings-dir /tmp/fuplayer-test --page NowPlaying "some track.fla
 ```
 
 `--settings-dir` moves the settings, library index and queue somewhere else. `null` is a silent output back-end
-that consumes the stream at real-time speed, which is handy for testing the engine without a DAC.
+that consumes the stream at real-time speed, which is handy for testing the engine without a DAC. `--language ko`
+(or `en`) shows the interface in that language for one run.
 
 ## Where settings live
 

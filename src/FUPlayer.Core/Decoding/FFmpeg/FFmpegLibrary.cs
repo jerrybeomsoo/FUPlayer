@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Decoding.FFmpeg;
 
@@ -82,8 +83,9 @@ public static class FFmpegLibrary
             uint format = FFmpegNative.avformat_version();
             if (util >> 16 != AvutilMajor || codec >> 16 != AvcodecMajor || format >> 16 != AvformatMajor)
             {
-                LoadError = $"Unsupported FFmpeg version (avformat {format >> 16}, avcodec {codec >> 16}, avutil {util >> 16}); " +
-                    $"FUPlayer requires FFmpeg 9.0 (avformat {AvformatMajor}, avcodec {AvcodecMajor}, avutil {AvutilMajor}).";
+                LoadError = Loc.F(
+                    "Unsupported FFmpeg version (avformat {0}, avcodec {1}, avutil {2}); FUPlayer requires FFmpeg 9.0 (avformat {3}, avcodec {4}, avutil {5}).",
+                    format >> 16, codec >> 16, util >> 16, AvformatMajor, AvcodecMajor, AvutilMajor);
                 return false;
             }
 
@@ -94,15 +96,15 @@ public static class FFmpegLibrary
         }
         catch (DllNotFoundException)
         {
-            LoadError = "FFmpeg libraries were not found. Settings › FFmpeg builds them, or see docs/Building-FFmpeg.md.";
+            LoadError = Loc.T("FFmpeg libraries were not found. Settings › FFmpeg builds them, or see docs/Building-FFmpeg.md.");
         }
         catch (EntryPointNotFoundException ex)
         {
-            LoadError = "Incompatible FFmpeg libraries: " + ex.Message;
+            LoadError = Loc.F("Incompatible FFmpeg libraries: {0}", ex.Message);
         }
         catch (BadImageFormatException ex)
         {
-            LoadError = "FFmpeg libraries have the wrong architecture: " + ex.Message;
+            LoadError = Loc.F("FFmpeg libraries have the wrong architecture: {0}", ex.Message);
         }
         catch (InvalidOperationException ex)
         {

@@ -3,6 +3,7 @@ using FUPlayer.Audio.Windows;
 using FUPlayer.Core.Capture;
 using FUPlayer.Core.Engine;
 using FUPlayer.Core.Library;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Metadata;
 using FUPlayer.Core.Output;
 using FUPlayer.Core.Playlists;
@@ -189,7 +190,7 @@ public sealed class PlayerServices : IDisposable
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            return new DeviceCapabilities { MaxChannels = channels, Notes = "The device could not be queried: " + ex.Message };
+            return new DeviceCapabilities { MaxChannels = channels, Notes = Loc.F("The device could not be queried: {0}", ex.Message) };
         }
 
         lock (_capabilitiesGate)

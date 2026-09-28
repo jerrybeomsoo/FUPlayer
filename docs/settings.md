@@ -82,6 +82,15 @@ order. The automatic dither setting picks by output rate. See [dsp.md](dsp.md) f
 
 ## Settings page
 
+### Language
+
+*Same as Windows* (the default), *English* or *한국어*. The interface is built in one language, so a change takes
+effect when the player starts again; *Restart now* does that, and the new player opens on this page with the
+same settings folder. `--language en` or `--language ko` on the command line sets it for one run.
+
+Translations are keyed by the English text, in `src/FUPlayer.Core/Localization/<code>.json`; anything without a
+translation shows in English. The command line tool is always in English.
+
 ### Playback
 
 Gapless playback, ReplayGain (off, track, album), clipping prevention for positive ReplayGain, polarity
@@ -139,6 +148,12 @@ Devices* page for 24-bit.
 | Setting | Options | Notes |
 | --- | --- | --- |
 | Mute the application's own playback | on (default) / off | Mutes the devices the captured application plays to while it is captured, so it is heard once, through the player. The device is muted rather than the application's session, which would silence the capture too. The player's own WASAPI device is left alone, and a device unmuted by hand stays unmuted. Anything muted is unmuted when the capture ends, or on the next start after a crash |
+
+## Glossary page
+
+Under Settings. Plain explanations of 58 terms the other pages use, in groups (the basics, filters and rate
+conversion, word length and dither, DSD, output, neural processing, connections and tools), with a search box. In
+Korean each term also shows its usual English name. The DSP studio and Output pages link to it.
 
 ## Calibration page
 

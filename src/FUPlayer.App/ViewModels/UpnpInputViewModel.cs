@@ -1,8 +1,10 @@
 using System.Diagnostics;
+using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using FUPlayer.App.Services;
 using FUPlayer.Core.Engine;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Settings;
 using FUPlayer.Core.Upnp;
 
@@ -27,7 +29,7 @@ public sealed partial class UpnpInputViewModel : ObservableObject
     private bool _hasStartError;
 
     [ObservableProperty]
-    private string _statusBadge = "OFF";
+    private string _statusBadge = Loc.T("OFF");
 
     [ObservableProperty]
     private string _statusText = string.Empty;
@@ -39,7 +41,7 @@ public sealed partial class UpnpInputViewModel : ObservableObject
     private bool _isReceiving;
 
     [ObservableProperty]
-    private string _transportBadge = "IDLE";
+    private string _transportBadge = Loc.T("IDLE");
 
     [ObservableProperty]
     private string _receivingText = string.Empty;
@@ -213,7 +215,7 @@ public sealed partial class UpnpInputViewModel : ObservableObject
             }
             catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
             {
-                FoobarNote = $"foobar2000 could not be started: {ex.Message}";
+                FoobarNote = Loc.F("foobar2000 could not be started: {0}", ex.Message);
             }
         }
     }
@@ -231,12 +233,12 @@ public sealed partial class UpnpInputViewModel : ObservableObject
             Foobar2000.AddEntry(path);
             RefreshFoobar();
             FoobarNote = _foobar is { IsRunning: true }
-                ? "Added. foobar2000 reads the list when it starts, so close it and open it again."
-                : "Added. foobar2000 takes it up the next time it starts.";
+                ? Loc.T("Added. foobar2000 reads the list when it starts, so close it and open it again.")
+                : Loc.T("Added. foobar2000 takes it up the next time it starts.");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            FoobarNote = $"The list could not be changed: {ex.Message}";
+            FoobarNote = Loc.F("The list could not be changed: {0}", ex.Message);
         }
     }
 
@@ -259,33 +261,37 @@ public sealed partial class UpnpInputViewModel : ObservableObject
         UpnpRendererSnapshot? snapshot = upnp.Snapshot;
         IsRunning = snapshot is not null;
         HasStartError = upnp.StartError is not null;
-        StatusBadge = IsRunning ? "ON" : HasStartError ? "ERROR" : "OFF";
+        StatusBadge = IsRunning ? Loc.T("ON") : HasStartError ? Loc.T("ERROR") : Loc.T("OFF");
         StatusText = snapshot is not null
-            ? $"Listed as \"{snapshot.FriendlyName}\" {(Settings.AllowNetworkControl ? "on the local network" : "on this computer only")}, port {upnp.Port}."
-                + (snapshot.Subscriptions > 0 ? $" {Plural(snapshot.Subscriptions, "controller")} following it." : string.Empty)
-            : upnp.StartError ?? "Off: controllers do not see the player.";
-        AddressesText = snapshot is null ? string.Empty : "Description at " + string.Join("  ·  ", snapshot.DescriptionUrls);
+            ? Loc.F(
+                Settings.AllowNetworkControl ? "Listed as \"{0}\" on the local network, port {1}." : "Listed as \"{0}\" on this computer only, port {1}.",
+                snapshot.FriendlyName, upnp.Port)
+                + (snapshot.Subscriptions > 0
+                    ? " " + Loc.F(snapshot.Subscriptions == 1 ? "{0} controller following it." : "{0} controllers following it.", snapshot.Subscriptions.ToString("N0", CultureInfo.CurrentCulture))
+                    : string.Empty)
+            : upnp.StartError ?? Loc.T("Off: controllers do not see the player.");
+        AddressesText = snapshot is null ? string.Empty : Loc.F("Description at {0}", string.Join("  ·  ", snapshot.DescriptionUrls));
 
         NetworkStreamStatus? stream = status.IsStream && status.State != EngineState.Stopped ? status.Stream : null;
         string state = snapshot?.TransportState ?? "NO_MEDIA_PRESENT";
         IsReceiving = stream is not null;
         TransportBadge = state switch
         {
-            "PLAYING" => "PLAYING",
-            "PAUSED_PLAYBACK" => "PAUSED",
-            "TRANSITIONING" => "OPENING",
-            "STOPPED" => "STOPPED",
-            _ => "IDLE",
+            "PLAYING" => Loc.T("PLAYING"),
+            "PAUSED_PLAYBACK" => Loc.T("PAUSED"),
+            "TRANSITIONING" => Loc.T("OPENING"),
+            "STOPPED" => Loc.T("STOPPED"),
+            _ => Loc.T("IDLE"),
         };
         HasStream = stream is not null || snapshot?.Uri is not null;
         ReceivingText = stream is not null
-            ? "Playing through the processing chain to the output device."
+            ? Loc.T("Playing through the processing chain to the output device.")
             : snapshot?.Uri is not null
-                ? "A controller has chosen a stream and not asked for it to play, or has stopped it."
-                : "Nothing yet. Choose this player as an output device in a controller, then play.";
+                ? Loc.T("A controller has chosen a stream and not asked for it to play, or has stopped it.")
+                : Loc.T("Nothing yet. Choose this player as an output device in a controller, then play.");
 
         StreamMetadata? metadata = stream?.Metadata ?? snapshot?.Metadata;
-        ControllerText = stream?.Controller ?? snapshot?.Controller ?? "-";
+        ControllerText = (stream?.Controller ?? snapshot?.Controller) is { } controller ? LiveSourceDescriber.DisplayController(controller) : "-";
         TrackText = metadata is { HasTrack: true }
             ? string.Join("  ·  ", new[] { metadata.Title, metadata.Artist, metadata.Album }.Where(s => !string.IsNullOrWhiteSpace(s)))
             : "-";
@@ -295,7 +301,10 @@ public sealed partial class UpnpInputViewModel : ObservableObject
                 + (status.Plan is { Source.IsValid: true } plan ? $"  ·  {plan.Source.Describe()}" : string.Empty)
             : "-";
         BufferText = stream is not null
-            ? $"{stream.BufferedSeconds:0.0} s ahead" + (stream.StarvedReads > 0 ? $"  ·  waited on the network {Plural(stream.StarvedReads, "time")}" : string.Empty)
+            ? Loc.F("{0} s ahead", stream.BufferedSeconds.ToString("0.0", CultureInfo.CurrentCulture))
+                + (stream.StarvedReads > 0
+                    ? "  ·  " + Loc.F(stream.StarvedReads == 1 ? "waited on the network {0} time" : "waited on the network {0} times", stream.StarvedReads.ToString("N0", CultureInfo.CurrentCulture))
+                    : string.Empty)
             : "-";
         ReceiveError = snapshot?.Error;
 
@@ -315,25 +324,22 @@ public sealed partial class UpnpInputViewModel : ObservableObject
 
     private void RefreshFoobarText()
     {
-        FoobarText = $"In foobar2000, open File › Preferences › Playback › Output and choose \"{EffectiveName}\" as the device. "
-            + "What foobar2000 plays then comes here, and its volume and mute follow along when the setting above allows it. "
-            + "Choose a local device there again to play through foobar2000 alone.";
-        FoobarBitsText = "foobar2000 sends 16 bits to a renderer until told otherwise: under Preferences › Playback › Output › Devices, "
-            + $"set Bits to 24 on the \"{EffectiveName}\" row. The format it arrives in shows under Receiving above.";
+        FoobarText = Loc.F(
+            "In foobar2000, open File › Preferences › Playback › Output and choose \"{0}\" as the device. What foobar2000 plays then comes here, and its volume and mute follow along when the setting above allows it. Choose a local device there again to play through foobar2000 alone.",
+            EffectiveName);
+        FoobarBitsText = Loc.F(
+            "foobar2000 sends 16 bits to a renderer until told otherwise: under Preferences › Playback › Output › Devices, set Bits to 24 on the \"{0}\" row. The format it arrives in shows under Receiving above.",
+            EffectiveName);
         FoobarFormatText = _foobar switch
         {
             { IsConfigured: true } =>
-                "foobar2000 knows this player: it sends FLAC, and pauses the stream rather than stopping it.",
+                Loc.T("foobar2000 knows this player: it sends FLAC, and pauses the stream rather than stopping it."),
             { ConfigPath: not null } =>
-                "Until foobar2000 knows this player it treats it like any renderer it has never heard of: it sends WAV, "
-                + "and pausing stops the stream. Adding the player to foobar2000's list of renderers lets it send FLAC and pause.",
+                Loc.T("Until foobar2000 knows this player it treats it like any renderer it has never heard of: it sends WAV, and pausing stops the stream. Adding the player to foobar2000's list of renderers lets it send FLAC and pause."),
             _ =>
-                "foobar2000 writes its list of renderers the first time its UPnP output runs. Choose this player as its output "
-                + "device once, then come back here to add it to that list, so foobar2000 sends FLAC rather than WAV.",
+                Loc.T("foobar2000 writes its list of renderers the first time its UPnP output runs. Choose this player as its output device once, then come back here to add it to that list, so foobar2000 sends FLAC rather than WAV."),
         };
     }
-
-    private static string Plural(long count, string noun) => count == 1 ? $"1 {noun}" : $"{count:N0} {noun}s";
 
     private static void OpenWithShell(string path)
     {

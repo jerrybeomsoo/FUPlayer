@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Settings;
 
 namespace FUPlayer.App.Controls;
@@ -107,7 +108,7 @@ public sealed class SpectrogramView : Control
         AnalyzerFrame? frame = _frame;
         if (frame is null || _lanes.Count == 0 || bounds.Width < ScaleWidth + 80 || bounds.Height < 40)
         {
-            AnalyzerDrawing.DrawHint(context, _text, bounds, "The spectrogram appears here during playback");
+            AnalyzerDrawing.DrawHint(context, _text, bounds, Loc.T("The spectrogram appears here during playback"));
             return;
         }
 

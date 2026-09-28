@@ -1,4 +1,4 @@
-﻿<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:FUPlayer.App.ViewModels"
              xmlns:controls="using:FUPlayer.App.Controls"
@@ -6,11 +6,21 @@
              x:DataType="vm:DspStudioViewModel">
   <ScrollViewer Classes="page">
     <StackPanel Margin="28,22,28,28" Spacing="18">
-      <StackPanel Spacing="4">
-        <TextBlock Classes="h1" Text="DSP studio" />
-        <TextBlock Classes="secondary" TextWrapping="Wrap"
-                   Text="Decide how every file is converted before it reaches the DAC. Changes reach the playing track within a moment." />
-      </StackPanel>
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+        <StackPanel Spacing="4">
+          <TextBlock Classes="h1" Text="DSP studio" />
+          <TextBlock Classes="secondary" TextWrapping="Wrap"
+                     Text="Decide how every file is converted before it reaches the DAC. Changes reach the playing track within a moment." />
+        </StackPanel>
+        <Button Grid.Column="1" Classes="subtle" VerticalAlignment="Top"
+                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).NavigateCommand}" CommandParameter="Glossary"
+                ToolTip.Tip="Plain explanations of the terms on this page">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <controls:LineIcon Data="{x:Static controls:Icons.Glossary}" Width="16" Height="16" />
+            <TextBlock Text="Explain the terms" />
+          </StackPanel>
+        </Button>
+      </Grid>
 
       <Border Classes="card" Padding="18,14">
         <Grid ColumnDefinitions="Auto,Auto,*">

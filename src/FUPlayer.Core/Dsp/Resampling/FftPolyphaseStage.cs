@@ -3,6 +3,7 @@ using FUPlayer.Core.Audio;
 using FUPlayer.Core.Dsp.Acceleration;
 using FUPlayer.Core.Dsp.Design;
 using FUPlayer.Core.Dsp.Numerics;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Resampling;
 
@@ -115,8 +116,7 @@ public sealed class FftPolyphaseStage : IRateStage
         }
 
         DelayOutputSamples = FirDesign.PeakIndex(prototype);
-        Description = $"{name} ({PrototypeLength:N0} taps, {TapsPerPhase:N0} per phase, " +
-            $"{Partitions:N0} × {FftSize:N0}-point FFT)";
+        Description = Loc.F("{0} ({1:N0} taps, {2:N0} per phase, {3:N0} × {4:N0}-point FFT)", name, PrototypeLength, TapsPerPhase, Partitions, FftSize);
 
         // One forward transform per block, one inverse per phase, plus the partition multiply-accumulates.
         CostPerOutputSample = PartitionPlan.LevelCost(BlockSamples, Partitions, up);

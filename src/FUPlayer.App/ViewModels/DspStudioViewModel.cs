@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -12,6 +12,7 @@ using FUPlayer.Core.Dsp.Quantization;
 using FUPlayer.Core.Dsp.Resampling;
 using FUPlayer.Core.Dsp.Restoration;
 using FUPlayer.Core.Engine;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Output;
 using FUPlayer.Core.Settings;
 
@@ -47,7 +48,7 @@ public sealed partial class FilterOptionViewModel(FilterPreset preset, DspStudio
     {
         if (preset.Family == FilterFamily.None)
         {
-            return "no conversion";
+            return Loc.T("no conversion");
         }
 
         var parts = new List<string> { preset.PhaseLabel };
@@ -58,17 +59,17 @@ public sealed partial class FilterOptionViewModel(FilterPreset preset, DspStudio
 
         if (preset.Apodizing)
         {
-            parts.Add("apodizing");
+            parts.Add(Loc.T("apodizing"));
         }
 
         if (preset.EarlyRollOff)
         {
-            parts.Add("above 48 kHz");
+            parts.Add(Loc.T("above 48 kHz"));
         }
 
         if (preset.IntegerRatioOnly)
         {
-            parts.Add("integer ratios");
+            parts.Add(Loc.T("integer ratios"));
         }
 
         return string.Join("  ·  ", parts);
@@ -465,7 +466,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
         ArgumentNullException.ThrowIfNull(status);
         string verdict = status.State == EngineState.Stopped || status.Plan is not { } plan
             ? string.Empty
-            : $"Playing now: {Codec(plan.SourceCodec)}read as {(plan.SourceCoded ? "lossy" : "lossless")}.";
+            : Loc.F(plan.SourceCoded ? "Playing now: {0}read as lossy." : "Playing now: {0}read as lossless.", Codec(plan.SourceCodec));
         if (verdict == _sourceVerdict)
         {
             return;
@@ -527,7 +528,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
     ];
 
     public IReadOnlyList<Choice> AnalysisRateChoices { get; } =
-        new[] { 44_100, 48_000, 88_200, 96_000, 176_400, 192_000 }.Select(r => new Choice(AudioRates.Format(r) + " source", r)).ToArray();
+        new[] { 44_100, 48_000, 88_200, 96_000, 176_400, 192_000 }.Select(r => new Choice(Loc.F("{0} source", AudioRates.Format(r)), r)).ToArray();
 
     public IReadOnlyList<FilterGroupViewModel> FilterGroups { get; }
 
@@ -541,13 +542,13 @@ public sealed partial class DspStudioViewModel : ObservableObject
 
     public string ModeDescription => SelectedMode?.Description ?? string.Empty;
 
-    public string FilterCardTitle => IsDsdMode ? "Filter feeding the modulator" : "Resampling filter";
+    public string FilterCardTitle => IsDsdMode ? Loc.T("Filter feeding the modulator") : Loc.T("Resampling filter");
 
     public string FilterCardDescription => SelectedMode?.Value switch
     {
-        OutputMode.Dsd => "Brings PCM files up to the modulator rate. Separate from the PCM output filter.",
-        OutputMode.FollowSource => "Used for PCM files. DSD files keep their own path.",
-        _ => "Used for every file played as PCM. Separate from the filter used for DSD output.",
+        OutputMode.Dsd => Loc.T("Brings PCM files up to the modulator rate. Separate from the PCM output filter."),
+        OutputMode.FollowSource => Loc.T("Used for PCM files. DSD files keep their own path."),
+        _ => Loc.T("Used for every file played as PCM. Separate from the filter used for DSD output."),
     };
 
     public bool IsFixedRate => SelectedRateSelection?.Value is RateSelection.Fixed;
@@ -560,8 +561,8 @@ public sealed partial class DspStudioViewModel : ObservableObject
     public bool HasBlockDelay => BlockDelayText != "-";
 
     public string LimiterDescription => Limiter
-        ? "Look-ahead peak limiter, 1 ms: holds inter-sample overs below full scale. Now playing counts engagements."
-        : "Off for lossless sources. Lossy codecs, captures, restored and upscaled audio stay limited: their overs are codec or network products that would alias above 40 kHz or destabilise a DSD modulator.";
+        ? Loc.T("Look-ahead peak limiter, 1 ms: holds inter-sample overs below full scale. Now playing counts engagements.")
+        : Loc.T("Off for lossless sources. Lossy codecs, captures, restored and upscaled audio stay limited: their overs are codec or network products that would alias above 40 kHz or destabilise a DSD modulator.");
 
     private PlayerSettings Settings => _services.Settings;
 
@@ -833,14 +834,14 @@ public sealed partial class DspStudioViewModel : ObservableObject
             LatencyText = analysis.LatencyMilliseconds.ToString("0.00", CultureInfo.CurrentCulture) + " ms";
             BlockDelayText = analysis.BlockDelayMilliseconds > 0
                 ? analysis.BlockDelayMilliseconds.ToString("0.00", CultureInfo.CurrentCulture) + " ms"
-                : "none";
+                : Loc.T("none");
             CostText = Formatting.Operations(analysis.OperationsPerSecond);
             CostFraction = Math.Clamp((Math.Log10(Math.Max(1, analysis.OperationsPerSecond)) - 5) / 5, 0, 1);
             TapsText = analysis.Taps > 0 ? analysis.Taps.ToString("N0", CultureInfo.CurrentCulture) : "-";
             // Long filters convolve in the frequency domain; saying what the tap-by-tap route would have cost is
             // the only way the small figure above reads as a saving rather than as a filter that is not running.
             DirectCostText = analysis.DirectOperationsPerSecond > analysis.OperationsPerSecond * 1.5
-                ? "tap by tap: " + Formatting.Operations(analysis.DirectOperationsPerSecond)
+                ? Loc.F("tap by tap: {0}", Formatting.Operations(analysis.DirectOperationsPerSecond))
                 : string.Empty;
             StagesText = string.Join("  →  ", analysis.Stages);
         }
@@ -867,11 +868,11 @@ public sealed partial class DspStudioViewModel : ObservableObject
             try
             {
                 PlaybackPlan plan = OutputPlanner.Plan(format, settings, backend, capabilities);
-                rows.Add(new PlanPreviewRow(label, plan.Output.DescribeShort(), plan.FilterName, plan.QuantizerName, string.Join("  ", plan.Notes), plan.Output.IsDsd));
+                rows.Add(new PlanPreviewRow(Loc.T(label), plan.Output.DescribeShort(), plan.FilterName, plan.QuantizerName, string.Join("  ", plan.Notes), plan.Output.IsDsd));
             }
             catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException)
             {
-                rows.Add(new PlanPreviewRow(label, "Not playable", "-", "-", ex.Message, false));
+                rows.Add(new PlanPreviewRow(Loc.T(label), Loc.T("Not playable"), "-", "-", ex.Message, false));
             }
         }
 
@@ -898,13 +899,15 @@ public sealed partial class DspStudioViewModel : ObservableObject
             if (focused.EarlyRollOff && analysisRate < FilterCatalog.EarlyRollOffMinimumRate)
             {
                 analysed = FilterCatalog.Get(FilterCatalog.EarlyRollOffSubstituteId);
-                message = $"{focused.Name} only applies to files above 48 kHz; {AudioRates.Format(analysisRate)} files use {analysed.Name}, shown here. Pick a higher source rate to see the filter itself.";
+                message = Loc.F(
+                    "{0} only applies to files above 48 kHz; {1} files use {2}, shown here. Pick a higher source rate to see the filter itself.",
+                    focused.Name, AudioRates.Format(analysisRate), analysed.Name);
             }
 
             conversion = $"{AudioRates.Format(analysisRate)}  →  {AudioRates.Format(output)}";
             if (analysed.Family != FilterFamily.None && output != analysisRate && !ResamplerFactory.IsSupported(analysed, analysisRate, output))
             {
-                message = $"{analysed.Name} cannot perform this conversion, so {FilterCatalog.Get(FilterCatalog.FallbackId).Name} is used instead.";
+                message = Loc.F("{0} cannot perform this conversion, so {1} is used instead.", analysed.Name, FilterCatalog.Get(FilterCatalog.FallbackId).Name);
             }
             else
             {
@@ -921,12 +924,12 @@ public sealed partial class DspStudioViewModel : ObservableObject
                         });
                     if (analysed.Family == FilterFamily.None || output == analysisRate)
                     {
-                        message = "No rate conversion happens for this source with the current settings.";
+                        message = Loc.T("No rate conversion happens for this source with the current settings.");
                     }
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException or OutOfMemoryException)
                 {
-                    message = $"{analysed.Name} could not be analysed: {ex.Message}";
+                    message = Loc.F("{0} could not be analysed: {1}", analysed.Name, ex.Message);
                 }
             }
         }
@@ -941,7 +944,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
             ModulatorPreset modulator = ModulatorCatalog.Get(settings.Dsd.ModulatorId);
             int dsdRate = plan is { Output.IsDsd: true } ? plan.Output.DsdRate : AudioRates.DsdRate(Math.Min(256, settings.Dsd.HighestMultiplier), family48k: false);
             NoiseTransferFunction ntf = ModulatorCatalog.DesignNtf(modulator, dsdRate);
-            return NoiseCurve.From(ntf, dsdRate, $"{modulator.Name} modulator at DSD{AudioRates.DsdMultiplier(dsdRate)}");
+            return NoiseCurve.From(ntf, dsdRate, Loc.F("{0} modulator at DSD{1}", modulator.Name, AudioRates.DsdMultiplier(dsdRate)));
         }
 
         int rate = plan is { Output.IsDsd: false } ? plan.Output.SampleRate : 352_800;
@@ -950,13 +953,13 @@ public sealed partial class DspStudioViewModel : ObservableObject
         {
             double osr = Math.Max(1.05, rate / (2.0 * DitherCatalog.ShapingBandwidthHz));
             NoiseTransferFunction ntf = NoiseTransferFunction.Synthesize(dither.ShaperOrder, osr, dither.ShaperMaxGain, dither.OptimizeZeros);
-            return NoiseCurve.From(ntf, rate, $"{dither.Name} at {AudioRates.Format(rate)}");
+            return NoiseCurve.From(ntf, rate, Loc.F("{0} at {1}", dither.Name, AudioRates.Format(rate)));
         }
 
         return new NoiseCurve(
             [10.0, rate / 2.0],
             [0.0, 0.0],
-            $"{dither.Name} at {AudioRates.Format(rate)}: requantization noise is left spectrally flat.");
+            Loc.F("{0} at {1}: requantization noise is left spectrally flat.", dither.Name, AudioRates.Format(rate)));
     }
 
     private void UpdatePlot()
@@ -978,7 +981,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
             PlotYFormat = PlotAxisFormat.Decibels;
             PlotYMinimum = Math.Max(-220, Math.Floor(_noise.MagnitudeDb.Min() / 20) * 20);
             PlotYMaximum = 20;
-            PlotSeries = [new PlotSeries("Noise transfer", _noise.Frequencies, _noise.MagnitudeDb, Palette.AccentDsd)];
+            PlotSeries = [new PlotSeries(Loc.T("Noise transfer"), _noise.Frequencies, _noise.MagnitudeDb, Palette.AccentDsd)];
             PlotMarkers = [new PlotMarker(20_000, "20 kHz", Palette.Warning)];
             AnalysisSummary = _noise.Summary;
             return;
@@ -1004,8 +1007,8 @@ public sealed partial class DspStudioViewModel : ObservableObject
                 PlotYMinimum = -Math.Clamp(
                     (FocusedFilter?.Preset.AttenuationDb ?? 120) + (FocusedFilter?.Preset.Family == FilterFamily.NuttallSinc ? 100 : 40), 100, 280);
                 PlotYMaximum = 10;
-                PlotSeries = [new PlotSeries("Magnitude", analysis.Magnitude.Frequencies, analysis.Magnitude.MagnitudeDb, Palette.Accent)];
-                PlotMarkers = [new PlotMarker(sourceNyquist, "source fs/2", Palette.Warning)];
+                PlotSeries = [new PlotSeries(Loc.T("Magnitude"), analysis.Magnitude.Frequencies, analysis.Magnitude.MagnitudeDb, Palette.Accent)];
+                PlotMarkers = [new PlotMarker(sourceNyquist, Loc.T("source fs/2"), Palette.Warning)];
                 break;
 
             case AnalysisView.Passband:
@@ -1016,7 +1019,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
                 PlotXMaximum = sourceNyquist * 1.1;
                 PlotYMinimum = -3;
                 PlotYMaximum = 0.5;
-                PlotSeries = [new PlotSeries("Magnitude (dB)", analysis.Magnitude.Frequencies, analysis.Magnitude.MagnitudeDb, Palette.Accent)];
+                PlotSeries = [new PlotSeries(Loc.T("Magnitude (dB)"), analysis.Magnitude.Frequencies, analysis.Magnitude.MagnitudeDb, Palette.Accent)];
                 PlotMarkers = [new PlotMarker(20_000, "20 kHz", Palette.TextSecondary), new PlotMarker(sourceNyquist, "fs/2", Palette.Warning)];
                 break;
 
@@ -1024,16 +1027,16 @@ public sealed partial class DspStudioViewModel : ObservableObject
                 PlotXScale = PlotAxisScale.Linear;
                 PlotXFormat = PlotAxisFormat.Milliseconds;
                 PlotYFormat = PlotAxisFormat.Plain;
-                PlotSeries = [new PlotSeries("Impulse", analysis.TimeMilliseconds, Normalize(analysis.Impulse), Palette.Accent, 1.3)];
-                PlotMarkers = [new PlotMarker(0, "peak", Palette.TextSecondary)];
+                PlotSeries = [new PlotSeries(Loc.T("Impulse"), analysis.TimeMilliseconds, Normalize(analysis.Impulse), Palette.Accent, 1.3)];
+                PlotMarkers = [new PlotMarker(0, Loc.T("peak"), Palette.TextSecondary)];
                 break;
 
             case AnalysisView.Step:
                 PlotXScale = PlotAxisScale.Linear;
                 PlotXFormat = PlotAxisFormat.Milliseconds;
                 PlotYFormat = PlotAxisFormat.Plain;
-                PlotSeries = [new PlotSeries("Step", analysis.TimeMilliseconds, analysis.Step, Palette.Accent)];
-                PlotMarkers = [new PlotMarker(0, "peak", Palette.TextSecondary)];
+                PlotSeries = [new PlotSeries(Loc.T("Step"), analysis.TimeMilliseconds, analysis.Step, Palette.Accent)];
+                PlotMarkers = [new PlotMarker(0, Loc.T("peak"), Palette.TextSecondary)];
                 break;
         }
     }
@@ -1072,7 +1075,9 @@ public sealed partial class DspStudioViewModel : ObservableObject
             }
 
             double inBandDb = 10.0 * Math.Log10(Math.Max(1e-30, power / bandPoints));
-            string summary = $"{title}: noise between 20 Hz and 20 kHz is {Formatting.Db(inBandDb, "0")} relative to unshaped quantization; the rise above the band is capped at a gain of {ntf.MaxGain.ToString("0.00", CultureInfo.CurrentCulture)}.";
+            string summary = Loc.F(
+                "{0}: noise between 20 Hz and 20 kHz is {1} relative to unshaped quantization; the rise above the band is capped at a gain of {2}.",
+                title, Formatting.Db(inBandDb, "0"), ntf.MaxGain.ToString("0.00", CultureInfo.CurrentCulture));
             return new NoiseCurve(frequencies, magnitude, summary);
         }
     }

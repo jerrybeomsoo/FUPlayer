@@ -1,4 +1,5 @@
 using FUPlayer.Core.Dsp.Design;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Resampling;
 
@@ -26,14 +27,25 @@ public enum PolynomialKind
 /// <summary>A user-selectable oversampling / resampling filter.</summary>
 public sealed record FilterPreset
 {
+    private readonly string _name = string.Empty;
+    private readonly string _group = string.Empty;
+    private readonly string _description = string.Empty;
+
     public required string Id { get; init; }
 
-    public required string Name { get; init; }
+    /// <summary>The name in the interface's language, with the phase variant's addition.</summary>
+    public required string Name { get => Loc.T(_name) + Loc.T(NameVariant); init => _name = value; }
 
     /// <summary>UI grouping.</summary>
-    public required string Group { get; init; }
+    public required string Group { get => Loc.T(_group); init => _group = value; }
 
-    public required string Description { get; init; }
+    public required string Description { get => Loc.T(_description) + Loc.T(DescriptionVariant); init => _description = value; }
+
+    /// <summary>What a phase variant adds to the name of the filter it is a variant of: " (minimum phase)".</summary>
+    public string NameVariant { get; init; } = string.Empty;
+
+    /// <summary>What a phase variant adds to the description: a sentence on where its ringing goes.</summary>
+    public string DescriptionVariant { get; init; } = string.Empty;
 
     public FilterFamily Family { get; init; }
 
@@ -77,9 +89,9 @@ public sealed record FilterPreset
 
     public string PhaseLabel => Phase switch
     {
-        PhaseResponse.Minimum => "minimum phase",
-        PhaseResponse.Intermediate => "intermediate phase",
-        _ => "linear phase",
+        PhaseResponse.Minimum => Loc.T("minimum phase"),
+        PhaseResponse.Intermediate => Loc.T("intermediate phase"),
+        _ => Loc.T("linear phase"),
     };
 }
 
@@ -193,7 +205,7 @@ public static class FilterCatalog
         });
         list.Add(new FilterPreset
         {
-            Id = "short-fir-mp", Name = "Short FIR · low ringing (minimum phase)", Group = "Low ringing", Family = FilterFamily.LowRinging,
+            Id = "short-fir-mp", Name = "Short FIR · low ringing", NameVariant = NameSuffix(PhaseResponse.Minimum), Group = "Low ringing", Family = FilterFamily.LowRinging,
             Phase = PhaseResponse.Minimum, PassbandFraction = 0.55, StopbandFraction = 1.45, AttenuationDb = 80,
             Description = "The short FIR in minimum phase: nothing rings before a transient.",
         });
@@ -234,9 +246,9 @@ public static class FilterCatalog
         {
             list.Add(new FilterPreset
             {
-                Id = id + Suffix(phase), Name = name + NameSuffix(phase), Group = "Kaiser-windowed sinc", Family = FilterFamily.Sinc, Phase = phase,
+                Id = id + Suffix(phase), Name = name, NameVariant = NameSuffix(phase), Group = "Kaiser-windowed sinc", Family = FilterFamily.Sinc, Phase = phase,
                 PassbandFraction = pass, StopbandFraction = stop, AttenuationDb = attenuation,
-                Description = description + PhaseNote(phase),
+                Description = description, DescriptionVariant = PhaseNote(phase),
             });
         }
     }
@@ -247,9 +259,9 @@ public static class FilterCatalog
         {
             list.Add(new FilterPreset
             {
-                Id = id + Suffix(phase), Name = name + NameSuffix(phase), Group = "Gaussian-windowed sinc", Family = FilterFamily.GaussianSinc, Phase = phase,
+                Id = id + Suffix(phase), Name = name, NameVariant = NameSuffix(phase), Group = "Gaussian-windowed sinc", Family = FilterFamily.GaussianSinc, Phase = phase,
                 PassbandFraction = pass, StopbandFraction = stop, AttenuationDb = attenuation, Apodizing = apodizing, EarlyRollOff = early,
-                Description = description + PhaseNote(phase),
+                Description = description, DescriptionVariant = PhaseNote(phase),
             });
         }
     }
@@ -260,10 +272,10 @@ public static class FilterCatalog
         {
             list.Add(new FilterPreset
             {
-                Id = id + Suffix(phase), Name = name + NameSuffix(phase), Group = "Nuttall-windowed sinc", Family = FilterFamily.NuttallSinc,
+                Id = id + Suffix(phase), Name = name, NameVariant = NameSuffix(phase), Group = "Nuttall-windowed sinc", Family = FilterFamily.NuttallSinc,
                 Window = window, Phase = phase, PassbandFraction = pass, StopbandFraction = 1.0,
                 AttenuationDb = FirDesign.CosineSumAttenuationDb,
-                Description = description + PhaseNote(phase),
+                Description = description, DescriptionVariant = PhaseNote(phase),
             });
         }
     }

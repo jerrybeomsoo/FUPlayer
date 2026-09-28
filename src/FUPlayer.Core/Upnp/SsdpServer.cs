@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Upnp;
 
@@ -80,7 +81,7 @@ internal sealed class SsdpServer : IDisposable
         if (_interfaces.Count == 0)
         {
             listener.Dispose();
-            throw new InvalidOperationException("No network interface could join the UPnP discovery group.");
+            throw new InvalidOperationException(Loc.T("No network interface could join the UPnP discovery group."));
         }
 
         _listener = listener;

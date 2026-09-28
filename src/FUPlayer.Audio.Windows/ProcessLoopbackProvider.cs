@@ -4,6 +4,7 @@ using FUPlayer.Audio.Windows.Interop;
 using FUPlayer.Core.Audio;
 using FUPlayer.Core.Capture;
 using FUPlayer.Core.Decoding;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Audio.Windows;
 
@@ -31,7 +32,7 @@ public sealed class ProcessLoopbackProvider : ICaptureProvider
 
     public string? UnsupportedReason => IsSupported
         ? null
-        : "Capturing one application's audio needs Windows 10 build 20348 or later.";
+        : Loc.T("Capturing one application's audio needs Windows 10 build 20348 or later.");
 
     public IReadOnlyList<CaptureTarget> List()
     {

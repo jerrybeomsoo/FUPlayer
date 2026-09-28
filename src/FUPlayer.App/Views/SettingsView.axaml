@@ -1,4 +1,4 @@
-﻿<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:FUPlayer.App.ViewModels"
              xmlns:controls="using:FUPlayer.App.Controls"
@@ -10,6 +10,19 @@
         <TextBlock Classes="h1" Text="Settings" />
         <TextBlock Classes="secondary" Text="Playback behaviour, processing resources and information about this build." />
       </StackPanel>
+
+      <Border Classes="card">
+        <StackPanel>
+          <TextBlock Classes="h3" Text="Language" Margin="0,0,0,4" />
+          <controls:SettingRow Title="Interface language" Description="Terms without a settled translation keep their usual name; the Glossary page under Settings explains them.">
+            <ComboBox ItemsSource="{Binding LanguageChoices}" SelectedItem="{Binding SelectedLanguage}" Width="190" MinWidth="190" />
+          </controls:SettingRow>
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="0,6,0,0" IsVisible="{Binding IsRestartNeeded}">
+            <TextBlock Classes="secondary" TextWrapping="Wrap" VerticalAlignment="Center" Text="The new language is used when FUPlayer starts again." />
+            <Button Grid.Column="1" Classes="primary" Command="{Binding RestartNowCommand}" Content="Restart now" />
+          </Grid>
+        </StackPanel>
+      </Border>
 
       <Border Classes="card">
         <StackPanel>

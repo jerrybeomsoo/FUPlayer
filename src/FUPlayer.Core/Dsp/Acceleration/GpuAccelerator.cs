@@ -1,4 +1,5 @@
 using FUPlayer.Core.Dsp.Resampling;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Acceleration;
 
@@ -115,40 +116,39 @@ public sealed class GpuAccelerator : IDisposable
             {
                 string? reason = _failure ?? _verdict;
                 return reason is null
-                    ? "Filtering on the processor: no stage in this conversion can be offloaded."
-                    : $"Filtering on the processor: {Device.Name} was not used because {reason}.";
+                    ? Loc.T("Filtering on the processor: no stage in this conversion can be offloaded.")
+                    : Loc.F("Filtering on the processor: {0} was not used because {1}.", Device.Name, reason);
             }
 
             string precision = UsesDouble
-                ? "64-bit"
-                : $"32-bit, {20.0 * Math.Log10(Math.Max(_deviation, 1e-12)):0} dB from the processor result";
-            string extra = _failure is null ? string.Empty : $" One stage stayed on the processor: {_failure}.";
+                ? Loc.T("64-bit")
+                : Loc.F("32-bit, {0:0} dB from the processor result", 20.0 * Math.Log10(Math.Max(_deviation, 1e-12)));
+            string extra = _failure is null ? string.Empty : " " + Loc.F("One stage stayed on the processor: {0}.", _failure);
 
             // A filter the check could not reach is used only because the device was forced, and saying which
             // matters: this is the one case where the answers were never compared at all.
             string unchecked_ = _unchecked is null
                 ? string.Empty
-                : $" Output not compared with the processor: {_unchecked}.";
+                : " " + Loc.F("Output not compared with the processor: {0}.", _unchecked);
 
             // Forced against the measurement, the reading is the one thing worth saying: it is why the load went up.
-            string overruled = _overruled is null ? string.Empty : $" Forced: {_overruled}.";
+            string overruled = _overruled is null ? string.Empty : " " + Loc.F("Forced: {0}.", _overruled);
 
             // How the work is divided. Both are working at once on the same blocks: the device is given as
             // many of the phases as it turned out to be quickest with, and that is timed again as it plays, so
             // the number here is what was measured rather than anything decided in advance.
             int phases = StagePhases;
             double taken = DevicePhases;
-            string how = _share >= 0
-                ? $", the {_share}% requested"
-                : _retime ? ", re-measured during playback" : ", measured once at the start";
             string split = phases <= 0
                 ? string.Empty
                 : taken <= 0.0
-                    ? " No phases on it: every split was timed and none beat the processor alone, so the device " +
-                      "was released."
-                    : $" {taken:0.#} of {phases} phases on the device{how}; the processor convolves the rest of " +
-                      "the same blocks concurrently.";
-            return $"Filtering on {Device.Name} ({precision}).{split}{unchecked_}{extra}{overruled}";
+                    ? " " + Loc.T("No phases on it: every split was timed and none beat the processor alone, so the device was released.")
+                    : " " + (_share >= 0
+                        ? Loc.F("{0:0.#} of {1} phases on the device, the {2}% requested; the processor convolves the rest of the same blocks concurrently.", taken, phases, _share)
+                        : _retime
+                            ? Loc.F("{0:0.#} of {1} phases on the device, re-measured during playback; the processor convolves the rest of the same blocks concurrently.", taken, phases)
+                            : Loc.F("{0:0.#} of {1} phases on the device, measured once at the start; the processor convolves the rest of the same blocks concurrently.", taken, phases));
+            return Loc.F("Filtering on {0} ({1}).", Device.Name, precision) + split + unchecked_ + extra + overruled;
         }
     }
 
@@ -175,7 +175,7 @@ public sealed class GpuAccelerator : IDisposable
         GpuDevice? device = GpuRuntime.Resolve(deviceId);
         if (device is null)
         {
-            status = $"Filtering on the processor: {GpuRuntime.Unavailable ?? "no OpenCL device was found"}.";
+            status = Loc.F("Filtering on the processor: {0}.", GpuRuntime.Unavailable ?? Loc.T("no OpenCL device was found"));
             return null;
         }
 
@@ -188,7 +188,7 @@ public sealed class GpuAccelerator : IDisposable
         }
         catch (OpenClException ex)
         {
-            status = $"Filtering on the processor: {device.Name} could not be prepared ({ex.Message}).";
+            status = Loc.F("Filtering on the processor: {0} could not be prepared ({1}).", device.Name, ex.Message);
             return null;
         }
     }
@@ -304,7 +304,7 @@ public sealed class GpuAccelerator : IDisposable
                     // several block lengths to answer sooner is not something it can be given, and saying so is
                     // better than letting the panel report that there was nothing worth handing over.
                     case LayeredFftPolyphaseStage:
-                        _failure ??= "its filter is convolved in blocks of several lengths, which the device does not do";
+                        _failure ??= Loc.T("its filter is convolved in blocks of several lengths, which the device does not do");
                         break;
                 }
             }
@@ -449,8 +449,8 @@ public sealed class GpuAccelerator : IDisposable
             // worth giving it; a device that lost outright ends up with none of the channels anyway.
             _advantage = _advantage > 0.0 ? Math.Min(_advantage, advantage) : advantage;
             _verdict ??= advantage > 0.0
-                ? $"the processor convolves this filter {1.0 / advantage:0.0} times faster than it does"
-                : "the device produced nothing to time";
+                ? Loc.F("the processor convolves this filter {0:0.0} times faster than it does", 1.0 / advantage)
+                : Loc.T("the device produced nothing to time");
             return filter;
         }
         catch (OpenClException ex)
@@ -459,7 +459,7 @@ public sealed class GpuAccelerator : IDisposable
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or AccessViolationException)
         {
-            _failure ??= "the OpenCL driver failed while the filter was being prepared";
+            _failure ??= Loc.T("the OpenCL driver failed while the filter was being prepared");
         }
 
         filter?.Dispose();

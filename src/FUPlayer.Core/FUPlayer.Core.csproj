@@ -22,6 +22,11 @@
     <InternalsVisibleTo Include="FUPlayer.Core.Tests" />
   </ItemGroup>
 
+  <!-- The interface's translations, one JSON object of English text to translated text per language. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Localization\*.json" LogicalName="FUPlayer.Core.Localization.%(Filename).json" />
+  </ItemGroup>
+
   <!-- The FFmpeg build script, which "Download and build FFmpeg" runs from a copy of its own. -->
   <ItemGroup>
     <EmbeddedResource Include="..\..\build\ffmpeg\build-ffmpeg-lgpl.sh" LogicalName="FUPlayer.Core.build-ffmpeg-lgpl.sh" />

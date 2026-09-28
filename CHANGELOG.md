@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Korean interface** (한국어). Every page, message, filter, dither and modulator description, and the notes
+  the planner and engine write, in English or Korean. The player follows Windows' language when there is a
+  translation for it; *Settings › Language* changes it and offers to restart. Terms without a settled Korean word
+  keep their usual name and are explained where they appear.
+- **Glossary**, a page under Settings: 58 terms explained in plain words, in either language, with a search box.
+  The DSP studio and Output pages link to it.
+
+### Fixed
+
+- The Output page's capability labels had a fixed width that a longer label ran past.
+
 ## 0.3.0 — 2026-09-28
 
 ### Added

@@ -134,6 +134,14 @@ ASIO. Expect rough edges, and expect settings to move between versions.
   CPU and GPU measured during playback rather than assumed.
 - A device must reproduce the processor's own output before it is used for anything.
 
+**Interface**
+
+- English and Korean (한국어). The player follows Windows' language when there is a translation for it, and
+  *Settings › Language* changes it. Terms without a settled Korean word keep their usual name and are explained
+  where they appear.
+- A *Glossary* page under Settings explains 58 terms, from sample rate and dither to delta-sigma modulation and
+  group delay, in plain words, in either language.
+
 **Library and playback**
 
 - Folder-based library with tag reading, cover art, album and artist views, and a search syntax
@@ -222,6 +230,9 @@ The solution also opens in Visual Studio 2022 (17.14 or newer) and JetBrains Rid
 2. **DSP studio**: choose PCM or DSD output, then a filter and a filter length. Watch the group delay and the
    cost per channel as you change them.
 3. **Library**: add a music folder, or drag files onto the window.
+
+The interface is in English or Korean, following Windows; *Settings › Language* changes it, and the *Glossary*
+page under Settings explains the terms the other pages use.
 
 Settings live in `%APPDATA%\FUPlayer`. Deleting that folder resets everything.
 

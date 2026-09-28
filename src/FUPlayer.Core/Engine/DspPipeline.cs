@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using FUPlayer.Core.Audio;
@@ -12,6 +12,7 @@ using FUPlayer.Core.Dsp.Processing;
 using FUPlayer.Core.Dsp.Quantization;
 using FUPlayer.Core.Dsp.Resampling;
 using FUPlayer.Core.Dsp.Restoration;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Output;
 using FUPlayer.Core.Settings;
 
@@ -113,9 +114,10 @@ internal sealed class DspPipeline : IDisposable
         {
             _upscalerModel = ModelLibrary.TryLoadUpscaler(settings.Restoration.NeuralUpscalerPath, out string? upscalerFailure);
             UpscalerStatus = _upscalerModel is null
-                ? $"Neural upscaler not running: {upscalerFailure}"
-                : $"Neural upscaler: {Path.GetFileName(_upscalerModel.Path)} at {AudioRates.Format(plan.UpscaleRate)}"
-                    + (plan.Restore ? ", after the restorer" : string.Empty);
+                ? Loc.F("Neural upscaler not running: {0}", upscalerFailure)
+                : plan.Restore
+                    ? Loc.F("Neural upscaler: {0} at {1}, after the restorer", Path.GetFileName(_upscalerModel.Path), AudioRates.Format(plan.UpscaleRate))
+                    : Loc.F("Neural upscaler: {0} at {1}", Path.GetFileName(_upscalerModel.Path), AudioRates.Format(plan.UpscaleRate));
         }
 
         // The restorer runs at the source rate on both channels at once, so it sits in front of the per-channel
@@ -125,13 +127,14 @@ internal sealed class DspPipeline : IDisposable
             NeuralRestorerModel? restorerModel = ModelLibrary.TryLoadRestorer(settings.Restoration.NeuralRestorerPath, out string? restorerFailure);
             if (restorerModel is null)
             {
-                RestorerStatus = $"Neural restorer not running: {restorerFailure}";
+                RestorerStatus = Loc.F("Neural restorer not running: {0}", restorerFailure);
             }
             else
             {
                 _restorer = new NeuralRestorer(restorerModel, plan.Source.SampleRate);
-                RestorerStatus = $"Neural restorer: {Path.GetFileName(restorerModel.Path)} at {AudioRates.Format(plan.Source.SampleRate)}, "
-                    + $"{1000.0 * _restorer.Latency / plan.Source.SampleRate:0} ms";
+                RestorerStatus = Loc.F(
+                    "Neural restorer: {0} at {1}, {2:0} ms", Path.GetFileName(restorerModel.Path), AudioRates.Format(plan.Source.SampleRate),
+                    1000.0 * _restorer.Latency / plan.Source.SampleRate);
                 _restored = [new double[InputBlock], new double[InputBlock]];
                 if (settings.Restoration.OutputDelta)
                 {
@@ -184,17 +187,16 @@ internal sealed class DspPipeline : IDisposable
             int channelThreads = Math.Min(workers.Parallelism, _outputChannels);
             int total = channelThreads * stageParallelism;
             acceleration = total == 1
-                ? "Filtering on one processor thread."
-                : $"Filtering on {total} processor threads ({channelThreads} channels, {stageParallelism} each).";
+                ? Loc.T("Filtering on one processor thread.")
+                : Loc.F("Filtering on {0} processor threads ({1} channels, {2} each).", total, channelThreads, stageParallelism);
 
             // Asked for a device and got none: say that the conversion is the reason, not the device, and say
             // which conversion it is, since a filter layered to answer sooner is a choice that can be taken back.
             if (settings.Processing.GpuAcceleration)
             {
                 acceleration += resampler?.Stages.Any(s => s is LayeredFftPolyphaseStage) == true
-                    ? " The filter uses layered partitioning, which no graphics device accepts. Select one block" +
-                      " length to allow offload."
-                    : " No stage in this conversion can be offloaded.";
+                    ? " " + Loc.T("The filter uses layered partitioning, which no graphics device accepts. Select one block length to allow offload.")
+                    : " " + Loc.T("No stage in this conversion can be offloaded.");
             }
         }
 
@@ -363,7 +365,7 @@ internal sealed class DspPipeline : IDisposable
 
         LatencySeconds = latency;
         FilterBlockSeconds = BlockSecondsOf(resampler);
-        ResamplerSummary = resampler?.Summary ?? "DSD passed through unchanged";
+        ResamplerSummary = resampler?.Summary ?? Loc.T("DSD passed through unchanged");
         OperationsPerSecond = (resampler?.OperationsPerInputSecond ?? 0) + (interpolator?.OperationsPerInputSecond ?? 0);
         AccelerationSummary = _accelerator?.Status ?? acceleration;
     }
@@ -597,7 +599,7 @@ internal sealed class DspPipeline : IDisposable
             stages.Add(new HalfbandInterpolatorStage(rate, band, 120.0));
         }
 
-        return new ResamplerChain(plan.ProcessingRate, target, stages, "Modulator interpolation");
+        return new ResamplerChain(plan.ProcessingRate, target, stages, Loc.T("Modulator interpolation"));
     }
 
     /// <summary>

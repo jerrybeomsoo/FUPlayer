@@ -1,4 +1,5 @@
 using FUPlayer.Core.Dsp.Design;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Resampling;
 
@@ -57,7 +58,7 @@ public static class FilterAnalysis
             double[] frequencies = Enumerable.Range(0, points).Select(i => outputRate / 2.0 * i / (points - 1)).ToArray();
             return new FilterAnalysisResult
             {
-                Summary = "No rate conversion: the signal is passed through unchanged.",
+                Summary = Loc.T("No rate conversion: the signal is passed through unchanged."),
                 InputRate = inputRate,
                 OutputRate = outputRate,
                 Magnitude = new ResponseCurve(frequencies, new double[points], new double[points]),

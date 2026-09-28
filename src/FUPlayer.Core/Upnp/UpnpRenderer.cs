@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading.Channels;
 using System.Xml;
 using System.Xml.Linq;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Upnp;
 
@@ -217,7 +218,7 @@ public sealed class UpnpRenderer : IDisposable
             }
         }
 
-        throw new InvalidOperationException("No TCP port could be opened for the UPnP renderer.");
+        throw new InvalidOperationException(Loc.T("No TCP port could be opened for the UPnP renderer."));
     }
 
     private string DescriptionUrl(IPAddress address) => $"http://{address}:{Port}/description.xml";

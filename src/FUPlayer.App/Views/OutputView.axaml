@@ -18,10 +18,20 @@
 
   <ScrollViewer Classes="page">
     <StackPanel Margin="28,22,28,28" Spacing="18" MaxWidth="1000" HorizontalAlignment="Left">
-      <StackPanel Spacing="4">
-        <TextBlock Classes="h1" Text="Output" />
-        <TextBlock Classes="secondary" Text="Where the processed signal goes, and what that device can take." />
-      </StackPanel>
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+        <StackPanel Spacing="4">
+          <TextBlock Classes="h1" Text="Output" />
+          <TextBlock Classes="secondary" TextWrapping="Wrap" Text="Where the processed signal goes, and what that device can take." />
+        </StackPanel>
+        <Button Grid.Column="1" Classes="subtle" VerticalAlignment="Top"
+                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).NavigateCommand}" CommandParameter="Glossary"
+                ToolTip.Tip="Plain explanations of the terms on this page">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <controls:LineIcon Data="{x:Static controls:Icons.Glossary}" Width="16" Height="16" />
+            <TextBlock Text="Explain the terms" />
+          </StackPanel>
+        </Button>
+      </Grid>
 
       <Border Classes="card">
         <StackPanel>
@@ -75,7 +85,7 @@
               <TextBlock Text="Probing the device…" Classes="muted small" />
             </StackPanel>
           </Grid>
-          <Grid ColumnDefinitions="170,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="24" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
             <TextBlock Grid.Row="0" Text="PCM sample rates" Classes="muted" Margin="0,7,0,0" />
             <ItemsControl Grid.Row="0" Grid.Column="1" ItemsSource="{Binding PcmRates}" ItemTemplate="{StaticResource ChipTemplate}" ItemsPanel="{StaticResource WrapPanelTemplate}" />
             <TextBlock Grid.Row="1" Text="Sample formats" Classes="muted" Margin="0,7,0,0" />

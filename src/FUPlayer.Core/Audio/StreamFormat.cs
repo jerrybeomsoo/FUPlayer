@@ -1,3 +1,5 @@
+using FUPlayer.Core.Localization;
+
 namespace FUPlayer.Core.Audio;
 
 /// <summary>How the samples of a stream are encoded.</summary>
@@ -28,8 +30,8 @@ public readonly record struct StreamFormat(SampleEncoding Encoding, int SampleRa
     public bool IsValid => SampleRate > 0 && Channels > 0 && BitsPerSample > 0;
 
     public string Describe() => IsDsd
-        ? $"DSD{AudioRates.DsdMultiplier(SampleRate)} · {AudioRates.Format(SampleRate)} · {Channels} ch"
-        : $"PCM · {AudioRates.Format(SampleRate)} · {BitsPerSample}-bit · {Channels} ch";
+        ? Loc.F("DSD{0} · {1} · {2} ch", AudioRates.DsdMultiplier(SampleRate), AudioRates.Format(SampleRate), Channels)
+        : Loc.F("PCM · {0} · {1}-bit · {2} ch", AudioRates.Format(SampleRate), BitsPerSample, Channels);
 
     public string DescribeShort() => IsDsd
         ? $"DSD{AudioRates.DsdMultiplier(SampleRate)}/{Channels}"

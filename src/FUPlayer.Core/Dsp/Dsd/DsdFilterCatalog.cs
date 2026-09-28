@@ -1,15 +1,20 @@
 using FUPlayer.Core.Dsp.Design;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Dsd;
 
 /// <summary>Low-pass applied when a DSD stream is turned into PCM (removes DSD's shaped high-frequency noise).</summary>
 public sealed record DsdFilterPreset
 {
+    private readonly string _name = string.Empty;
+    private readonly string _description = string.Empty;
+
     public required string Id { get; init; }
 
-    public required string Name { get; init; }
+    /// <summary>The name in the interface's language.</summary>
+    public required string Name { get => Loc.T(_name); init => _name = value; }
 
-    public required string Description { get; init; }
+    public required string Description { get => Loc.T(_description); init => _description = value; }
 
     /// <summary>Passband edge for DSD64; scaled proportionally for higher DSD rates.</summary>
     public double PassbandHz { get; init; }

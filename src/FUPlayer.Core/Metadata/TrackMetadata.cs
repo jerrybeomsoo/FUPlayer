@@ -1,4 +1,5 @@
 using FUPlayer.Core.Audio;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Metadata;
 
@@ -55,7 +56,7 @@ public sealed record TrackMetadata
 
     public string DisplayTitle => string.IsNullOrWhiteSpace(Title) ? Path.GetFileNameWithoutExtension(FilePath) : Title;
 
-    public string DisplayArtist => FirstNonEmpty(Artist, AlbumArtist) ?? "Unknown artist";
+    public string DisplayArtist => FirstNonEmpty(Artist, AlbumArtist) ?? Loc.T("Unknown artist");
 
     public string DisplayAlbum => FirstNonEmpty(Album) ?? Path.GetFileName(Path.GetDirectoryName(FilePath)) ?? string.Empty;
 

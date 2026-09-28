@@ -1,6 +1,7 @@
 using FUPlayer.Core.Audio;
 using FUPlayer.Core.Decoding;
 using FUPlayer.Core.Dsp.Processing;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Engine;
 
@@ -39,7 +40,7 @@ internal sealed class TestToneDecoder : IAudioDecoder
 
     public bool CanSeek => false;
 
-    public string CodecName => "Pink noise";
+    public string CodecName => Loc.T("Pink noise");
 
     public static string UriFor(TestToneMode mode) => UriPrefix + (mode == TestToneMode.Rotating ? "rotate" : "all");
 

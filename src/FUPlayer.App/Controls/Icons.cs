@@ -24,6 +24,7 @@ public static class Icons
     public static readonly Geometry LiveInput = Parse("M4,9.5 H7 L11,6 V18 L7,14.5 H4 Z M14.5,12 H21 M18,9 L21,12 L18,15");
     public static readonly Geometry Upnp = Parse("M10.5,12 A1.5,1.5 0 1 0 13.5,12 A1.5,1.5 0 1 0 10.5,12 Z M7.8,8 C5.6,10.2 5.6,13.8 7.8,16 M16.2,8 C18.4,10.2 18.4,13.8 16.2,16 M5,5.2 C1.3,8.9 1.3,15.1 5,18.8 M19,5.2 C22.7,8.9 22.7,15.1 19,18.8");
     public static readonly Geometry Calibration = Parse("M12,2.5 V6 M12,18 V21.5 M2.5,12 H6 M18,12 H21.5 M5.5,12 A6.5,6.5 0 1 0 18.5,12 A6.5,6.5 0 1 0 5.5,12 Z M10.5,12 A1.5,1.5 0 1 0 13.5,12 A1.5,1.5 0 1 0 10.5,12 Z");
+    public static readonly Geometry Glossary = Parse("M12,6.5 C10,5 7,4.6 3.5,5 V18.5 C7,18.1 10,18.5 12,20 C14,18.5 17,18.1 20.5,18.5 V5 C17,4.6 14,5 12,6.5 Z M12,6.5 V20");
     public static readonly Geometry Settings = Parse("M4,6 H13 M17,6 H20 M15,4 V8 M4,12 H7 M11,12 H20 M9,10 V14 M4,18 H11 M15,18 H20 M13,16 V20");
     public static readonly Geometry Add = Parse("M12,5 V19 M5,12 H19");
     public static readonly Geometry Folder = Parse("M3,7 C3,5.9 3.9,5 5,5 H9 L11,7 H19 C20.1,7 21,7.9 21,9 V17 C21,18.1 20.1,19 19,19 H5 C3.9,19 3,18.1 3,17 Z");

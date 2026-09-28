@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using FUPlayer.App.Services;
 using FUPlayer.Core.Library;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Settings;
 
 namespace FUPlayer.App.ViewModels;
@@ -71,7 +72,7 @@ public sealed partial class AlbumViewModel : ObservableObject
             parts.Add(album.Year.ToString(CultureInfo.InvariantCulture));
         }
 
-        parts.Add($"{album.Tracks.Count} {(album.Tracks.Count == 1 ? "track" : "tracks")}");
+        parts.Add(Loc.F(album.Tracks.Count == 1 ? "{0} track" : "{0} tracks", album.Tracks.Count));
         parts.Add(Formatting.Time(album.Duration));
         Details = string.Join("  ·  ", parts);
 
@@ -86,7 +87,7 @@ public sealed partial class AlbumViewModel : ObservableObject
 
     public string Title => Album.Title;
 
-    public string Artist => Album.Artist;
+    public string Artist => LibraryViewModel.ShownArtist(Album.Artist);
 
     public string Format => Album.FormatSummary;
 
@@ -230,13 +231,13 @@ public sealed record LibraryGroup(string Name, int AlbumCount, int TrackCount)
 
     public string Count => IsAll ? string.Empty : AlbumCount.ToString(CultureInfo.InvariantCulture);
 
-    public static LibraryGroup All(int albums) => new("All", -1, 0) { Total = albums };
+    public static LibraryGroup All(int albums) => new(Loc.T("All"), -1, 0) { Total = albums };
 
     public int Total { get; private init; }
 
     public string Summary => IsAll
-        ? $"{Total} {(Total == 1 ? "album" : "albums")}"
-        : $"{AlbumCount} {(AlbumCount == 1 ? "album" : "albums")}  ·  {TrackCount} {(TrackCount == 1 ? "track" : "tracks")}";
+        ? Loc.F(Total == 1 ? "{0} album" : "{0} albums", Total)
+        : Loc.F(AlbumCount == 1 ? "{0} album" : "{0} albums", AlbumCount) + "  ·  " + Loc.F(TrackCount == 1 ? "{0} track" : "{0} tracks", TrackCount);
 }
 
 /// <summary>A row of album tiles (rows keep the grid virtualised).</summary>
@@ -382,7 +383,7 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
     private async Task AddFolderAsync()
     {
         bool added = false;
-        foreach (string folder in await _dialogs.PickFoldersAsync("Add music folders"))
+        foreach (string folder in await _dialogs.PickFoldersAsync(Loc.T("Add music folders")))
         {
             if (!Folders.Any(f => f.Path.Equals(folder, StringComparison.OrdinalIgnoreCase)))
             {
@@ -444,12 +445,12 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
         using var cancellation = new CancellationTokenSource();
         _scan = cancellation;
         IsScanning = true;
-        Status = "Scanning…";
+        Status = Loc.T("Scanning…");
         var progress = new Progress<LibraryScanProgress>(p =>
         {
             if (p.CurrentFolder is not null && _scan == cancellation)
             {
-                Status = $"Scanning…  {p.Tracks} tracks in {p.Folders} folders";
+                Status = Loc.F("Scanning…  {0} tracks in {1} folders", p.Tracks, p.Folders);
             }
         });
 
@@ -535,10 +536,10 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
 
         int tracks = all.Sum(a => a.Tracks.Count);
         Status = all.Count == 0
-            ? HasFolders ? "No music found in the library folders" : "Add a music folder to build your library"
+            ? HasFolders ? Loc.T("No music found in the library folders") : Loc.T("Add a music folder to build your library")
             : string.IsNullOrWhiteSpace(SearchText)
-                ? $"{all.Count} albums  ·  {tracks} tracks"
-                : $"{_filtered.Count} of {all.Count} albums";
+                ? Loc.F("{0} albums  ·  {1} tracks", all.Count, tracks)
+                : Loc.F("{0} of {1} albums", _filtered.Count, all.Count);
     }
 
     /// <summary>Artists or genres of the albums the search left, each with what it holds.</summary>
@@ -566,10 +567,16 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
 
         string Name(LibraryAlbum album)
         {
-            string value = byArtist ? album.Artist : album.Genre;
-            return value.Length > 0 ? value : byArtist ? "Unknown artist" : "No genre";
+            string value = byArtist ? ShownArtist(album.Artist) : album.Genre;
+            return value.Length > 0 ? value : byArtist ? Loc.T("Unknown artist") : Loc.T("No genre");
         }
     }
+
+    /// <summary>
+    /// An album artist as shown. The library's stand-ins for an album with no one artist are kept in English in its
+    /// saved index, so they are translated here rather than when the folder is scanned.
+    /// </summary>
+    internal static string ShownArtist(string artist) => artist is "Various artists" or "Unknown artist" ? Loc.T(artist) : artist;
 
     private void RebuildRows()
     {
@@ -577,12 +584,12 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
         if (IsBrowsingGroups && SelectedGroup is { IsAll: false } group)
         {
             bool byArtist = Browse is LibraryBrowse.Artists;
-            albums = _filtered.Where(a => Matches(byArtist ? a.Artist : a.Genre)).ToList();
+            albums = _filtered.Where(a => Matches(byArtist ? ShownArtist(a.Artist) : a.Genre)).ToList();
 
             bool Matches(string value) =>
                 value.Length > 0
                     ? value.Equals(group.Name, StringComparison.CurrentCultureIgnoreCase)
-                    : group.Name is "Unknown artist" or "No genre";
+                    : group.Name == Loc.T("Unknown artist") || group.Name == Loc.T("No genre");
         }
 
         int columns = Math.Max(1, Columns);

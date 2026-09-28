@@ -4,6 +4,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using FUPlayer.App.Services;
 using FUPlayer.App.ViewModels;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.App;
 
@@ -24,6 +25,11 @@ public partial class App : Application
             string[] args = desktop.Args ?? [];
             _services = new PlayerServices(OptionValue(args, "--settings-dir"));
             _services.RestoreQueue();
+
+            // The language, before anything is built that says something: "--language ko" for one run, otherwise
+            // the setting, otherwise Windows' own when there is a translation for it.
+            Loc.SetLanguage(OptionValue(args, "--language") ?? _services.Settings.Ui.Language);
+            LiteralTranslator.Install();
 
             var window = new MainWindow
             {

@@ -4,6 +4,7 @@ using FUPlayer.Core.Dsp.Modulation;
 using FUPlayer.Core.Dsp.Processing;
 using FUPlayer.Core.Dsp.Quantization;
 using FUPlayer.Core.Dsp.Resampling;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Output;
 using FUPlayer.Core.Settings;
 
@@ -18,12 +19,12 @@ public static class OutputPlanner
         int channels = Math.Clamp(settings.Output.Channels, 1, Math.Max(1, capabilities.MaxChannels));
         if (channels != settings.Output.Channels)
         {
-            notes.Add($"The device offers {capabilities.MaxChannels} channels; using {channels}.");
+            notes.Add(Loc.F("The device offers {0} channels; using {1}.", capabilities.MaxChannels, channels));
         }
 
         if (source.Channels > channels)
         {
-            notes.Add($"The source has {source.Channels} channels; only the first {channels} are played.");
+            notes.Add(Loc.F("The source has {0} channels; only the first {1} are played.", source.Channels, channels));
         }
 
         OutputMode mode = settings.Output.Mode == OutputMode.FollowSource
@@ -34,7 +35,7 @@ public static class OutputPlanner
         {
             if (!backend.IsBitPerfect)
             {
-                notes.Add($"{backend.DisplayName} mixes the signal, which would destroy DSD; playing PCM instead.");
+                notes.Add(Loc.F("{0} mixes the signal, which would destroy DSD; playing PCM instead.", backend.DisplayName));
             }
             else if (PlanDsd(source, settings, backend, capabilities, channels, notes) is { } dsd)
             {
@@ -42,7 +43,7 @@ public static class OutputPlanner
             }
             else
             {
-                notes.Add("The device accepts none of the configured DSD rates; playing PCM instead.");
+                notes.Add(Loc.T("The device accepts none of the configured DSD rates; playing PCM instead."));
             }
         }
 
@@ -66,13 +67,13 @@ public static class OutputPlanner
 
         if (plan.Source.SampleRate is not (44_100 or 48_000))
         {
-            notes.Add($"The neural restorer works at 44.1 and 48 kHz; {AudioRates.Format(plan.Source.SampleRate)} is played without it.");
+            notes.Add(Loc.F("The neural restorer works at 44.1 and 48 kHz; {0} is played without it.", AudioRates.Format(plan.Source.SampleRate)));
             return plan with { Notes = [.. plan.Notes, .. notes.Except(plan.Notes)] };
         }
 
         if (plan.Source.Channels > 2)
         {
-            notes.Add($"The neural restorer works on stereo and mono; {plan.Source.Channels} channels are played without it.");
+            notes.Add(Loc.F("The neural restorer works on stereo and mono; {0} channels are played without it.", plan.Source.Channels));
             return plan with { Notes = [.. plan.Notes, .. notes.Except(plan.Notes)] };
         }
 
@@ -108,7 +109,7 @@ public static class OutputPlanner
 
         if (!ResamplerFactory.IsSupported(plan.Filter, upscale, plan.ProcessingRate))
         {
-            notes.Add($"{plan.Filter.Name} cannot convert {AudioRates.Format(upscale)} to {AudioRates.Format(plan.ProcessingRate)}; the neural upscaler is not running.");
+            notes.Add(Loc.F("{0} cannot convert {1} to {2}; the neural upscaler is not running.", plan.Filter.Name, AudioRates.Format(upscale), AudioRates.Format(plan.ProcessingRate)));
             return plan;
         }
 
@@ -122,7 +123,7 @@ public static class OutputPlanner
         if (filter.EarlyRollOff && sourceRate < FilterCatalog.EarlyRollOffMinimumRate)
         {
             FilterPreset substitute = FilterCatalog.Get(FilterCatalog.EarlyRollOffSubstituteId);
-            notes.Add($"{filter.Name} is meant for sources above 48 kHz; {AudioRates.Format(sourceRate)} material uses {substitute.Name}.");
+            notes.Add(Loc.F("{0} is meant for sources above 48 kHz; {1} material uses {2}.", filter.Name, AudioRates.Format(sourceRate), substitute.Name));
             return substitute;
         }
 
@@ -147,7 +148,7 @@ public static class OutputPlanner
             {
                 filter = FilterCatalog.Get(FilterCatalog.FallbackId);
                 rate = ChooseRate(conversionRate, deviceRates, int.MaxValue, RateSelection.Automatic, 0, filter, notes);
-                notes.Add($"The device does not accept {AudioRates.Format(conversionRate)}; resampling with {filter.Name}.");
+                notes.Add(Loc.F("The device does not accept {0}; resampling with {1}.", AudioRates.Format(conversionRate), filter.Name));
             }
         }
         else
@@ -157,7 +158,7 @@ public static class OutputPlanner
             if (!ResamplerFactory.IsSupported(filter, conversionRate, rate))
             {
                 FilterPreset fallback = FilterCatalog.Get(FilterCatalog.FallbackId);
-                notes.Add($"{filter.Name} cannot convert {AudioRates.Format(conversionRate)} to {AudioRates.Format(rate)}; using {fallback.Name}.");
+                notes.Add(Loc.F("{0} cannot convert {1} to {2}; using {3}.", filter.Name, AudioRates.Format(conversionRate), AudioRates.Format(rate), fallback.Name));
                 filter = fallback;
             }
         }
@@ -165,7 +166,7 @@ public static class OutputPlanner
         (int validBits, int containerBits) = ChooseBits(pcm.DacBits, capabilities.ContainerBits);
         if (validBits < pcm.DacBits)
         {
-            notes.Add($"The device accepts at most {containerBits}-bit samples.");
+            notes.Add(Loc.F("The device accepts at most {0}-bit samples.", containerBits));
         }
 
         return new PlaybackPlan
@@ -201,7 +202,7 @@ public static class OutputPlanner
         bool native = settings.Output.DsdTransport == DsdTransport.Native && backend.SupportsNativeDsd && capabilities.NativeDsdRates.Count > 0;
         if (settings.Output.DsdTransport == DsdTransport.Native && !native)
         {
-            notes.Add("This output cannot take native DSD, so DSD travels inside PCM frames (DoP).");
+            notes.Add(Loc.T("This output cannot take native DSD, so DSD travels inside PCM frames (DoP)."));
         }
 
         int limit = Math.Clamp(dsd.HighestMultiplier, 64, 1024);
@@ -243,7 +244,7 @@ public static class OutputPlanner
             }
             else
             {
-                notes.Add($"DSD{limit} is not available; using DSD{AudioRates.DsdMultiplier(output.DsdRate)}.");
+                notes.Add(Loc.F("DSD{0} is not available; using DSD{1}.", limit, AudioRates.DsdMultiplier(output.DsdRate)));
             }
         }
 
@@ -255,7 +256,7 @@ public static class OutputPlanner
                 return new PlaybackPlan { Source = source, Output = direct, PassThrough = true, Notes = notes };
             }
 
-            notes.Add("Pass-through needs the file's own DSD rate at the output; converting it instead.");
+            notes.Add(Loc.T("Pass-through needs the file's own DSD rate at the output; converting it instead."));
         }
 
         int processingRate = Math.Min(AudioRates.FamilyBase(output.DsdRate) * 16, output.DsdRate / 4);
@@ -280,7 +281,7 @@ public static class OutputPlanner
             if (filter.Family == FilterFamily.None || !ResamplerFactory.IsSupported(filter, conversionRate, processingRate))
             {
                 FilterPreset fallback = FilterCatalog.Get(FilterCatalog.FallbackId);
-                notes.Add($"{filter.Name} cannot feed the modulator from {AudioRates.Format(conversionRate)}; using {fallback.Name}.");
+                notes.Add(Loc.F("{0} cannot feed the modulator from {1}; using {2}.", filter.Name, AudioRates.Format(conversionRate), fallback.Name));
                 filter = fallback;
             }
         }
@@ -288,7 +289,7 @@ public static class OutputPlanner
         ModulatorPreset modulator = ModulatorCatalog.Get(dsd.ModulatorId);
         if (AudioRates.DsdMultiplier(output.DsdRate) < modulator.MinimumDsdMultiplier)
         {
-            notes.Add($"{modulator.Name} is intended for DSD{modulator.MinimumDsdMultiplier} and above.");
+            notes.Add(Loc.F("{0} is intended for DSD{1} and above.", modulator.Name, modulator.MinimumDsdMultiplier));
         }
 
         return new PlaybackPlan
@@ -326,7 +327,7 @@ public static class OutputPlanner
             if (usable.Count == 0)
             {
                 usable = [deviceRates.Min()];
-                notes.Add("The rate limit is below every device rate; using the lowest rate the device accepts.");
+                notes.Add(Loc.T("The rate limit is below every device rate; using the lowest rate the device accepts."));
             }
         }
 
@@ -337,7 +338,7 @@ public static class OutputPlanner
                 return fixedRate;
             }
 
-            notes.Add($"The fixed rate {AudioRates.Format(fixedRate)} is not available; choosing automatically.");
+            notes.Add(Loc.F("The fixed rate {0} is not available; choosing automatically.", AudioRates.Format(fixedRate)));
         }
 
         int sameFamily = usable.FirstOrDefault(r => AudioRates.IsSameFamily(r, sourceRate));
@@ -348,7 +349,7 @@ public static class OutputPlanner
                 return sameFamily;
             }
 
-            notes.Add("No rate of the source's family is available; converting across rate families.");
+            notes.Add(Loc.T("No rate of the source's family is available; converting across rate families."));
             return usable[0];
         }
 

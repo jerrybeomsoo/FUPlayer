@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.Versioning;
 using Avalonia.Media.Imaging;
 using FUPlayer.Core.Engine;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Upnp;
 
 namespace FUPlayer.App.Services;
@@ -53,23 +54,23 @@ public sealed class LiveSourceDescriber
         if (_app.ProcessId != processId)
         {
             string? executable = AppIdentity.ExecutablePath(processId);
-            string name = executable is null ? $"Process {processId}" : Path.GetFileNameWithoutExtension(executable);
+            string name = executable is null ? Loc.F("Process {0}", processId) : Path.GetFileNameWithoutExtension(executable);
             _app = (processId, executable, AppIdentity.ProductName(executable, name), AppIdentity.Icon(executable));
         }
 
         string processName = _app.Executable is null ? string.Empty : Path.GetFileNameWithoutExtension(_app.Executable);
-        string details = $"Captured from {_app.Product}{Format(status)}";
+        string details = Loc.F("Captured from {0}", _app.Product) + Format(status);
         MediaSessionInfo? session = processName.Length > 0 ? await _sessions.FindAsync(app => Matches(app, processName)) : null;
         if (session is { HasTrack: true })
         {
-            return new LiveTrack(session.Title!, session.Artist ?? _app.Product, session.Album, details, "LIVE INPUT", Cover(session) ?? _app.Icon);
+            return new LiveTrack(session.Title!, session.Artist ?? _app.Product, session.Album, details, Loc.T("LIVE INPUT"), Cover(session) ?? _app.Icon);
         }
 
         // No session: the window title, which most players set to the track. An application that shows only its own
         // name there has nothing more to say, and the line underneath says it is live input.
         string? title = AppIdentity.WindowTitle(processId);
         bool meaningful = title is not null && !string.Equals(title, _app.Product, StringComparison.OrdinalIgnoreCase);
-        return new LiveTrack(meaningful ? title! : _app.Product, meaningful ? _app.Product : "Live input", null, details, "LIVE INPUT", _app.Icon);
+        return new LiveTrack(meaningful ? title! : _app.Product, meaningful ? _app.Product : Loc.T("Live input"), null, details, Loc.T("LIVE INPUT"), _app.Icon);
     }
 
     private async Task<LiveTrack> DescribeStreamAsync(PlaybackStatus status, NetworkStreamStatus stream)
@@ -78,7 +79,7 @@ public sealed class LiveSourceDescriber
         string product = ControllerProduct(controller);
         bool local = controller.EndsWith("on this computer", StringComparison.Ordinal);
         string source = "UPNP · " + product.ToUpperInvariant();
-        string details = $"{stream.Container} stream from {controller}{Format(status)}";
+        string details = Loc.F("{0} stream from {1}", stream.Container, DisplayController(controller)) + Format(status);
 
         // A controller on this computer usually publishes a media session with the track in it, which a stream of its
         // output does not carry: foobar2000's UPnP output calls every stream "foobar2000 audio stream".
@@ -95,7 +96,7 @@ public sealed class LiveSourceDescriber
             return new LiveTrack(metadata.Title ?? product, metadata.Artist ?? product, metadata.Album, details, source, await ArtAsync(metadata) ?? icon);
         }
 
-        return new LiveTrack($"Stream from {product}", controller, null, details, source, await ArtAsync(metadata) ?? icon);
+        return new LiveTrack(Loc.F("Stream from {0}", product), DisplayController(controller), null, details, source, await ArtAsync(metadata) ?? icon);
     }
 
     /// <summary>A session's application id against a program: "foobar2000.exe" for "foobar2000", or a packaged app that names it.</summary>
@@ -104,6 +105,22 @@ public sealed class LiveSourceDescriber
         && (app.Equals(program + ".exe", StringComparison.OrdinalIgnoreCase)
             || app.Equals(program, StringComparison.OrdinalIgnoreCase)
             || app.Contains(program, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// A controller as the renderer names it ("foobar2000 on this computer", "BubbleUPnP at 192.168.1.20"), in the
+    /// interface's language. The renderer's own wording stays English, because its log and this class read it.
+    /// </summary>
+    public static string DisplayController(string controller)
+    {
+        const string Local = " on this computer";
+        if (controller.EndsWith(Local, StringComparison.Ordinal))
+        {
+            return Loc.F("{0} on this computer", controller[..^Local.Length]);
+        }
+
+        int at = controller.LastIndexOf(" at ", StringComparison.Ordinal);
+        return at > 0 ? Loc.F("{0} at {1}", controller[..at], controller[(at + 4)..]) : controller;
+    }
 
     /// <summary>"foobar2000 on this computer" → "foobar2000"; "BubbleUPnP at 192.168.1.20" → "BubbleUPnP".</summary>
     private static string ControllerProduct(string controller)

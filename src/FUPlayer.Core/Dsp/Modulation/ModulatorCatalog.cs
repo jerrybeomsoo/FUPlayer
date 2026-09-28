@@ -1,16 +1,21 @@
 using System.Collections.Concurrent;
 using FUPlayer.Core.Dsp.Design;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Modulation;
 
 /// <summary>A selectable 1-bit delta-sigma modulator configuration.</summary>
 public sealed record ModulatorPreset
 {
+    private readonly string _name = string.Empty;
+    private readonly string _description = string.Empty;
+
     public required string Id { get; init; }
 
-    public required string Name { get; init; }
+    /// <summary>The name in the interface's language.</summary>
+    public required string Name { get => Loc.T(_name); init => _name = value; }
 
-    public required string Description { get; init; }
+    public required string Description { get => Loc.T(_description); init => _description = value; }
 
     public int Order { get; init; }
 

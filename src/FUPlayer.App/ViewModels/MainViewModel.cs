@@ -7,6 +7,7 @@ using FUPlayer.App.Controls;
 using FUPlayer.App.Services;
 using FUPlayer.Core.Dsp.Resampling;
 using FUPlayer.Core.Engine;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Metadata;
 using FUPlayer.Core.Playlists;
 using FUPlayer.Core.Settings;
@@ -22,7 +23,7 @@ public sealed partial class NavItem(string key, string title, Geometry icon, Obs
 
     public string Key { get; } = key;
 
-    public string Title { get; } = title;
+    public string Title { get; } = Loc.T(title);
 
     public Geometry Icon { get; } = icon;
 
@@ -72,10 +73,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _isActive;
 
     [ObservableProperty]
-    private string _trackTitle = "Nothing playing";
+    private string _trackTitle = Loc.T("Nothing playing");
 
     [ObservableProperty]
-    private string _trackSubtitle = "Pick an album in the library or drop files anywhere";
+    private string _trackSubtitle = Loc.T("Pick an album in the library or drop files anywhere");
 
     [ObservableProperty]
     private Bitmap? _cover;
@@ -147,7 +148,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _isDsdOutput;
 
     [ObservableProperty]
-    private string _deviceText = "Idle";
+    private string _deviceText = Loc.T("Idle");
 
     [ObservableProperty]
     private double _dspLoad;
@@ -180,6 +181,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         LiveInput = new LiveInputViewModel(services);
         UpnpInput = new UpnpInputViewModel(services);
         General = new SettingsViewModel(services);
+        Glossary = new GlossaryViewModel();
 
         NowPlayingNav = new NavItem("NowPlaying", "Now playing", Icons.NowPlaying, NowPlaying);
         QueueNav = new NavItem("Queue", "Queue", Icons.Queue, Queue);
@@ -190,7 +192,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         UpnpInputNav = new NavItem("UpnpInput", "UPnP input", Icons.Upnp, UpnpInput, isChild: true);
         CalibrationNav = new NavItem("Calibration", "Calibration", Icons.Calibration, Calibration);
         SettingsNav = new NavItem("Settings", "Settings", Icons.Settings, General);
-        Navigation = [NowPlayingNav, QueueNav, LibraryNav, LiveInputNav, UpnpInputNav, DspNav, OutputNav, CalibrationNav, SettingsNav];
+        GlossaryNav = new NavItem("Glossary", "Glossary", Icons.Glossary, Glossary, isChild: true);
+        Navigation = [NowPlayingNav, QueueNav, LibraryNav, LiveInputNav, UpnpInputNav, DspNav, OutputNav, CalibrationNav, SettingsNav, GlossaryNav];
         SelectedNav = Navigation.FirstOrDefault(n => n.Key == services.Settings.Ui.LastPage) ?? NowPlayingNav;
 
         PlaybackSettings playback = services.Settings.Playback;
@@ -231,6 +234,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public SettingsViewModel General { get; }
 
+    /// <summary>Plain explanations of the terms the other pages use.</summary>
+    public GlossaryViewModel Glossary { get; }
+
     public NavItem NowPlayingNav { get; }
 
     public NavItem QueueNav { get; }
@@ -248,6 +254,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public NavItem CalibrationNav { get; }
 
     public NavItem SettingsNav { get; }
+
+    public NavItem GlossaryNav { get; }
 
     public IReadOnlyList<NavItem> Navigation { get; }
 
@@ -511,20 +519,20 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (status.IsCapture && status.CaptureProcessId > 0)
         {
             // The application's name and track follow as soon as they have been looked up.
-            TrackTitle = "Live input";
-            TrackSubtitle = $"Process {status.CaptureProcessId}";
-            NowPlaying.SetPlaceholder(TrackTitle, TrackSubtitle, "LIVE INPUT");
+            TrackTitle = Loc.T("Live input");
+            TrackSubtitle = Loc.F("Process {0}", status.CaptureProcessId);
+            NowPlaying.SetPlaceholder(TrackTitle, TrackSubtitle, Loc.T("LIVE INPUT"));
         }
         else if (status.IsStream && status.Stream is { } stream)
         {
-            TrackTitle = "UPnP stream";
+            TrackTitle = Loc.T("UPnP stream");
             TrackSubtitle = stream.Controller;
-            NowPlaying.SetPlaceholder(TrackTitle, TrackSubtitle, "UPNP");
+            NowPlaying.SetPlaceholder(TrackTitle, TrackSubtitle, Loc.T("UPNP"));
         }
         else if (status.IsTestTone)
         {
-            TrackTitle = "Pink noise test signal";
-            TrackSubtitle = "Calibration  ·  −20 dBFS RMS";
+            TrackTitle = Loc.T("Pink noise test signal");
+            TrackSubtitle = Loc.T("Calibration  ·  −20 dBFS RMS");
             NowPlaying.SetPlaceholder(TrackTitle, TrackSubtitle);
         }
         else if (status.CurrentItem is { } item)
@@ -536,9 +544,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         else
         {
-            TrackTitle = "Nothing playing";
-            TrackSubtitle = "Pick an album in the library or drop files anywhere";
-            NowPlaying.SetPlaceholder(TrackTitle, "Pick an album in the library, or drop music files anywhere in this window.");
+            TrackTitle = Loc.T("Nothing playing");
+            TrackSubtitle = Loc.T("Pick an album in the library or drop files anywhere");
+            NowPlaying.SetPlaceholder(TrackTitle, Loc.T("Pick an album in the library, or drop music files anywhere in this window."));
         }
     }
 
@@ -615,7 +623,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             _ when active && status.IsTestTone => "∞",
 
             // A captured application or a stream has no length; its position is the time since it began.
-            _ when active && (status.IsCapture || status.IsStream) => "LIVE",
+            _ when active && (status.IsCapture || status.IsStream) => Loc.T("LIVE"),
             _ => "0:00",
         };
     }
@@ -634,7 +642,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         DeviceText = active && status.BackendName is not null
             ? $"{status.BackendName}  ·  {status.DeviceName}"
-            : "Idle";
+            : Loc.T("Idle");
         DspLoad = active ? Math.Clamp(status.DspLoad, 0, 1) : 0;
         DspLoadText = active ? Formatting.Percent(status.DspLoad) : "-";
         IsDspOverloaded = active && status.DspLoad > 0.9;
@@ -692,12 +700,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             // Tap by tap first, because it is the largest lever by far: a filter of several thousand taps a phase
             // costs a multiply-add for every one of them, where the frequency domain costs a transform.
-            string remedies = _services.Settings.Processing.Convolution == ConvolutionMode.TapByTap
-                ? "set Convolution to Frequency domain, which costs a transform rather than a multiply-add for every tap"
+            OverloadMessage = _services.Settings.Processing.Convolution == ConvolutionMode.TapByTap
+                ? Loc.T("Processing cannot keep up with this output, so the sound may drop out. In the DSP studio, set Convolution to Frequency domain, which costs a transform rather than a multiply-add for every tap.")
                 : status.Plan is { Output.IsDsd: true }
-                    ? "lower the highest DSD rate, choose a lighter modulator or filter, or use multi-stage filter staging"
-                    : "lower the highest PCM rate, choose a lighter filter, or use multi-stage filter staging";
-            OverloadMessage = $"Processing cannot keep up with this output, so the sound may drop out. In the DSP studio, {remedies}.";
+                    ? Loc.T("Processing cannot keep up with this output, so the sound may drop out. In the DSP studio, lower the highest DSD rate, choose a lighter modulator or filter, or use multi-stage filter staging.")
+                    : Loc.T("Processing cannot keep up with this output, so the sound may drop out. In the DSP studio, lower the highest PCM rate, choose a lighter filter, or use multi-stage filter staging.");
         }
         else if (calm)
         {

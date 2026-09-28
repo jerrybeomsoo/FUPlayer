@@ -2,6 +2,7 @@ using System.Numerics;
 using FUPlayer.Core.Audio;
 using FUPlayer.Core.Dsp.Design;
 using FUPlayer.Core.Dsp.Numerics;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Resampling;
 
@@ -120,7 +121,7 @@ public sealed class LayeredFftPolyphaseStage : IRateStage
         }
 
         DelayOutputSamples = FirDesign.PeakIndex(prototype);
-        Description = $"{name} ({PrototypeLength:N0} taps, {TapsPerPhase:N0} per phase, {plan})";
+        Description = Loc.F("{0} ({1:N0} taps, {2:N0} per phase, {3})", name, PrototypeLength, TapsPerPhase, plan);
         CostPerOutputSample = plan.CostPerOutputSample;
     }
 

@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
 using FUPlayer.Core.Dsp.Dsd;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Output;
 
@@ -22,9 +23,9 @@ public sealed class FileAudioBackend : IAudioBackend
 
     public string Id => BackendId;
 
-    public string DisplayName => "Render to file";
+    public string DisplayName => Loc.T("Render to file");
 
-    public string Description => "Writes the processed stream to WAV/RF64 (PCM, DoP) or DSF (native DSD) files.";
+    public string Description => Loc.T("Writes the processed stream to WAV/RF64 (PCM, DoP) or DSF (native DSD) files.");
 
     public bool IsAvailable => true;
 
@@ -37,7 +38,7 @@ public sealed class FileAudioBackend : IAudioBackend
     /// <summary>Path of the most recently created file.</summary>
     public string? LastFilePath { get; private set; }
 
-    public IReadOnlyList<AudioDevice> GetDevices() => [new AudioDevice(BackendId, "file", "Output folder", true)];
+    public IReadOnlyList<AudioDevice> GetDevices() => [new AudioDevice(BackendId, "file", Loc.T("Output folder"), true)];
 
     public DeviceCapabilities GetCapabilities(string? deviceId, int channels) => DeviceCapabilities.Unrestricted();
 

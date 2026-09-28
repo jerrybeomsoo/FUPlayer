@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using FUPlayer.Audio.Windows.Interop;
 using FUPlayer.Core.Audio;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Output;
 
 namespace FUPlayer.Audio.Windows;
@@ -22,11 +23,11 @@ public sealed class WasapiBackend : IAudioBackend
 
     public string Id => _exclusive ? ExclusiveId : SharedId;
 
-    public string DisplayName => _exclusive ? "WASAPI exclusive" : "WASAPI shared";
+    public string DisplayName => _exclusive ? Loc.T("WASAPI exclusive") : Loc.T("WASAPI shared");
 
     public string Description => _exclusive
-        ? "Bit-perfect output that bypasses the Windows mixer. DSD is sent as DoP."
-        : "Output through the Windows mixer at its mix rate. Convenient, but not bit-perfect.";
+        ? Loc.T("Bit-perfect output that bypasses the Windows mixer. DSD is sent as DoP.")
+        : Loc.T("Output through the Windows mixer at its mix rate. Convenient, but not bit-perfect.");
 
     public bool IsAvailable => true;
 
@@ -102,7 +103,7 @@ public sealed class WasapiBackend : IAudioBackend
         }
         catch (Exception ex) when (ex is COMException or InvalidOperationException or InvalidCastException)
         {
-            return new DeviceCapabilities { MaxChannels = 2, Notes = $"Could not query the device: {ex.Message}" };
+            return new DeviceCapabilities { MaxChannels = 2, Notes = Loc.F("Could not query the device: {0}", ex.Message) };
         }
         finally
         {
@@ -213,7 +214,7 @@ public sealed class WasapiBackend : IAudioBackend
             PcmRates = rates,
             ContainerBits = containers.ToArray(),
             Notes = rates.Count == 0
-                ? "The device accepted no exclusive-mode format. Make sure exclusive mode is allowed in the Windows sound device properties."
+                ? Loc.T("The device accepted no exclusive-mode format. Make sure exclusive mode is allowed in the Windows sound device properties.")
                 : null,
         };
     }
@@ -230,7 +231,7 @@ public sealed class WasapiBackend : IAudioBackend
                 MaxChannels = Math.Max(1, channels),
                 PcmRates = [rate],
                 ContainerBits = [32],
-                Notes = "Shared mode always plays at the Windows mix rate (set it in the device's advanced sound properties).",
+                Notes = Loc.T("Shared mode always plays at the Windows mix rate (set it in the device's advanced sound properties)."),
             };
         }
         finally
@@ -293,7 +294,7 @@ internal sealed unsafe class WasapiStream : IAudioStream
     {
         if (format.Kind == OutputSampleKind.NativeDsd)
         {
-            throw new NotSupportedException("WASAPI cannot carry native DSD; use DoP.");
+            throw new NotSupportedException(Loc.T("WASAPI cannot carry native DSD; use DoP."));
         }
 
         _deviceId = deviceId;
@@ -535,7 +536,7 @@ internal sealed unsafe class WasapiStream : IAudioStream
         }
 
         WasapiBackend.Release(client);
-        throw new InvalidOperationException($"The device does not accept {Format.Describe()} in exclusive mode.");
+        throw new InvalidOperationException(Loc.F("The device does not accept {0} in exclusive mode.", Format.Describe()));
     }
 
     private void FillBuffer(IAudioRenderClient render, int frames, byte[] canonical, int deviceBytesPerFrame)

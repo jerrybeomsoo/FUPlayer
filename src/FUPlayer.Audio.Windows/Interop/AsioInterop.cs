@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using FUPlayer.Audio.Windows;
+using FUPlayer.Core.Localization;
 using Microsoft.Win32;
 
 namespace FUPlayer.Audio.Windows.Interop;
@@ -148,13 +149,13 @@ internal sealed unsafe class AsioDriver : IDisposable
     {
         if (!Environment.Is64BitProcess)
         {
-            throw new PlatformNotSupportedException("ASIO support requires a 64-bit process.");
+            throw new PlatformNotSupportedException(Loc.T("ASIO support requires a 64-bit process."));
         }
 
         int hr = NativeMethods.CoCreateInstance(classId, IntPtr.Zero, NativeMethods.ClsCtxInprocServer, classId, out IntPtr instance);
         if (hr != 0 || instance == IntPtr.Zero)
         {
-            throw new COMException("Could not instantiate the ASIO driver.", hr);
+            throw new COMException(Loc.T("Could not instantiate the ASIO driver."), hr);
         }
 
         var driver = new AsioDriver(instance) { Name = name.Length > 0 ? name : classId.ToString("B") };

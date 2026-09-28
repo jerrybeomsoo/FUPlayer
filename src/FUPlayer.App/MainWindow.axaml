@@ -1,4 +1,4 @@
-﻿<Window xmlns="https://github.com/avaloniaui"
+<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:FUPlayer.App.ViewModels"
         xmlns:views="using:FUPlayer.App.Views"
@@ -108,6 +108,9 @@
         </Panel>
         <Panel IsVisible="{Binding SettingsNav.IsSelected}">
           <views:SettingsView DataContext="{Binding General}" />
+        </Panel>
+        <Panel IsVisible="{Binding GlossaryNav.IsSelected}">
+          <views:GlossaryView DataContext="{Binding Glossary}" />
         </Panel>
       </Panel>
     </Grid>

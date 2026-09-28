@@ -138,7 +138,7 @@ public sealed class EngineRendererHost : IUpnpRendererHost, IDisposable
     {
         lock (_gate)
         {
-            if (_requestedUri is not null && message.StartsWith(PlaybackEngine.NetworkStreamErrorPrefix, StringComparison.Ordinal))
+            if (_requestedUri is not null && PlaybackEngine.IsNetworkStreamError(message))
             {
                 _error = message;
             }

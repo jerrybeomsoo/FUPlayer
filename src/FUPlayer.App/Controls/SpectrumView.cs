@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Settings;
 
 namespace FUPlayer.App.Controls;
@@ -144,7 +145,7 @@ public sealed class SpectrumView : Control
 
         if (frame is null || _series.Length == 0)
         {
-            AnalyzerDrawing.DrawHint(context, _text, plot, "The spectrum appears here during playback");
+            AnalyzerDrawing.DrawHint(context, _text, plot, Loc.T("The spectrum appears here during playback"));
             return;
         }
 
@@ -153,7 +154,7 @@ public sealed class SpectrumView : Control
         {
             double x = X(nyquist);
             context.DrawRectangle(new SolidColorBrush(Color.FromArgb(0x50, 0, 0, 0)), null, new Rect(x, plot.Top, plot.Right - x, plot.Height));
-            _text.Draw(context, "above fs/2", new Point(x + 6, plot.Top + 4), 10, Palette.TextMuted);
+            _text.Draw(context, Loc.T("above fs/2"), new Point(x + 6, plot.Top + 4), 10, Palette.TextMuted);
         }
 
         if (frame.MarkerHz > axis.MinimumHz && frame.MarkerHz < frame.TopHz)

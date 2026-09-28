@@ -5,6 +5,7 @@ using Avalonia.Platform.Storage;
 using FUPlayer.App.Services;
 using FUPlayer.App.ViewModels;
 using FUPlayer.Core.Decoding;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Playlists;
 
 namespace FUPlayer.App;
@@ -26,14 +27,14 @@ public partial class MainWindow : Window, IDialogService
     {
         IReadOnlyList<IStorageFile> files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Add music files",
+            Title = Loc.T("Add music files"),
             AllowMultiple = true,
             FileTypeFilter =
             [
                 // Every format FUPlayer knows, not only the ones playable right now: an Ogg file that the
                 // picker will not even show is a puzzle, whereas one that reports a missing library is not.
-                new FilePickerFileType("Audio files") { Patterns = DecoderFactory.KnownExtensions.Select(Pattern).ToArray() },
-                new FilePickerFileType("Playlists") { Patterns = PlaylistFile.Extensions.Select(Pattern).ToArray() },
+                new FilePickerFileType(Loc.T("Audio files")) { Patterns = DecoderFactory.KnownExtensions.Select(Pattern).ToArray() },
+                new FilePickerFileType(Loc.T("Playlists")) { Patterns = PlaylistFile.Extensions.Select(Pattern).ToArray() },
                 FilePickerFileTypes.All,
             ],
         });
@@ -54,9 +55,9 @@ public partial class MainWindow : Window, IDialogService
     {
         IReadOnlyList<IStorageFile> files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Open playlist",
+            Title = Loc.T("Open playlist"),
             AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("Playlists") { Patterns = PlaylistFile.Extensions.Select(Pattern).ToArray() }],
+            FileTypeFilter = [new FilePickerFileType(Loc.T("Playlists")) { Patterns = PlaylistFile.Extensions.Select(Pattern).ToArray() }],
         });
         return LocalPaths(files).FirstOrDefault();
     }
@@ -65,10 +66,10 @@ public partial class MainWindow : Window, IDialogService
     {
         IStorageFile? file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = "Save queue as playlist",
+            Title = Loc.T("Save queue as playlist"),
             SuggestedFileName = suggestedName,
             DefaultExtension = "m3u8",
-            FileTypeChoices = [new FilePickerFileType("M3U8 playlist") { Patterns = ["*.m3u8"] }],
+            FileTypeChoices = [new FilePickerFileType(Loc.T("M3U8 playlist")) { Patterns = ["*.m3u8"] }],
         });
         return file?.TryGetLocalPath();
     }

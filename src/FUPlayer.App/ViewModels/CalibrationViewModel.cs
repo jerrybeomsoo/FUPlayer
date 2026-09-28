@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using FUPlayer.App.Services;
 using FUPlayer.Core.Engine;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Settings;
 
 namespace FUPlayer.App.ViewModels;
@@ -40,7 +41,8 @@ public sealed partial class ChannelTrimViewModel : ObservableObject
 
     public int Index { get; }
 
-    public string Name => _trim.Name;
+    /// <summary>The speaker's name; the settings keep it in English.</summary>
+    public string Name => Loc.T(_trim.Name);
 
     public string Label => MeterChannelViewModel.LabelFor(Index, _owner.ChannelCount);
 
@@ -164,7 +166,7 @@ public sealed partial class CalibrationViewModel : ObservableObject
         foreach (ChannelTrimViewModel channel in Channels)
         {
             double delayMs = (farthest - (double)channel.DistanceCm) / SpeedOfSoundCmPerSecond * 1000.0;
-            channel.DelayText = delayMs.ToString("0.00", CultureInfo.CurrentCulture) + " ms delay";
+            channel.DelayText = Loc.F("{0} ms delay", delayMs.ToString("0.00", CultureInfo.CurrentCulture));
         }
     }
 }

@@ -5,6 +5,7 @@ using System.Text;
 using FUPlayer.Core.Audio;
 using FUPlayer.Core.Decoding.Flac;
 using FUPlayer.Core.Engine;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Decoding.Network;
 
@@ -127,7 +128,7 @@ public sealed class NetworkStreamDecoder : IAudioDecoder, ILiveSource
     {
         if (!Uri.TryCreate(uri, UriKind.Absolute, out Uri? address) || address.Scheme is not ("http" or "https"))
         {
-            throw new NotSupportedException($"Only http streams can be played from the network, not '{uri}'.");
+            throw new NotSupportedException(Loc.F("Only http streams can be played from the network, not '{0}'.", uri));
         }
 
         TimeSpan limit = timeout ?? TimeSpan.FromSeconds(8);
@@ -144,7 +145,7 @@ public sealed class NetworkStreamDecoder : IAudioDecoder, ILiveSource
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
             {
-                throw new IOException($"The stream at {address} could not be opened: {ex.Message}", ex);
+                throw new IOException(Loc.F("The stream at {0} could not be opened: {1}", address, ex.Message), ex);
             }
         }
 
@@ -152,7 +153,7 @@ public sealed class NetworkStreamDecoder : IAudioDecoder, ILiveSource
         {
             int status = (int)response.StatusCode;
             response.Dispose();
-            throw new IOException($"The stream at {address} answered {status}.");
+            throw new IOException(Loc.F("The stream at {0} answered {1}.", address, status));
         }
 
         ReadAhead? source = null;
@@ -174,7 +175,7 @@ public sealed class NetworkStreamDecoder : IAudioDecoder, ILiveSource
             Span<byte> magic = stackalloc byte[4];
             if (stream.ReadAtLeast(magic, 4, throwOnEndOfStream: false) < 4)
             {
-                throw new InvalidDataException($"The stream at {address} ended before it began.");
+                throw new InvalidDataException(Loc.F("The stream at {0} ended before it began.", address));
             }
 
             stream.Position -= 4;
@@ -197,7 +198,9 @@ public sealed class NetworkStreamDecoder : IAudioDecoder, ILiveSource
 
                 default:
                     throw new NotSupportedException(
-                        $"The stream at {address} is {(mime.Length > 0 ? mime : "in a format that is not recognised")}; the player takes FLAC, WAV and LPCM streams.");
+                        mime.Length > 0
+                            ? Loc.F("The stream at {0} is {1}; the player takes FLAC, WAV and LPCM streams.", address, mime)
+                            : Loc.F("The stream at {0} is in a format that is not recognised; the player takes FLAC, WAV and LPCM streams.", address));
             }
         }
         catch

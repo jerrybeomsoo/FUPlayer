@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using FUPlayer.Audio.Windows.Interop;
 using FUPlayer.Core.Audio;
 using FUPlayer.Core.Dsp.Dsd;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Output;
 
 namespace FUPlayer.Audio.Windows;
@@ -21,7 +22,7 @@ public sealed class AsioBackend : IAudioBackend
 
     public string DisplayName => "ASIO";
 
-    public string Description => "Professional low-latency drivers. Native DSD where the driver supports ASIO DSD mode, DoP otherwise.";
+    public string Description => Loc.T("Professional low-latency drivers. Native DSD where the driver supports ASIO DSD mode, DoP otherwise.");
 
     public bool IsAvailable => Environment.Is64BitProcess && AsioDriver.EnumerateInstalled().Count > 0;
 
@@ -41,7 +42,7 @@ public sealed class AsioBackend : IAudioBackend
         AsioDriverEntry? entry = Find(deviceId);
         if (entry is null)
         {
-            return new DeviceCapabilities { MaxChannels = 2, Notes = "No ASIO driver is installed." };
+            return new DeviceCapabilities { MaxChannels = 2, Notes = Loc.T("No ASIO driver is installed.") };
         }
 
         if (AsioStream.ActiveDriver == entry.ClassId)
@@ -49,7 +50,7 @@ public sealed class AsioBackend : IAudioBackend
             // Loading a second instance of a driver that is streaming can disturb it: reuse the last probe.
             return CapabilityCache.TryGetValue(entry.ClassId, out DeviceCapabilities? cached)
                 ? cached
-                : new DeviceCapabilities { MaxChannels = channels, Notes = "The driver is currently streaming." };
+                : new DeviceCapabilities { MaxChannels = channels, Notes = Loc.T("The driver is currently streaming.") };
         }
 
         try
@@ -71,13 +72,13 @@ public sealed class AsioBackend : IAudioBackend
         }
         catch (Exception ex) when (ex is COMException or PlatformNotSupportedException or InvalidOperationException)
         {
-            return new DeviceCapabilities { MaxChannels = 2, Notes = $"The ASIO driver could not be queried: {ex.Message}" };
+            return new DeviceCapabilities { MaxChannels = 2, Notes = Loc.F("The ASIO driver could not be queried: {0}", ex.Message) };
         }
     }
 
     public IAudioStream OpenStream(string? deviceId, OutputFormat format, AudioStreamOptions options, IAudioRenderSource source)
     {
-        AsioDriverEntry entry = Find(deviceId) ?? throw new InvalidOperationException("No ASIO driver is installed.");
+        AsioDriverEntry entry = Find(deviceId) ?? throw new InvalidOperationException(Loc.T("No ASIO driver is installed."));
         return new AsioStream(entry, format, options, source);
     }
 
@@ -127,9 +128,9 @@ public sealed class AsioBackend : IAudioBackend
 
     private static string? ProbeNotes(bool nativeDsd, bool floatSamples) => (nativeDsd, floatSamples) switch
     {
-        (false, false) => "The driver does not offer native DSD; DSD output uses DoP.",
-        (false, true) => "The driver takes floating-point samples and has no native DSD mode, so DSD output is not possible (DoP needs exact 24-bit samples). PCM output works.",
-        (true, true) => "The driver takes floating-point samples, so DSD always uses its native DSD mode rather than DoP.",
+        (false, false) => Loc.T("The driver does not offer native DSD; DSD output uses DoP."),
+        (false, true) => Loc.T("The driver takes floating-point samples and has no native DSD mode, so DSD output is not possible (DoP needs exact 24-bit samples). PCM output works."),
+        (true, true) => Loc.T("The driver takes floating-point samples, so DSD always uses its native DSD mode rather than DoP."),
         _ => null,
     };
 
@@ -139,7 +140,7 @@ public sealed class AsioBackend : IAudioBackend
         using AsioDriver driver = AsioDriver.Load(entry.ClassId, entry.Name);
         if (!driver.Init(IntPtr.Zero))
         {
-            return new DeviceCapabilities { MaxChannels = 2, Notes = $"The driver did not initialise: {driver.GetErrorMessage()}" };
+            return new DeviceCapabilities { MaxChannels = 2, Notes = Loc.F("The driver did not initialise: {0}", driver.GetErrorMessage()) };
         }
 
         driver.GetChannels(out _, out int outputs);
@@ -148,7 +149,7 @@ public sealed class AsioBackend : IAudioBackend
             return new DeviceCapabilities
             {
                 MaxChannels = 2,
-                Notes = "The driver reports no output channels. Is the interface connected and switched on?",
+                Notes = Loc.T("The driver reports no output channels. Is the interface connected and switched on?"),
             };
         }
 
@@ -399,7 +400,7 @@ internal sealed unsafe class AsioStream : IAudioStream
     private static void OnSampleRateDidChange(double rate)
     {
         AsioTrace.Write($"driver callback: sample rate changed to {rate:0} Hz");
-        _active?.Fail(new InvalidOperationException($"The ASIO driver switched to {rate:0} Hz."));
+        _active?.Fail(new InvalidOperationException(Loc.F("The ASIO driver switched to {0:0} Hz.", rate)));
     }
 
     private static AsioCallbacks* CreateCallbacks()
@@ -424,7 +425,7 @@ internal sealed unsafe class AsioStream : IAudioStream
                 return 2;
             case AsioConstants.MessageResetRequest:
                 AsioTrace.Write("driver callback: reset requested");
-                _active?.Fail(new InvalidOperationException("The ASIO driver requested a reset (for example after a settings change)."));
+                _active?.Fail(new InvalidOperationException(Loc.T("The ASIO driver requested a reset (for example after a settings change).")));
                 return 1;
             case AsioConstants.MessageResyncRequest:
             case AsioConstants.MessageLatenciesChanged:
@@ -438,7 +439,7 @@ internal sealed unsafe class AsioStream : IAudioStream
     {
         if (!AsioConstants.Succeeded(error))
         {
-            throw new InvalidOperationException($"The ASIO driver could not {action} ({error}).");
+            throw new InvalidOperationException(Loc.F("The ASIO driver could not {0} ({1}).", Loc.T(action), error));
         }
     }
 
@@ -446,7 +447,7 @@ internal sealed unsafe class AsioStream : IAudioStream
     {
         if (_active is not null)
         {
-            throw new InvalidOperationException("Another ASIO stream is already open.");
+            throw new InvalidOperationException(Loc.T("Another ASIO stream is already open."));
         }
 
         _driver = AsioDriver.Load(_entry.ClassId, _entry.Name);
@@ -454,7 +455,7 @@ internal sealed unsafe class AsioStream : IAudioStream
         {
             if (!_driver.Init(_options.WindowHandle))
             {
-                throw new InvalidOperationException($"The ASIO driver did not initialise: {_driver.GetErrorMessage()}");
+                throw new InvalidOperationException(Loc.F("The ASIO driver did not initialise: {0}", _driver.GetErrorMessage()));
             }
 
             // Remember the rate the driver was running at, so the device is handed back the way it was found.
@@ -464,12 +465,12 @@ internal sealed unsafe class AsioStream : IAudioStream
             _driver.GetChannels(out _, out int outputs);
             if (_channels > MaxChannels)
             {
-                throw new InvalidOperationException($"ASIO output is limited to {MaxChannels} channels.");
+                throw new InvalidOperationException(Loc.F("ASIO output is limited to {0} channels.", MaxChannels));
             }
 
             if (_options.ChannelOffset + _channels > outputs)
             {
-                throw new InvalidOperationException($"The driver has {outputs} outputs; {_channels} channels starting at {_options.ChannelOffset} do not fit.");
+                throw new InvalidOperationException(Loc.F("The driver has {0} outputs; {1} channels starting at {2} do not fit.", outputs, _channels, _options.ChannelOffset));
             }
 
             bool dsd = Format.Kind == OutputSampleKind.NativeDsd;
@@ -477,7 +478,7 @@ internal sealed unsafe class AsioStream : IAudioStream
             {
                 if (!_driver.TrySetIoFormat(AsioConstants.IoFormatDsd))
                 {
-                    throw new NotSupportedException("The ASIO driver does not support native DSD; choose DoP.");
+                    throw new NotSupportedException(Loc.T("The ASIO driver does not support native DSD; choose DoP."));
                 }
             }
             else
@@ -487,7 +488,7 @@ internal sealed unsafe class AsioStream : IAudioStream
 
             if (!AsioConstants.Succeeded(_driver.CanSampleRate(Format.SampleRate)))
             {
-                throw new InvalidOperationException($"The ASIO driver cannot run at {AudioRates.Format(Format.SampleRate)}.");
+                throw new InvalidOperationException(Loc.F("The ASIO driver cannot run at {0}.", AudioRates.Format(Format.SampleRate)));
             }
 
             AsioTrace.Write($"setSampleRate({Format.SampleRate})");
@@ -533,22 +534,22 @@ internal sealed unsafe class AsioStream : IAudioStream
         bool isDsdType = _sampleType is AsioSampleType.DsdInt8Lsb1 or AsioSampleType.DsdInt8Msb1 or AsioSampleType.DsdInt8Ner8;
         if (dsd != isDsdType)
         {
-            throw new NotSupportedException($"The driver reports sample type {_sampleType} for this mode.");
+            throw new NotSupportedException(Loc.F("The driver reports sample type {0} for this mode.", _sampleType));
         }
 
         if (_sampleType is AsioSampleType.DsdInt8Ner8)
         {
-            throw new NotSupportedException("DSD Int8 NER8 buffers are not supported; choose DoP.");
+            throw new NotSupportedException(Loc.T("DSD Int8 NER8 buffers are not supported; choose DoP."));
         }
 
         if (!dsd && !AsioBackend.IsWritablePcm(_sampleType))
         {
-            throw new NotSupportedException($"ASIO sample type {_sampleType} is not supported.");
+            throw new NotSupportedException(Loc.F("ASIO sample type {0} is not supported.", _sampleType));
         }
 
         if (Format.Kind == OutputSampleKind.Dop && AsioBackend.IsFloat(_sampleType))
         {
-            throw new NotSupportedException("The driver takes floating-point samples, which cannot carry DoP reliably; use native DSD or PCM output.");
+            throw new NotSupportedException(Loc.T("The driver takes floating-point samples, which cannot carry DoP reliably; use native DSD or PCM output."));
         }
     }
 
@@ -684,7 +685,7 @@ internal sealed unsafe class AsioStream : IAudioStream
                         Unsafe.WriteUnaligned(target + f * 2, System.Buffers.Binary.BinaryPrimitives.ReverseEndianness((short)(sample >> 16)));
                         break;
                     default:
-                        throw new NotSupportedException($"ASIO sample type {_sampleType} is not supported.");
+                        throw new NotSupportedException(Loc.F("ASIO sample type {0} is not supported.", _sampleType));
                 }
             }
         }

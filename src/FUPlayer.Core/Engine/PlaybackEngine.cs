@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Threading.Channels;
 using FUPlayer.Core.Audio;
@@ -7,6 +7,7 @@ using FUPlayer.Core.Dsp.Analysis;
 using FUPlayer.Core.Decoding;
 using FUPlayer.Core.Decoding.Network;
 using FUPlayer.Core.Dsp.Dsd;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Metadata;
 using FUPlayer.Core.Output;
 using FUPlayer.Core.Playlists;
@@ -24,6 +25,8 @@ public sealed class PlaybackEngine : IDisposable
 {
     /// <summary>How an error about a network stream that could not be played begins, so its sender can be told.</summary>
     public const string NetworkStreamErrorPrefix = "The stream from ";
+
+    private const string NetworkStreamErrorFormat = "The stream from {0} could not be played: {1}";
 
     private const int MaxMarkers = 16;
 
@@ -235,7 +238,7 @@ public sealed class PlaybackEngine : IDisposable
         _capture is { IsSupported: true } ? _capture.List() : [];
 
     /// <summary>Why capture is unavailable, or null when it works.</summary>
-    public string? CaptureUnavailable => _capture is null ? "This build cannot capture an application." : _capture.UnsupportedReason;
+    public string? CaptureUnavailable => _capture is null ? Loc.T("This build cannot capture an application.") : _capture.UnsupportedReason;
 
     /// <summary>The bandwidth verdict as a line for the interface, or null while it is still measuring.</summary>
     private static string? Describe(DspPipeline? pipeline)
@@ -394,7 +397,7 @@ public sealed class PlaybackEngine : IDisposable
             }
             catch (Exception ex) when (IsRecoverable(ex))
             {
-                ReportError($"Playback stopped: {ex.Message}");
+                ReportError(Loc.F("Playback stopped: {0}", ex.Message));
                 try
                 {
                     StopInternal();
@@ -469,7 +472,7 @@ public sealed class PlaybackEngine : IDisposable
     {
         if (_streamFailure is { } failure)
         {
-            ReportError($"The audio device stopped: {failure}");
+            ReportError(Loc.F("The audio device stopped: {0}", failure));
             StopInternal();
             return;
         }
@@ -501,7 +504,7 @@ public sealed class PlaybackEngine : IDisposable
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException)
         {
-            ReportError($"Decoding failed: {ex.Message}");
+            ReportError(Loc.F("Decoding failed: {0}", ex.Message));
             count = 0;
         }
 
@@ -594,7 +597,7 @@ public sealed class PlaybackEngine : IDisposable
                 catch (Exception ex) when (IsRecoverable(ex))
                 {
                     decoder.Dispose();
-                    ReportError($"Playback could not start: {ex.Message}");
+                    ReportError(Loc.F("Playback could not start: {0}", ex.Message));
                     StopInternal();
                 }
 
@@ -616,7 +619,7 @@ public sealed class PlaybackEngine : IDisposable
     {
         if (_capture is null || !_capture.IsSupported)
         {
-            ReportError(CaptureUnavailable ?? "This build cannot capture an application.");
+            ReportError(CaptureUnavailable ?? Loc.T("This build cannot capture an application."));
             return;
         }
 
@@ -631,7 +634,7 @@ public sealed class PlaybackEngine : IDisposable
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
-            ReportError($"The capture could not restart: {ex.Message}");
+            ReportError(Loc.F("The capture could not restart: {0}", ex.Message));
             StopInternal();
         }
     }
@@ -653,7 +656,7 @@ public sealed class PlaybackEngine : IDisposable
         catch (Exception ex) when (IsRecoverable(ex))
         {
             _network = null;
-            ReportError($"{NetworkStreamErrorPrefix}{request.Controller} could not be played: {ex.Message}");
+            ReportError(Loc.F(NetworkStreamErrorFormat, request.Controller, ex.Message));
             StopInternal();
         }
     }
@@ -672,7 +675,7 @@ public sealed class PlaybackEngine : IDisposable
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
-            ReportError($"Test tone could not start: {ex.Message}");
+            ReportError(Loc.F("Test tone could not start: {0}", ex.Message));
             StopInternal();
         }
     }
@@ -690,7 +693,7 @@ public sealed class PlaybackEngine : IDisposable
         {
             // Some drivers advertise ASIO DSD mode but refuse it when a stream opens: fall back to DoP.
             _nativeDsdRefused = true;
-            ReportError($"Native DSD could not be started ({ex.Message}); sending DSD as DoP instead.");
+            ReportError(Loc.F("Native DSD could not be started ({0}); sending DSD as DoP instead.", ex.Message));
             plan = PlanFor(decoder);
             EnsureStream(plan);
         }
@@ -845,7 +848,7 @@ public sealed class PlaybackEngine : IDisposable
         catch (Exception ex) when (IsRecoverable(ex))
         {
             transition.Decoder.Dispose();
-            ReportError($"Playback could not continue: {ex.Message}");
+            ReportError(Loc.F("Playback could not continue: {0}", ex.Message));
             StopInternal();
         }
     }
@@ -1021,7 +1024,7 @@ public sealed class PlaybackEngine : IDisposable
             }
             catch (Exception ex) when (IsRecoverable(ex))
             {
-                ReportError($"The stream could not continue: {ex.Message}");
+                ReportError(Loc.F("The stream could not continue: {0}", ex.Message));
                 StopInternal();
             }
         }
@@ -1150,7 +1153,7 @@ public sealed class PlaybackEngine : IDisposable
             {
                 if (_capture is null || !_capture.IsSupported)
                 {
-                    throw new NotSupportedException(_capture?.UnsupportedReason ?? "This build cannot capture an application.");
+                    throw new NotSupportedException(_capture?.UnsupportedReason ?? Loc.T("This build cannot capture an application."));
                 }
 
                 decoder = _capture.Open(processId, _settings.Output.Channels, CaptureOptionsFor(_settings));
@@ -1221,7 +1224,7 @@ public sealed class PlaybackEngine : IDisposable
             {
                 Restore = false,
                 Limiter = settings.Processing.Limiter || coded || plan.UpscaleRate > 0,
-                Notes = [.. plan.Notes, "Neural restorer idle: lossless source."],
+                Notes = [.. plan.Notes, Loc.T("Neural restorer idle: lossless source.")],
             };
         }
 
@@ -1235,13 +1238,13 @@ public sealed class PlaybackEngine : IDisposable
         bool upscalerLossy = lossy && !plan.Restore;
         if (!upscalerLossy && plan.ProcessingRate < plan.UpscaleRate)
         {
-            string reason = plan.Restore ? "restored source" : "lossless source";
+            string reason = plan.Restore ? Loc.T("restored source") : Loc.T("lossless source");
             return plan with
             {
                 UpscaleRate = 0,
                 SourceIsLossy = false,
                 Limiter = settings.Processing.Limiter || coded || plan.Restore,
-                Notes = [.. plan.Notes, $"Neural upscaler idle: {reason}, output below {AudioRates.Format(plan.UpscaleRate)}."],
+                Notes = [.. plan.Notes, Loc.F("Neural upscaler idle: {0}, output below {1}.", reason, AudioRates.Format(plan.UpscaleRate))],
             };
         }
 
@@ -1543,6 +1546,18 @@ public sealed class PlaybackEngine : IDisposable
 
         _state = state;
         StateChanged?.Invoke(this, state);
+    }
+
+    /// <summary>
+    /// Whether an error the engine reported is about a network stream it was asked to play. The message is in the
+    /// interface's language, so this looks for the translated opening of that one message.
+    /// </summary>
+    public static bool IsNetworkStreamError(string message)
+    {
+        string format = Loc.T(NetworkStreamErrorFormat);
+        int hole = format.IndexOf("{0}", StringComparison.Ordinal);
+        string opening = hole > 0 ? format[..hole] : NetworkStreamErrorPrefix;
+        return message.StartsWith(opening, StringComparison.Ordinal);
     }
 
     private void ReportError(string message)

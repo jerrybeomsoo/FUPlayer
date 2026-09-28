@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using FUPlayer.App.Services;
 using FUPlayer.Audio.Windows;
 using FUPlayer.Core.Audio;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Output;
 using FUPlayer.Core.Settings;
 
@@ -21,17 +22,17 @@ public sealed class BackendChoice
         var traits = new List<string>();
         if (backend.IsBitPerfect)
         {
-            traits.Add("Bit-perfect");
+            traits.Add(Loc.T("Bit-perfect"));
         }
 
         if (backend.SupportsNativeDsd)
         {
-            traits.Add("Native DSD");
+            traits.Add(Loc.T("Native DSD"));
         }
 
         if (!IsAvailable)
         {
-            traits.Add("Not available");
+            traits.Add(Loc.T("Not available"));
         }
 
         Traits = string.Join("  ·  ", traits);
@@ -321,7 +322,7 @@ public sealed partial class OutputViewModel : ObservableObject
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                Avalonia.Threading.Dispatcher.UIThread.Post(() => Message = "The driver control panel could not be opened: " + ex.Message);
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => Message = Loc.F("The driver control panel could not be opened: {0}", ex.Message));
             }
         });
     }
@@ -329,7 +330,7 @@ public sealed partial class OutputViewModel : ObservableObject
     [RelayCommand]
     private async Task BrowseRenderDirectoryAsync()
     {
-        IReadOnlyList<string> folders = await _dialogs.PickFoldersAsync("Folder for rendered files");
+        IReadOnlyList<string> folders = await _dialogs.PickFoldersAsync(Loc.T("Folder for rendered files"));
         if (folders.Count > 0)
         {
             Settings.FileOutputDirectory = folders[0];
@@ -348,7 +349,7 @@ public sealed partial class OutputViewModel : ObservableObject
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
-            Message = "The folder could not be opened: " + ex.Message;
+            Message = Loc.F("The folder could not be opened: {0}", ex.Message);
         }
     }
 
@@ -386,8 +387,8 @@ public sealed partial class OutputViewModel : ObservableObject
     {
         VolumeSettings volume = _services.Settings.Volume;
         VolumeSummary = volume.IsBypassed
-            ? "Volume control is bypassed: the signal leaves at 0 dB, so use the amplifier or DAC volume."
-            : $"The knob covers {Formatting.Db(volume.MinimumDb)} to {Formatting.Db(volume.MaximumDb)}. Set both to 0 dB to bypass digital volume.";
+            ? Loc.T("Volume control is bypassed: the signal leaves at 0 dB, so use the amplifier or DAC volume.")
+            : Loc.F("The knob covers {0} to {1}. Set both to 0 dB to bypass digital volume.", Formatting.Db(volume.MinimumDb), Formatting.Db(volume.MaximumDb));
     }
 
     private async Task RefreshDevicesAsync(bool refreshCapabilities, bool allowProbe = true)
@@ -432,7 +433,7 @@ public sealed partial class OutputViewModel : ObservableObject
             _loading = false;
         }
 
-        Message = devices.Count == 0 ? "No devices were found for this output type." : string.Empty;
+        Message = devices.Count == 0 ? Loc.T("No devices were found for this output type.") : string.Empty;
         await RefreshCapabilitiesAsync(refreshCapabilities, allowProbe);
     }
 
@@ -479,7 +480,7 @@ public sealed partial class OutputViewModel : ObservableObject
         MaxChannelsText = capabilities.MaxChannels.ToString(CultureInfo.InvariantCulture);
         int[] dop = AudioRates.DsdMultipliers.Where(m => capabilities.SupportsDop(AudioRates.DsdRate(m, family48k: false))).ToArray();
         DopText = dop.Length == 0
-            ? "Not possible at the supported PCM rates"
+            ? Loc.T("Not possible at the supported PCM rates")
             : string.Join(", ", dop.Select(m => $"DSD{m.ToString(CultureInfo.InvariantCulture)} ({AudioRates.Format(AudioRates.DsdRate(m, family48k: false) / 16)})"));
         CapabilityNotes = capabilities.Notes ?? string.Empty;
         HasCapabilityNotes = !string.IsNullOrWhiteSpace(capabilities.Notes);

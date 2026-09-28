@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using Avalonia;
+using FUPlayer.App.Services;
 using FUPlayer.Core.Decoding;
 using FUPlayer.Core.Decoding.FFmpeg;
 using FUPlayer.Core.Dsp.Restoration;
@@ -23,6 +24,9 @@ internal static class Program
 
         // Somebody told to put a model in a folder should find the folder there.
         ModelLibrary.EnsureDirectory();
+
+        // Started by a restart: the player before this one is still closing.
+        AppRestart.WaitForPredecessor(args);
 
         try
         {

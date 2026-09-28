@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using FUPlayer.App.Services;
 using FUPlayer.Core.Decoding.FFmpeg;
 using FUPlayer.Core.Dsp.Acceleration;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Settings;
 
 namespace FUPlayer.App.ViewModels;
@@ -56,7 +57,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     private Choice? _selectedGpuDivision;
 
     [ObservableProperty]
-    private string _ffmpegStatus = "Checking…";
+    private string _ffmpegStatus = Loc.T("Checking…");
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanBuildFfmpeg), nameof(FfmpegBadge))]
@@ -102,16 +103,17 @@ public sealed partial class SettingsViewModel : ObservableObject
         PreventReplayGainClipping = settings.Playback.PreventReplayGainClipping;
         InvertPolarity = settings.Playback.InvertPolarity;
         SelectedTimeDisplay = Choice.Find(TimeDisplayChoices, settings.Playback.TimeDisplay);
+        SelectedLanguage = Choice.Find(LanguageChoices, settings.Ui.Language ?? string.Empty) ?? LanguageChoices[0];
 
         int threads = Math.Min(16, Environment.ProcessorCount);
         DspThreadChoices =
         [
-            new("Automatic", -1, $"One thread per channel; a partitioned filter spreads its phases over all {threads}."),
+            new("Automatic", -1, Loc.F("One thread per channel; a partitioned filter spreads its phases over all {0}.", threads)),
             new("Single thread", 0, "Every channel and every stage on the engine thread."),
             .. Enumerable.Range(1, threads).Select(n => new Choice(
-                $"{n} extra {(n == 1 ? "thread" : "threads")}",
+                Loc.F(n == 1 ? "{0} extra thread" : "{0} extra threads", n),
                 n,
-                $"{n + 1} threads total, shared between channels and filter phases.")),
+                Loc.F("{0} threads total, shared between channels and filter phases.", n + 1))),
         ];
         SelectedDspThreads = Choice.Find(DspThreadChoices, settings.Processing.DspThreads) ?? DspThreadChoices[0];
         SelectedFifo = Choice.Find(FifoChoices, settings.Processing.FifoMilliseconds) ?? FifoChoices[1];
@@ -133,13 +135,28 @@ public sealed partial class SettingsViewModel : ObservableObject
         GpuForce = settings.Processing.GpuForce;
         GpuStatus = HasGpuDevices
             ? string.Join(Environment.NewLine, GpuRuntime.Devices.Select(d => $"{d.Name}: {d.Summary}"))
-            : GpuRuntime.Unavailable ?? "No OpenCL device was found.";
+            : GpuRuntime.Unavailable ?? Loc.T("No OpenCL device was found.");
 
         string? version = typeof(SettingsViewModel).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         Version = version is null ? "0.1" : version.Split('+')[0];
         _ready = true;
         _ = CheckFfmpegAsync();
     }
+
+    /// <summary>Windows' own language, English and each translation, every one named in its own language.</summary>
+    public IReadOnlyList<Choice> LanguageChoices { get; } =
+    [
+        new("Same as Windows", string.Empty),
+        new("English", "en"),
+        .. Loc.Languages.Select(l => new Choice(l.Name, l.Code)),
+    ];
+
+    [ObservableProperty]
+    private Choice? _selectedLanguage;
+
+    /// <summary>The language chosen is not the one the interface was built in, which takes a restart.</summary>
+    [ObservableProperty]
+    private bool _isRestartNeeded;
 
     public IReadOnlyList<Choice> ReplayGainChoices { get; } =
     [
@@ -180,7 +197,7 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     /// <summary>What the FIFO is actually holding, once something is playing and the real format is known.</summary>
     [ObservableProperty]
-    private string _fifoSize = "No stream, no FIFO allocated.";
+    private string _fifoSize = Loc.T("No stream, no FIFO allocated.");
 
     /// <summary>
     /// Called from the frame timer while this page is shown. The engine's own ring is the honest figure: the
@@ -189,11 +206,11 @@ public sealed partial class SettingsViewModel : ObservableObject
     public void RefreshFifo(int bytes, double seconds)
     {
         FifoSize = bytes <= 0
-            ? "No stream, no FIFO allocated."
-            : string.Create(
-                System.Globalization.CultureInfo.CurrentCulture,
-                $"Allocated {bytes / (1024.0 * 1024.0):0.###} MiB, {seconds * 1000.0:N0} ms at the current " +
-                $"format. Rounded up to a power of two, and raised by the device buffer or a block-based filter.");
+            ? Loc.T("No stream, no FIFO allocated.")
+            : Loc.F(
+                "Allocated {0} MiB, {1} ms at the current format. Rounded up to a power of two, and raised by the device buffer or a block-based filter.",
+                (bytes / (1024.0 * 1024.0)).ToString("0.###", System.Globalization.CultureInfo.CurrentCulture),
+                (seconds * 1000.0).ToString("N0", System.Globalization.CultureInfo.CurrentCulture));
     }
 
     public IReadOnlyList<Choice> GpuDeviceChoices { get; }
@@ -242,7 +259,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// <summary>The build is offered once the check has found no FFmpeg, and not while one runs.</summary>
     public bool CanBuildFfmpeg => _ffmpegChecked && !IsFfmpegAvailable && !IsFfmpegBuilding;
 
-    public string FfmpegBadge => IsFfmpegAvailable ? "LOADED" : IsFfmpegBuilding ? "BUILDING" : "NOT INSTALLED";
+    public string FfmpegBadge => IsFfmpegAvailable ? Loc.T("LOADED") : IsFfmpegBuilding ? Loc.T("BUILDING") : Loc.T("NOT INSTALLED");
 
     public bool HasFfmpegError => FfmpegError is not null;
 
@@ -254,6 +271,22 @@ public sealed partial class SettingsViewModel : ObservableObject
     public string RuntimeDescription => $".NET {Environment.Version}  ·  {RuntimeInformation.OSDescription}  ·  {RuntimeInformation.ProcessArchitecture}";
 
     private PlayerSettings Settings => _services.Settings;
+
+    partial void OnSelectedLanguageChanged(Choice? value)
+    {
+        if (!_ready || value?.Value is not string code)
+        {
+            return;
+        }
+
+        // Nothing in the engine reads it: the interface is built in one language, and takes the next at a restart.
+        Settings.Ui.Language = code;
+        _services.NotifySettingsChanged(applyToEngine: false);
+        IsRestartNeeded = Loc.Resolve(code) != Loc.Language;
+    }
+
+    [RelayCommand]
+    private void RestartNow() => AppRestart.Restart();
 
     partial void OnGaplessChanged(bool value) => Update(() => Settings.Playback.Gapless = value);
 
@@ -367,9 +400,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         _ffmpegChecked = true;
         IsFfmpegAvailable = available;
         FfmpegStatus = available
-            ? $"{FFmpegLibrary.VersionDescription ?? "Loaded"}{(FFmpegLibrary.LoadedFrom is { } folder ? $", from {folder}" : string.Empty)}"
-            : "Not installed. FLAC, WAV, AIFF, DSF and DFF play without it; MP3, AAC, ALAC, Ogg Vorbis, Opus, WavPack and "
-              + "the rest need it.";
+            ? (FFmpegLibrary.VersionDescription ?? Loc.T("Loaded")) + (FFmpegLibrary.LoadedFrom is { } folder ? Loc.F(", from {0}", folder) : string.Empty)
+            : Loc.T("Not installed. FLAC, WAV, AIFF, DSF and DFF play without it; MP3, AAC, ALAC, Ogg Vorbis, Opus, WavPack and the rest need it.");
         FfmpegBuildDescription = DescribeBuild();
         OnPropertyChanged(nameof(CanBuildFfmpeg));
     }
@@ -377,16 +409,21 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// <summary>What pressing the button will do on this computer, before it is pressed.</summary>
     private static string DescribeBuild()
     {
-        string source = $"Downloads FFmpeg {FFmpegInstaller.FFmpegVersion}'s source from ffmpeg.org (12 MB) and builds its LGPL libraries on this computer";
+        string version = FFmpegInstaller.FFmpegVersion;
         if (!OperatingSystem.IsWindows())
         {
-            return $"{source} with the system's own compiler: gcc or clang, make and nasm need to be installed.";
+            return Loc.F(
+                "Downloads FFmpeg {0}'s source from ffmpeg.org (12 MB) and builds its LGPL libraries on this computer with the system's own compiler: gcc or clang, make and nasm need to be installed.",
+                version);
         }
 
         return FFmpegInstaller.FindInstalledMsys2() is { } msys
-            ? $"{source} with the MSYS2 installed at {msys}, adding its compiler if it lacks one. It takes a few minutes, and the player keeps playing meanwhile."
-            : $"{source}. The compiler comes from MSYS2, which it sets up for itself in {SafeToolsRoot()}: about 50 MB to download "
-              + "and 1 GB on disk once the compiler is in. The first build takes 10 minutes or more; the player keeps playing meanwhile.";
+            ? Loc.F(
+                "Downloads FFmpeg {0}'s source from ffmpeg.org (12 MB) and builds its LGPL libraries on this computer with the MSYS2 installed at {1}, adding its compiler if it lacks one. It takes a few minutes, and the player keeps playing meanwhile.",
+                version, msys)
+            : Loc.F(
+                "Downloads FFmpeg {0}'s source from ffmpeg.org (12 MB) and builds its LGPL libraries on this computer. The compiler comes from MSYS2, which it sets up for itself in {1}: about 50 MB to download and 1 GB on disk once the compiler is in. The first build takes 10 minutes or more; the player keeps playing meanwhile.",
+                version, SafeToolsRoot());
     }
 
     private static string SafeToolsRoot()
@@ -414,7 +451,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         IsFfmpegBuilding = true;
         FfmpegError = null;
         FfmpegDone = null;
-        FfmpegStage = "Starting";
+        FfmpegStage = Loc.T("Starting");
         FfmpegLine = string.Empty;
         IsFfmpegProgressKnown = false;
 
@@ -441,12 +478,12 @@ public sealed partial class SettingsViewModel : ObservableObject
             var installer = new FFmpegInstaller(new FFmpegInstallOptions(), progress);
             _ffmpegLogPath = installer.LogPath;
             await Task.Run(() => installer.RunAsync(cancellation.Token));
-            FfmpegDone = "FFmpeg is built and loaded. The files that need it play now, and the library is looking for the ones it passed over.";
+            FfmpegDone = Loc.T("FFmpeg is built and loaded. The files that need it play now, and the library is looking for the ones it passed over.");
             _services.NotifyFFmpegInstalled();
         }
         catch (OperationCanceledException)
         {
-            FfmpegError = "Stopped. Pressing the button again carries on from the download.";
+            FfmpegError = Loc.T("Stopped. Pressing the button again carries on from the download.");
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or InvalidDataException or HttpRequestException)
         {

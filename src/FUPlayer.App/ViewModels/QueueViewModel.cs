@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 using FUPlayer.App.Services;
 using FUPlayer.Core.Audio;
 using FUPlayer.Core.Engine;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Metadata;
 using FUPlayer.Core.Playlists;
 
@@ -128,7 +129,7 @@ public sealed partial class QueueViewModel : ObservableObject
     private Guid? _currentId;
 
     [ObservableProperty]
-    private string _summary = "The queue is empty";
+    private string _summary = Loc.T("The queue is empty");
 
     [ObservableProperty]
     private bool _isEmpty = true;
@@ -296,7 +297,7 @@ public sealed partial class QueueViewModel : ObservableObject
     private async Task AddFilesAsync() => await AddPathsAsync(await _dialogs.PickAudioFilesAsync());
 
     [RelayCommand]
-    private async Task AddFolderAsync() => await AddPathsAsync(await _dialogs.PickFoldersAsync("Add folders to the queue"));
+    private async Task AddFolderAsync() => await AddPathsAsync(await _dialogs.PickFoldersAsync(Loc.T("Add folders to the queue")));
 
     [RelayCommand]
     private async Task OpenPlaylistAsync()
@@ -321,7 +322,7 @@ public sealed partial class QueueViewModel : ObservableObject
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Summary = "Could not save the playlist: " + ex.Message;
+            Summary = Loc.F("Could not save the playlist: {0}", ex.Message);
         }
     }
 
@@ -433,12 +434,12 @@ public sealed partial class QueueViewModel : ObservableObject
         IsEmpty = Items.Count == 0;
         if (IsEmpty)
         {
-            Summary = "The queue is empty";
+            Summary = Loc.T("The queue is empty");
             return;
         }
 
         TimeSpan total = TimeSpan.FromTicks(Items.Sum(i => i.DurationValue.Ticks));
-        Summary = $"{Items.Count} {(Items.Count == 1 ? "track" : "tracks")}  ·  {Formatting.Time(total)}";
+        Summary = Loc.F(Items.Count == 1 ? "{0} track  ·  {1}" : "{0} tracks  ·  {1}", Items.Count, Formatting.Time(total));
     }
 
     private async Task LoadMetadataAsync()

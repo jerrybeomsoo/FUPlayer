@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Media;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.App.Controls;
 
@@ -212,7 +213,7 @@ public sealed class VolumeKnob : Control
             context.DrawEllipse(new SolidColorBrush(color), null, tip, 2.2, 2.2);
         }
 
-        string label = IsBypassed ? "FIXED" : Value.ToString(Math.Abs(Value) >= 10 ? "0" : "0.0", CultureInfo.CurrentCulture).Replace('-', '−');
+        string label = IsBypassed ? Loc.T("FIXED") : Value.ToString(Math.Abs(Value) >= 10 ? "0" : "0.0", CultureInfo.CurrentCulture).Replace('-', '−');
         FormattedText main = _text.Get(label, IsBypassed ? 10 : 14, Palette.TextPrimary);
         context.DrawText(main, new Point(center.X - main.Width / 2, center.Y - main.Height / 2 - (IsBypassed ? 0 : 4)));
         if (!IsBypassed)

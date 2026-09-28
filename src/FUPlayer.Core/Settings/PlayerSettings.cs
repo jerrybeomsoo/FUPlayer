@@ -534,4 +534,7 @@ public sealed class UiSettings
     public double WindowHeight { get; set; } = 900;
 
     public string LastPage { get; set; } = "NowPlaying";
+
+    /// <summary>The interface language: "en", "ko", or empty for Windows' own when there is a translation for it.</summary>
+    public string Language { get; set; } = string.Empty;
 }

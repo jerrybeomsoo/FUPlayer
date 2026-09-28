@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Decoding.FFmpeg;
 
@@ -113,7 +114,7 @@ public sealed partial class FFmpegInstaller
         return IsBuildablePath(shared)
             ? shared
             : throw new InvalidOperationException(
-                $"FFmpeg cannot be built under '{preferred}': its build tools take no paths with spaces or letters outside ASCII.");
+                Loc.F("FFmpeg cannot be built under '{0}': its build tools take no paths with spaces or letters outside ASCII.", preferred));
     }
 
     /// <summary>Whether FFmpeg's configure and MSYS2 take the path: ASCII, and nothing a shell would split or expand.</summary>
@@ -217,7 +218,7 @@ public sealed partial class FFmpegInstaller
         }
 
         // configure says nothing until it has run all its tests, a few minutes on Windows where starting a process is slow.
-        Report("Configuring FFmpeg", null, "Testing what the compiler can do; this prints nothing until it is done.");
+        Report("Configuring FFmpeg", null, Loc.T("Testing what the compiler can do; this prints nothing until it is done."));
         int compiled = 0;
         string command = string.Join(
             ' ',
@@ -404,7 +405,7 @@ public sealed partial class FFmpegInstaller
                         if (total - reported >= 1 << 19)
                         {
                             reported = total;
-                            Report(stage, length > 0 ? total / (double)length : null, $"{total / 1048576.0:0.0} of {size} MB");
+                            Report(stage, length > 0 ? total / (double)length : null, Loc.F("{0:0.0} of {1} MB", total / 1048576.0, size));
                         }
                     }
 
@@ -414,7 +415,7 @@ public sealed partial class FFmpegInstaller
                 string actual = Convert.ToHexStringLower(hash.GetHashAndReset());
                 if (actual != sha256)
                 {
-                    throw new InvalidDataException($"The file from {url} is not the one expected: its SHA-256 is {actual}.");
+                    throw new InvalidDataException(Loc.F("The file from {0} is not the one expected: its SHA-256 is {1}.", url, actual));
                 }
 
                 File.Move(partial, destination, overwrite: true);
@@ -426,7 +427,7 @@ public sealed partial class FFmpegInstaller
             }
             catch (HttpRequestException ex)
             {
-                throw new IOException($"{Path.GetFileName(destination)} could not be downloaded: {ex.Message}", ex);
+                throw new IOException(Loc.F("{0} could not be downloaded: {1}", Path.GetFileName(destination), ex.Message), ex);
             }
         }
     }
@@ -517,7 +518,7 @@ public sealed partial class FFmpegInstaller
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
-            throw new InvalidOperationException($"{what} could not start {file}: {ex.Message}", ex);
+            throw new InvalidOperationException(Loc.F("{0} could not start {1}: {2}", Loc.T(what), file, ex.Message), ex);
         }
 
         process.StandardInput.Close();
@@ -537,7 +538,7 @@ public sealed partial class FFmpegInstaller
                 tail = string.Join(Environment.NewLine, _lastLines.TakeLast(12));
             }
 
-            throw new InvalidOperationException($"{what} failed (exit code {process.ExitCode}).{Environment.NewLine}{tail}");
+            throw new InvalidOperationException(Loc.F("{0} failed (exit code {1}).", Loc.T(what), process.ExitCode) + Environment.NewLine + tail);
         }
 
         return process.ExitCode;
@@ -558,7 +559,7 @@ public sealed partial class FFmpegInstaller
     private void Report(string stage, double? fraction = null, string? line = null)
     {
         _stage = stage;
-        _progress?.Report(new FFmpegInstallProgress(stage, fraction, line));
+        _progress?.Report(new FFmpegInstallProgress(Loc.T(stage), fraction, line));
     }
 
     private void Log(string line)

@@ -1,4 +1,5 @@
 using FUPlayer.Core.Audio;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Output;
 
@@ -49,9 +50,9 @@ public sealed record OutputFormat(OutputSampleKind Kind, int SampleRate, int Cha
 
     public string Describe() => Kind switch
     {
-        OutputSampleKind.NativeDsd => $"DSD{AudioRates.DsdMultiplier(SampleRate)} native · {AudioRates.Format(SampleRate)} · {Channels} ch",
-        OutputSampleKind.Dop => $"DSD{AudioRates.DsdMultiplier(DsdRate)} DoP · {AudioRates.Format(SampleRate)} carrier · {Channels} ch",
-        _ => $"PCM · {AudioRates.Format(SampleRate)} · {ValidBits}-bit · {Channels} ch",
+        OutputSampleKind.NativeDsd => Loc.F("DSD{0} native · {1} · {2} ch", AudioRates.DsdMultiplier(SampleRate), AudioRates.Format(SampleRate), Channels),
+        OutputSampleKind.Dop => Loc.F("DSD{0} DoP · {1} carrier · {2} ch", AudioRates.DsdMultiplier(DsdRate), AudioRates.Format(SampleRate), Channels),
+        _ => Loc.F("PCM · {0} · {1}-bit · {2} ch", AudioRates.Format(SampleRate), ValidBits, Channels),
     };
 
     public string DescribeShort() => Kind switch

@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Settings;
 
 namespace FUPlayer.App.Controls;
@@ -87,7 +88,7 @@ public sealed class WaterfallView : Control
         AnalyzerFrame? frame = _frame;
         if (frame is null || _histories.Count == 0 || _filled == 0)
         {
-            AnalyzerDrawing.DrawHint(context, _text, bounds, "The waterfall appears here during playback");
+            AnalyzerDrawing.DrawHint(context, _text, bounds, Loc.T("The waterfall appears here during playback"));
             return;
         }
 

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Acceleration;
 
@@ -29,8 +30,8 @@ public sealed record GpuDevice
     internal nint Handle { get; init; }
 
     public string Summary =>
-        $"{ComputeUnits} compute units  ·  {GlobalMemoryBytes / (1024 * 1024)} MB  ·  " +
-        (SupportsDouble ? "64-bit maths" : "32-bit maths only") + $"  ·  {Platform}";
+        Loc.F("{0} compute units", ComputeUnits) + $"  ·  {GlobalMemoryBytes / (1024 * 1024)} MB  ·  " +
+        (SupportsDouble ? Loc.T("64-bit maths") : Loc.T("32-bit maths only")) + $"  ·  {Platform}";
 }
 
 /// <summary>
@@ -84,7 +85,7 @@ public static class GpuRuntime
     {
         if (!OpenClApi.IsPresent)
         {
-            return ([], OpenClApi.LoadError ?? "This machine has no usable OpenCL loader.");
+            return ([], OpenClApi.LoadError ?? Loc.T("This machine has no usable OpenCL loader."));
         }
 
         var devices = new List<GpuDevice>();
@@ -132,7 +133,7 @@ public static class GpuRuntime
             return (devices, ex.Message);
         }
 
-        return (devices, devices.Count > 0 ? null : "OpenCL is installed but reports no usable graphics device.");
+        return (devices, devices.Count > 0 ? null : Loc.T("OpenCL is installed but reports no usable graphics device."));
     }
 }
 

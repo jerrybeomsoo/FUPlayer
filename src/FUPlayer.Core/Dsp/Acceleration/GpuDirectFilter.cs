@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using FUPlayer.Core.Dsp.Numerics;
 using FUPlayer.Core.Dsp.Resampling;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Acceleration;
 
@@ -24,8 +25,9 @@ internal sealed class GpuDirectFilter : IGpuFilter
         if (bytes > program.Device.MaxAllocationBytes)
         {
             throw new OpenClException(
-                $"{stage.Taps:N0} taps need a {bytes / (1024 * 1024)} MB buffer, more than the " +
-                $"{program.Device.MaxAllocationBytes / (1024 * 1024)} MB this device allows in one allocation.");
+                Loc.F(
+                    "{0:N0} taps need a {1} MB buffer, more than the {2} MB this device allows in one allocation.",
+                    stage.Taps, bytes / (1024 * 1024), program.Device.MaxAllocationBytes / (1024 * 1024)));
         }
 
         int maxGroup = (int)OpenClApi.GetDeviceValue<nuint>(program.Device.Handle, OpenClApi.DeviceMaxWorkGroupSize);
@@ -164,7 +166,7 @@ internal sealed class GpuDirectFilter : IGpuFilter
 
         if (peak < 1e-6)
         {
-            return "the comparison signal never reached the device; the filter cannot be checked";
+            return Loc.T("the comparison signal never reached the device; the filter cannot be checked");
         }
 
         // Relative to the loudest sample either path produced, so the check means the same at any signal level.
@@ -173,8 +175,9 @@ internal sealed class GpuDirectFilter : IGpuFilter
         if (!(relative <= tolerance))
         {
             throw new OpenClException(
-                $"the device and the processor disagree by {20.0 * Math.Log10(relative):0} dB, " +
-                $"more than the {20.0 * Math.Log10(tolerance):0} dB allowed at this precision");
+                Loc.F(
+                    "the device and the processor disagree by {0:0} dB, more than the {1:0} dB allowed at this precision",
+                    20.0 * Math.Log10(relative), 20.0 * Math.Log10(tolerance)));
         }
 
         WorstDeviation = relative;

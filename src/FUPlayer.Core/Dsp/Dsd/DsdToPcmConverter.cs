@@ -1,6 +1,7 @@
 using FUPlayer.Core.Audio;
 using FUPlayer.Core.Dsp.Design;
 using FUPlayer.Core.Dsp.Resampling;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Dsd;
 
@@ -93,7 +94,7 @@ public sealed class DsdToPcmDesign
         var stageBSpec = new LowpassSpec(passband / stageARate, stopband / stageARate, preset.AttenuationDb);
         double[] prototype = FirDesign.DesignLowpass(stageBSpec, 1.0, preset.Phase);
         var stage = new PolyphaseStage(stageARate, outputRate, prototype,
-            $"DSD low-pass {AudioRates.FormatShort(stageARate)}→{AudioRates.FormatShort(outputRate)}");
+            Loc.F("DSD low-pass {0}→{1}", AudioRates.FormatShort(stageARate), AudioRates.FormatShort(outputRate)));
         var stageB = new ResamplerChain(stageARate, outputRate, [stage], stage.Description);
 
         string description = $"DSD{AudioRates.DsdMultiplier(dsdRate)} → PCM {AudioRates.Format(outputRate)} ({preset.Name})";

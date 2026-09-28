@@ -3,6 +3,7 @@ using FUPlayer.Core.Dsp.Dsd;
 using FUPlayer.Core.Dsp.Modulation;
 using FUPlayer.Core.Dsp.Quantization;
 using FUPlayer.Core.Dsp.Resampling;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Output;
 
 namespace FUPlayer.Core.Engine;
@@ -86,10 +87,10 @@ public sealed record PlaybackPlan
 
     public bool IsDsdOutput => Output.IsDsd;
 
-    public string FilterName => PassThrough ? "None (DSD pass-through)" : Filter?.Name ?? "-";
+    public string FilterName => PassThrough ? Loc.T("None (DSD pass-through)") : Filter?.Name ?? "-";
 
     public string QuantizerName => PassThrough
-        ? "Unchanged DSD"
+        ? Loc.T("Unchanged DSD")
         : IsDsdOutput ? Modulator?.Name ?? "-" : Dither?.Name ?? "-";
 
     /// <summary>True when both plans process audio identically, so tracks can be joined gaplessly.</summary>

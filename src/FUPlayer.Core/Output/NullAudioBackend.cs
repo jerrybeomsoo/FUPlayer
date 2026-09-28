@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Output;
 
@@ -9,9 +10,9 @@ public sealed class NullAudioBackend : IAudioBackend
 
     public string Id => BackendId;
 
-    public string DisplayName => "Silent output";
+    public string DisplayName => Loc.T("Silent output");
 
-    public string Description => "Consumes audio in real time without playing it (testing and benchmarking).";
+    public string Description => Loc.T("Consumes audio in real time without playing it (testing and benchmarking).");
 
     public bool IsAvailable => true;
 
@@ -21,7 +22,7 @@ public sealed class NullAudioBackend : IAudioBackend
 
     public bool HasControlPanel => false;
 
-    public IReadOnlyList<AudioDevice> GetDevices() => [new AudioDevice(BackendId, "silent", "Silent device", true)];
+    public IReadOnlyList<AudioDevice> GetDevices() => [new AudioDevice(BackendId, "silent", Loc.T("Silent device"), true)];
 
     public DeviceCapabilities GetCapabilities(string? deviceId, int channels) => DeviceCapabilities.Unrestricted();
 

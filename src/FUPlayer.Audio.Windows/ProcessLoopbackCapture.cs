@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using FUPlayer.Audio.Windows.Interop;
 using FUPlayer.Core.Engine;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Audio.Windows;
 
@@ -67,7 +68,7 @@ public sealed class ProcessLoopbackCapture : IDisposable
         if (!LoopbackConstants.IsSupported)
         {
             throw new NotSupportedException(
-                "Capturing one application's audio needs Windows 10 build 20348 or later.");
+                Loc.T("Capturing one application's audio needs Windows 10 build 20348 or later."));
         }
 
         _thread = new Thread(Run)
@@ -81,7 +82,7 @@ public sealed class ProcessLoopbackCapture : IDisposable
 
         if (!_started.Wait(TimeSpan.FromSeconds(ActivationTimeoutSeconds + 2)) && Error is null)
         {
-            Error = "The capture device did not open in time.";
+            Error = Loc.T("The capture device did not open in time.");
         }
 
         if (Error is not null)
@@ -191,7 +192,7 @@ public sealed class ProcessLoopbackCapture : IDisposable
 
             if (!handler.Wait(TimeSpan.FromSeconds(ActivationTimeoutSeconds)))
             {
-                throw new TimeoutException("Windows did not answer the capture request.");
+                throw new TimeoutException(Loc.T("Windows did not answer the capture request."));
             }
 
             int hr = operation.GetActivateResult(out int activateResult, out object activated);
@@ -204,7 +205,7 @@ public sealed class ProcessLoopbackCapture : IDisposable
             if (activateResult != WasapiConstants.SOk)
             {
                 throw new InvalidOperationException(
-                    $"Process {_processId} cannot be captured: {WasapiConstants.Describe(activateResult)}");
+                    Loc.F("Process {0} cannot be captured: {1}", _processId, WasapiConstants.Describe(activateResult)));
             }
 
             return (IAudioClient)activated;

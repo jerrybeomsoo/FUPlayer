@@ -1,3 +1,5 @@
+using FUPlayer.Core.Localization;
+
 namespace FUPlayer.Core.Dsp.Restoration;
 
 /// <summary>
@@ -148,7 +150,7 @@ public static class ModelLibrary
         path ??= ListUpscalers().FirstOrDefault();
         if (path is null)
         {
-            failure = $"no {NeuralUpscalerModel.Extension} model in {string.Join(" or ", SearchDirectories())}";
+            failure = Loc.F("no {0} model in {1}", NeuralUpscalerModel.Extension, string.Join(Loc.T(" or "), SearchDirectories()));
             return null;
         }
 
@@ -185,7 +187,7 @@ public static class ModelLibrary
         path ??= ListRestorers().FirstOrDefault();
         if (path is null)
         {
-            failure = $"no *{NeuralRestorerModel.Suffix} model in {string.Join(" or ", SearchDirectories())}";
+            failure = Loc.F("no {0} model in {1}", "*" + NeuralRestorerModel.Suffix, string.Join(Loc.T(" or "), SearchDirectories()));
             return null;
         }
 
@@ -223,8 +225,9 @@ public static class ModelLibrary
         string? path = ListRestorers().FirstOrDefault();
         if (path is null)
         {
-            return $"No model installed. Place a *{NeuralRestorerModel.Suffix} model and its .json in "
-                + $"{string.Join(" or ", SearchDirectories())}; see training/neural-restorer.";
+            return Loc.F(
+                "No model installed. Place a {0} model and its .json in {1}; see {2}.",
+                "*" + NeuralRestorerModel.Suffix, string.Join(Loc.T(" or "), SearchDirectories()), "training/neural-restorer");
         }
 
         string name = Path.GetFileName(path);
@@ -234,14 +237,15 @@ public static class ModelLibrary
             System.Text.Json.JsonElement root = metadata.RootElement;
             double parameters = root.TryGetProperty("parameters", out var p) ? p.GetDouble() : 0.0;
             long steps = root.TryGetProperty("step", out var s) ? s.GetInt64() : 0;
-            string text = $"{name}: {parameters / 1e6:0.#} M parameters, {steps:N0} steps.";
+            string text = Loc.F("{0}: {1:0.#} M parameters, {2:N0} steps.", name, parameters / 1e6, steps);
             if (root.TryGetProperty("scores", out var scores)
                 && Pair(scores, "in_above16k_db", "out_above16k_db") is { } level
                 && Pair(scores, "in_12k-nyq", "out_12k-nyq") is { } top
                 && Pair(scores, "in_side_db", "out_side_db") is { } side)
             {
-                text += $" Held out, coded against lossless: level above 16 kHz {level.Before:+0.0;−0.0} → {level.After:+0.0;−0.0} dB, "
-                    + $"LSD above 12 kHz {top.Before:0.0} → {top.After:0.0} dB, side channel {side.Before:0.0} → {side.After:0.0} dB.";
+                text += " " + Loc.F(
+                    "Held out, coded against lossless: level above 16 kHz {0:+0.0;−0.0} → {1:+0.0;−0.0} dB, LSD above 12 kHz {2:0.0} → {3:0.0} dB, side channel {4:0.0} → {5:0.0} dB.",
+                    level.Before, level.After, top.Before, top.After, side.Before, side.After);
             }
 
             return text;
@@ -249,7 +253,7 @@ public static class ModelLibrary
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
             or System.Text.Json.JsonException or InvalidOperationException or FormatException)
         {
-            return $"{name}: no description file beside it.";
+            return Loc.F("{0}: no description file beside it.", name);
         }
 
         static (double Before, double After)? Pair(System.Text.Json.JsonElement scores, string before, string after) =>
@@ -266,8 +270,9 @@ public static class ModelLibrary
         string? path = ListUpscalers().FirstOrDefault();
         if (path is null)
         {
-            return $"No model installed. Place a {NeuralUpscalerModel.Extension} model and its .json in "
-                + $"{string.Join(" or ", SearchDirectories())}; see training/neural-upscaler.";
+            return Loc.F(
+                "No model installed. Place a {0} model and its .json in {1}; see {2}.",
+                NeuralUpscalerModel.Extension, string.Join(Loc.T(" or "), SearchDirectories()), "training/neural-upscaler");
         }
 
         string name = Path.GetFileName(path);
@@ -278,12 +283,14 @@ public static class ModelLibrary
             double parameters = root.TryGetProperty("parameters", out var p) ? p.GetDouble() : 0.0;
             long steps = root.TryGetProperty("step", out var s) ? s.GetInt64() : 0;
             bool conditioned = root.TryGetProperty("conditioned", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.True;
-            string text = $"{name}: {parameters / 1e6:0.#} M parameters, {steps:N0} steps"
-                + (conditioned ? ", lossy/lossless conditioned" : string.Empty) + ".";
+            string text = conditioned
+                ? Loc.F("{0}: {1:0.#} M parameters, {2:N0} steps, lossy/lossless conditioned.", name, parameters / 1e6, steps)
+                : Loc.F("{0}: {1:0.#} M parameters, {2:N0} steps.", name, parameters / 1e6, steps);
             if (root.TryGetProperty("scores", out var scores)
                 && Score(scores, "16-22k") is { } middle && Score(scores, "22k-nyq") is { } top)
             {
-                text += $" Held-out LSD: 16–22 kHz {middle.Before:0.0} → {middle.After:0.0} dB, >22 kHz {top.Before:0.0} → {top.After:0.0} dB.";
+                text += " " + Loc.F(
+                    "Held-out LSD: 16–22 kHz {0:0.0} → {1:0.0} dB, >22 kHz {2:0.0} → {3:0.0} dB.", middle.Before, middle.After, top.Before, top.After);
             }
 
             return text;
@@ -291,7 +298,7 @@ public static class ModelLibrary
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
             or System.Text.Json.JsonException or InvalidOperationException or FormatException)
         {
-            return $"{name}: no description file beside it.";
+            return Loc.F("{0}: no description file beside it.", name);
         }
 
         static (double Before, double After)? Score(System.Text.Json.JsonElement scores, string band) =>

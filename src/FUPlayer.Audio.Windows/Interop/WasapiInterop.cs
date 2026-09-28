@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Audio.Windows.Interop;
 
@@ -51,12 +52,12 @@ internal static class WasapiConstants
 
     public static string Describe(int hresult) => hresult switch
     {
-        ErrorUnsupportedFormat => "The device does not support this format in exclusive mode.",
-        ErrorExclusiveModeNotAllowed => "Exclusive mode is disabled for this device (Sound settings → device properties → Advanced).",
-        ErrorDeviceInUse => "The device is in use by another application in exclusive mode.",
-        ErrorDeviceInvalidated => "The device was removed or disabled.",
-        ErrorNotFound => "The audio device was not found.",
-        _ => $"WASAPI error 0x{hresult:X8}.",
+        ErrorUnsupportedFormat => Loc.T("The device does not support this format in exclusive mode."),
+        ErrorExclusiveModeNotAllowed => Loc.T("Exclusive mode is disabled for this device (Sound settings → device properties → Advanced)."),
+        ErrorDeviceInUse => Loc.T("The device is in use by another application in exclusive mode."),
+        ErrorDeviceInvalidated => Loc.T("The device was removed or disabled."),
+        ErrorNotFound => Loc.T("The audio device was not found."),
+        _ => Loc.F("WASAPI error 0x{0:X8}.", hresult),
     };
 }
 

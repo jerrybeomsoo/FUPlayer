@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using FUPlayer.Core.Dsp.Resampling;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Acceleration;
 
@@ -26,8 +27,9 @@ internal sealed class GpuPolyphaseFilter : IGpuFilter
         if (spectrumBytes > program.Device.MaxAllocationBytes)
         {
             throw new OpenClException(
-                $"{stage.Taps:N0} taps need a {spectrumBytes / (1024 * 1024)} MB buffer, more than the " +
-                $"{program.Device.MaxAllocationBytes / (1024 * 1024)} MB this device allows in one allocation.");
+                Loc.F(
+                    "{0:N0} taps need a {1} MB buffer, more than the {2} MB this device allows in one allocation.",
+                    stage.Taps, spectrumBytes / (1024 * 1024), program.Device.MaxAllocationBytes / (1024 * 1024)));
         }
 
         nint queue = OpenClApi.CreateQueue(program.Context, program.Device.Handle);
@@ -172,8 +174,9 @@ internal sealed class GpuPolyphaseFilter : IGpuFilter
 
         if (peak < 1e-6)
         {
-            return $"the {blocks:N0} of {Stage.Partitions:N0} partitions the check can reach are " +
-                $"{(gain > 0.0 ? 20.0 * Math.Log10(gain) : -999.0):0} dB down, too far for any answer to be compared";
+            return Loc.F(
+                "the {0:N0} of {1:N0} partitions the check can reach are {2:0} dB down, too far for any answer to be compared",
+                blocks, Stage.Partitions, gain > 0.0 ? 20.0 * Math.Log10(gain) : -999.0);
         }
 
         // Relative to the loudest sample either path produced, so the check means the same at any signal level.
@@ -182,8 +185,9 @@ internal sealed class GpuPolyphaseFilter : IGpuFilter
         if (!(relative <= tolerance))
         {
             throw new OpenClException(
-                $"the device and the processor disagree by {20.0 * Math.Log10(relative):0} dB, " +
-                $"more than the {20.0 * Math.Log10(tolerance):0} dB allowed at this precision");
+                Loc.F(
+                    "the device and the processor disagree by {0:0} dB, more than the {1:0} dB allowed at this precision",
+                    20.0 * Math.Log10(relative), 20.0 * Math.Log10(tolerance)));
         }
 
         WorstDeviation = relative;

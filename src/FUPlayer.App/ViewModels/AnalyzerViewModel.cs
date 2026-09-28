@@ -10,6 +10,7 @@ using FUPlayer.App.Services;
 using FUPlayer.Core.Audio;
 using FUPlayer.Core.Dsp.Analysis;
 using FUPlayer.Core.Engine;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Settings;
 
 namespace FUPlayer.App.ViewModels;
@@ -26,7 +27,7 @@ public sealed partial class AnalyzerViewModel : ObservableObject
     private const string MixKey = "mix";
     private const string StereoKey = "stereo";
     private const string AllKey = "all";
-    private const string IdleSummary = "Start playback to analyse the signal.";
+    private static string IdleSummary => Loc.T("Start playback to analyse the signal.");
 
     private readonly PlayerServices _services;
     private readonly bool _ready;
@@ -130,7 +131,7 @@ public sealed partial class AnalyzerViewModel : ObservableObject
 
     public IReadOnlyList<Choice> FftSizeChoices { get; } =
         new[] { 1024, 2048, 4096, 8192, 16384, 32768, 65536 }
-            .Select(n => new Choice(n.ToString("N0", CultureInfo.InvariantCulture) + " points", n))
+            .Select(n => new Choice(Loc.F("{0} points", n.ToString("N0", CultureInfo.InvariantCulture)), n))
             .ToArray();
 
     public IReadOnlyList<Choice> BandChoices { get; } =
@@ -356,7 +357,10 @@ public sealed partial class AnalyzerViewModel : ObservableObject
     private void ToggleOptions() => ShowOptions = !ShowOptions;
 
     private static Choice Band(int rate) =>
-        new($"{AudioRates.Format(rate)} rate · to {AudioRates.Format(rate / 2)}", rate / 2.0, $"Shows 0 Hz up to {AudioRates.Format(rate / 2)}, the highest frequency a {AudioRates.Format(rate)} file can hold.");
+        new(
+            Loc.F("{0} rate · to {1}", AudioRates.Format(rate), AudioRates.Format(rate / 2)),
+            rate / 2.0,
+            Loc.F("Shows 0 Hz up to {0}, the highest frequency a {1} file can hold.", AudioRates.Format(rate / 2), AudioRates.Format(rate)));
 
     private static int RefreshMilliseconds(int fftSize) => fftSize switch
     {
@@ -413,12 +417,12 @@ public sealed partial class AnalyzerViewModel : ObservableObject
     {
         if (channels <= 1)
         {
-            return [new TraceSpec([0], "M", "Mono", Palette.Accent)];
+            return [new TraceSpec([0], "M", Loc.T("Mono"), Palette.Accent)];
         }
 
         return options.Channels switch
         {
-            AnalyzerChannels.Mono => [new TraceSpec(Enumerable.Range(0, channels).ToArray(), "Mix", channels == 2 ? "Left and right mixed" : "All channels mixed", Palette.Accent)],
+            AnalyzerChannels.Mono => [new TraceSpec(Enumerable.Range(0, channels).ToArray(), Loc.T("Mix"), channels == 2 ? Loc.T("Left and right mixed") : Loc.T("All channels mixed"), Palette.Accent)],
             AnalyzerChannels.Single => [Channel(Math.Clamp(options.ChannelIndex, 0, channels - 1), channels)],
             AnalyzerChannels.Stereo => [Channel(0, channels), Channel(1, channels)],
             _ => Enumerable.Range(0, channels).Select(c => Channel(c, channels)).ToArray(),
@@ -428,7 +432,7 @@ public sealed partial class AnalyzerViewModel : ObservableObject
     private static TraceSpec Channel(int channel, int channels) => new(
         [channel],
         MeterChannelViewModel.LabelFor(channel, channels),
-        channels == 2 ? (channel == 0 ? "Left" : "Right") : $"Channel {channel + 1}",
+        channels == 2 ? (channel == 0 ? Loc.T("Left") : Loc.T("Right")) : Loc.F("Channel {0}", channel + 1),
         Palette.ChannelColor(channel));
 
     private static (double Hz, string? Label) Marker(PlaybackPlan? plan, bool output)
@@ -442,7 +446,7 @@ public sealed partial class AnalyzerViewModel : ObservableObject
         if (output)
         {
             // Everything above the file's own Nyquist frequency was created by the conversion.
-            return (rate / 2.0, "source fs/2");
+            return (rate / 2.0, Loc.T("source fs/2"));
         }
 
         if (rate > 50_000)
@@ -485,10 +489,10 @@ public sealed partial class AnalyzerViewModel : ObservableObject
     private string Describe(AnalyzerSettings options, bool useOutput, bool outputAvailable, int streamRate, int sampleRate, int fftSize)
     {
         string signal = useOutput
-            ? "Processed output"
+            ? Loc.T("Processed output")
             : options.Signal == AnalyzerSignal.Output && !outputAvailable
-                ? "Source file (DSD pass-through has no processed output)"
-                : "Source file";
+                ? Loc.T("Source file (DSD pass-through has no processed output)")
+                : Loc.T("Source file");
         string window = Choice.Find(WindowChoices, options.Window)?.Label ?? options.Window.ToString();
         double resolution = (double)sampleRate / fftSize;
         string perBin = resolution switch
@@ -499,8 +503,9 @@ public sealed partial class AnalyzerViewModel : ObservableObject
         };
         string rate = streamRate == sampleRate
             ? AudioRates.Format(sampleRate)
-            : $"{AudioRates.Format(streamRate)}, analysed at {AudioRates.Format(sampleRate)}";
-        return $"{signal}  ·  {rate}  ·  {window} window  ·  {fftSize.ToString("N0", CultureInfo.InvariantCulture)}-point FFT, {perBin} per bin";
+            : Loc.F("{0}, analysed at {1}", AudioRates.Format(streamRate), AudioRates.Format(sampleRate));
+        return Loc.F("{0}  ·  {1}  ·  {2} window  ·  {3}-point FFT, {4} per bin",
+            signal, rate, window, fftSize.ToString("N0", CultureInfo.InvariantCulture), perBin);
     }
 
     private void EnsureChannelChoices(int channels)
@@ -533,7 +538,7 @@ public sealed partial class AnalyzerViewModel : ObservableObject
                 {
                     string name = channels == 2
                         ? c == 0 ? "Left only" : "Right only"
-                        : $"{MeterChannelViewModel.LabelFor(c, channels)} only (channel {c + 1})";
+                        : Loc.F("{0} only (channel {1})", MeterChannelViewModel.LabelFor(c, channels), c + 1);
                     ChannelChoices.Add(new Choice(name, c.ToString(CultureInfo.InvariantCulture)));
                 }
             }

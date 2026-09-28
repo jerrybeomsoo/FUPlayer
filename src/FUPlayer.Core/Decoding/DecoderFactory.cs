@@ -1,6 +1,7 @@
 using System.Text;
 using FUPlayer.Core.Decoding.FFmpeg;
 using FUPlayer.Core.Decoding.Flac;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Decoding;
 
@@ -102,8 +103,8 @@ public static class DecoderFactory
         }
 
         string reason = nativeFailure?.Message
-            ?? $"'{Path.GetExtension(path)}' files need the FFmpeg libraries. {FFmpegLibrary.LoadError}";
-        throw new AudioDecoderException($"Cannot decode '{Path.GetFileName(path)}': {reason}", nativeFailure);
+            ?? Loc.F("'{0}' files need the FFmpeg libraries. {1}", Path.GetExtension(path), FFmpegLibrary.LoadError);
+        throw new AudioDecoderException(Loc.F("Cannot decode '{0}': {1}", Path.GetFileName(path), reason), nativeFailure);
     }
 
     internal static Container Sniff(string path)

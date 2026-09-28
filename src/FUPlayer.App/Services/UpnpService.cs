@@ -1,5 +1,6 @@
 using System.Reflection;
 using Avalonia.Threading;
+using FUPlayer.Core.Localization;
 using FUPlayer.Core.Settings;
 using FUPlayer.Core.Upnp;
 
@@ -89,7 +90,7 @@ public sealed class UpnpService : IDisposable
         catch (Exception ex) when (ex is System.Net.Sockets.SocketException or InvalidOperationException or IOException)
         {
             renderer.Dispose();
-            StartError = $"The renderer could not start: {ex.Message}";
+            StartError = Loc.F("The renderer could not start: {0}", ex.Message);
             Log(StartError);
             Changed?.Invoke(this, EventArgs.Empty);
             return;

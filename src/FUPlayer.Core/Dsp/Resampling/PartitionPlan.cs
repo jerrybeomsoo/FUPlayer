@@ -1,4 +1,5 @@
 using System.Numerics;
+using FUPlayer.Core.Localization;
 
 namespace FUPlayer.Core.Dsp.Resampling;
 
@@ -176,6 +177,6 @@ public sealed class PartitionPlan
 
     /// <summary>A short phrase for the stage description: how many bands there are and how far they spread.</summary>
     public override string ToString() => IsUniform
-        ? $"{Levels[0].Count:N0} × {Levels[0].FftSize:N0}-point FFT"
-        : $"{Levels.Count} layers, {2 * HeadBlock:N0}- to {2 * LongestBlock:N0}-point FFT";
+        ? Loc.F("{0:N0} × {1:N0}-point FFT", Levels[0].Count, Levels[0].FftSize)
+        : Loc.F("{0} layers, {1:N0}- to {2:N0}-point FFT", Levels.Count, 2 * HeadBlock, 2 * LongestBlock);
 }
