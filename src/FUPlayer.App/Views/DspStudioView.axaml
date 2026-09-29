@@ -144,7 +144,7 @@
                 <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,4" Text="{Binding UpscalerStatus}" />
               </StackPanel>
               <controls:SettingRow Title="Oversampling exciter"
-                                   Description="Adds the music's own harmonics above where its spectrum ends, made from the band above 7 kHz at four times the source rate, so they reach 44.1/48 kHz without folding back. Their level follows the music the way hi-res recordings do; nothing to set. PCM up to 48 kHz, about 25 ms.">
+                                   Description="Adds the music's own harmonics, made from the band above 7 kHz: faint under the music from about 15 kHz, then filling what is missing above where its spectrum ends, up to the output's top (44.1/48 kHz at twice the source rate). Their level follows the music; nothing to set. PCM up to 48 kHz, about 25 ms.">
                 <ToggleSwitch IsChecked="{Binding Exciter}" OnContent="" OffContent="" />
               </controls:SettingRow>
               <StackPanel Spacing="0" IsVisible="{Binding HasNeuralModel}">

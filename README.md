@@ -116,9 +116,10 @@ ASIO. Expect rough edges, and expect settings to move between versions.
   Chained, the restorer goes first and the upscaler reads its output as lossless. Neither recovers what a codec
   discarded, and both pages say what they get right and where they are wrong. The scripts in `training/` train
   either from your own files.
-- An **oversampling exciter** writes the music's own harmonics above where its spectrum ends: made from the band
-  above 7 kHz at four times the source rate and written up to 44.1/48 kHz, at the level hi-res masters have there.
-  With or without the networks, off until asked for, nothing to set ([its page](docs/exciter.md)).
+- An **oversampling exciter** writes the music's own harmonics, made from the band above 7 kHz: faint under the music
+  from about 15 kHz, and above where its spectrum ends at the level hi-res masters have there, up to 44.1/48 kHz when
+  the output runs above the source rate. At any output rate, with or without the networks, off until asked for,
+  nothing to set ([its page](docs/exciter.md)).
 - Measures where a file's spectrum actually ends, which is the only way to tell a coded stream from a
   lossless one when nothing in the container says so.
 

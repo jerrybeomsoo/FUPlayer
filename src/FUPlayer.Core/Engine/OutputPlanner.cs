@@ -55,9 +55,10 @@ public static class OutputPlanner
     }
 
     /// <summary>
-    /// Adds the oversampling exciter for a PCM source at 48 kHz or below. It runs at twice the source rate, after the
-    /// upscaler when that runs, so the harmonics it writes can reach past the source's Nyquist frequency; the chosen
-    /// filter then converts from there, and has to accept that conversion. It adds signal, so the limiter runs with it.
+    /// Adds the oversampling exciter for a PCM source at 48 kHz or below. When the output has room above the source's
+    /// Nyquist frequency it runs at twice the source rate, after the upscaler when that runs, so the harmonics can reach
+    /// into it, and the chosen filter converts from there; otherwise it runs at the source rate in front of the filter,
+    /// under the music and up to Nyquist. It adds signal, so the limiter runs with it.
     /// </summary>
     internal static PlaybackPlan WithExciter(PlaybackPlan plan, RestorationSettings restore, List<string> notes)
     {
@@ -72,14 +73,33 @@ public static class OutputPlanner
             return plan with { Notes = [.. plan.Notes, .. notes.Except(plan.Notes)] };
         }
 
-        int rate = plan.ConversionRate * 2;
-        if (plan.UpscaleRate == 0 && !ResamplerFactory.IsSupported(plan.Filter, rate, plan.ProcessingRate))
+        return plan with { ExciteRate = ExciteRateFor(plan, notes), Limiter = true, Notes = [.. plan.Notes, .. notes.Except(plan.Notes)] };
+    }
+
+    /// <summary>
+    /// Twice the conversion rate after the upscaler, or when the output runs above the source rate and the chosen filter
+    /// converts from twice it; otherwise the conversion rate.
+    /// </summary>
+    internal static int ExciteRateFor(PlaybackPlan plan, List<string>? notes = null)
+    {
+        int twice = plan.ConversionRate * 2;
+        if (plan.UpscaleRate > 0)
         {
-            notes.Add(Loc.F("{0} cannot convert {1} to {2}; the exciter is not running.", plan.Filter.Name, AudioRates.Format(rate), AudioRates.Format(plan.ProcessingRate)));
-            return plan with { Notes = [.. plan.Notes, .. notes.Except(plan.Notes)] };
+            return twice;
         }
 
-        return plan with { ExciteRate = rate, Limiter = true, Notes = [.. plan.Notes, .. notes.Except(plan.Notes)] };
+        if (plan.ProcessingRate <= plan.ConversionRate)
+        {
+            return plan.ConversionRate;
+        }
+
+        if (!ResamplerFactory.IsSupported(plan.Filter!, twice, plan.ProcessingRate))
+        {
+            notes?.Add(Loc.F("{0} cannot convert {1} to {2}; the exciter runs at the source rate.", plan.Filter!.Name, AudioRates.Format(twice), AudioRates.Format(plan.ProcessingRate)));
+            return plan.ConversionRate;
+        }
+
+        return twice;
     }
 
     /// <summary>

@@ -324,9 +324,10 @@ public sealed class RestorationSettings
     public string? NeuralRestorerPath { get; set; }
 
     /// <summary>
-    /// Write the music's own harmonics above the top of its spectrum, at twice the source rate, for PCM sources up to
-    /// 48 kHz (<see cref="Dsp.Restoration.HarmonicExciter"/>). Runs with or without the networks; nothing to set, it
-    /// follows the music by itself. Off until asked for, like the networks.
+    /// Write the music's own harmonics into its top octave and above the top of its spectrum, for PCM sources up to
+    /// 48 kHz (<see cref="Dsp.Restoration.HarmonicExciter"/>): at twice the source rate when the output runs above it,
+    /// and at the source rate otherwise. Runs with or without the networks; nothing to set, it follows the music by
+    /// itself. Off until asked for, like the networks.
     /// </summary>
     public bool Exciter { get; set; }
 

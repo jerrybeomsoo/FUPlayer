@@ -1095,14 +1095,13 @@
   "The audio device was not found.": "오디오 장치를 찾지 못했습니다.",
   "WASAPI error 0x{0:X8}.": "WASAPI 오류 0x{0:X8}.",
   "Various artists": "여러 아티스트",
-  "A process that adds harmonics to a sound. FUPlayer's oversampling exciter makes them from the music above 7 kHz and adds them above where its spectrum ends, up to 44.1 or 48 kHz. It makes them at four times the source rate, so none fold back as tones the music never had.": "소리에 배음을 만들어 더하는 처리입니다. FUPlayer의 오버샘플링 익사이터는 7 kHz 위의 음악으로 배음을 만들어, 스펙트럼이 끝나는 곳 위로 44.1 또는 48 kHz까지 더합니다. 원본의 4배 샘플레이트에서 만들기 때문에, 음악에 없던 음으로 접혀 내려오지 않습니다.",
+  "A process that adds harmonics to a sound. FUPlayer's oversampling exciter makes them from the music above 7 kHz at twice the rate it runs at, so none fold back as tones the music never had. They fade in under the music from about 15 kHz and fill what is missing above where its spectrum ends, up to 44.1 or 48 kHz when the output allows.": "소리에 배음을 만들어 더하는 처리입니다. FUPlayer의 오버샘플링 익사이터는 7 kHz 위의 음악으로 동작 레이트의 2배에서 배음을 만들어, 음악에 없던 음으로 접히지 않게 합니다. 약 15 kHz부터 음악 아래로 옅게 더하고 스펙트럼이 끝나는 곳 위의 빈 부분을 채우며, 출력이 허락하면 44.1 또는 48 kHz까지 닿습니다.",
   "Outputs y − x: what the networks and the exciter added, their output minus their latency-aligned input. Silent when none runs. Monitoring only.": "y − x만 내보냅니다. 신경망과 익사이터가 더한 것, 곧 출력에서 지연을 맞춘 입력을 뺀 차이입니다. 아무것도 켜져 있지 않으면 무음입니다. 확인용입니다.",
   "Oversampling exciter: measuring where the music ends": "오버샘플링 익사이터: 음악이 끝나는 곳을 재는 중",
   "Oversampling exciter: nothing to add above {0:0.0} kHz just now": "오버샘플링 익사이터: 지금은 {0:0.0} kHz 위에 더할 것 없음",
   "Oversampling exciter: harmonics from {0:0.0} to {1:0.#} kHz, {2:0} dB under the band above {3:0} kHz": "오버샘플링 익사이터: {0:0.0}~{1:0.#} kHz에 배음, {3:0} kHz 위 대역보다 {2:0} dB 낮게",
   "The exciter works on sources up to 48 kHz; {0} is played without it.": "익사이터는 48 kHz 이하 원본에서만 동작합니다. {0}은(는) 익사이터 없이 재생합니다.",
-  "{0} cannot convert {1} to {2}; the exciter is not running.": "{0}은(는) {1}을(를) {2}(으)로 변환하지 못해서 익사이터가 작동하지 않습니다.",
-  "Exciter idle: no room above the music below {0}.": "익사이터 쉼: {0}보다 낮은 출력에는 음악 위에 빈 곳이 없습니다.",
+  "{0} cannot convert {1} to {2}; the exciter runs at the source rate.": "{0}은(는) {1}을(를) {2}(으)로 변환하지 못해서 익사이터를 원본 레이트로 돌립니다.",
   "Off for lossless sources. Lossy codecs, captures, and restored, upscaled or excited audio stay limited: their overs are codec or processing products that would alias above 40 kHz or destabilise a DSD modulator.": "무손실 음원에서는 꺼집니다. 손실 코덱, 캡처, 복원·업스케일·익사이터를 거친 오디오는 계속 제한합니다. 그 오버는 코덱이나 처리가 만든 것이라, 40 kHz 위로 에일리어싱되거나 DSD 모듈레이터를 불안정하게 합니다.",
-  "Adds the music's own harmonics above where its spectrum ends, made from the band above 7 kHz at four times the source rate, so they reach 44.1/48 kHz without folding back. Their level follows the music the way hi-res recordings do; nothing to set. PCM up to 48 kHz, about 25 ms.": "음악의 스펙트럼이 끝나는 곳 위에 음악 자신의 배음을 더합니다. 7 kHz 위 대역으로 원본의 4배 샘플레이트에서 만들어, 접힘 없이 44.1/48 kHz까지 닿습니다. 레벨은 고해상도 녹음처럼 음악을 따라가며, 조절할 것은 없습니다. 48 kHz 이하 PCM, 약 25 ms."
+  "Adds the music's own harmonics, made from the band above 7 kHz: faint under the music from about 15 kHz, then filling what is missing above where its spectrum ends, up to the output's top (44.1/48 kHz at twice the source rate). Their level follows the music; nothing to set. PCM up to 48 kHz, about 25 ms.": "7 kHz 위 대역으로 음악 자신의 배음을 만들어 더합니다. 약 15 kHz부터 음악 아래로 옅게 시작해, 스펙트럼이 끝나는 곳 위의 빈 부분을 출력 상한까지(원본 2배 레이트면 44.1/48 kHz) 채웁니다. 레벨은 음악을 따라가며 조절할 것은 없습니다. 48 kHz 이하 PCM, 약 25 ms."
 }

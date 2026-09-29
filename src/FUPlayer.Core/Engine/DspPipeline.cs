@@ -30,6 +30,13 @@ internal sealed class DspPipeline : IDisposable
     private const int MaxModulatorSamplesPerChunk = 1 << 20;
     private const double SpeedOfSound = 343.0;
 
+    /// <summary>
+    /// How long a second of audio counts towards where the exciter takes the source to end: long enough for the codec
+    /// detector's steepest fall to stand out of a song's own variation, short enough to follow a new source in a live
+    /// stream within a few seconds.
+    /// </summary>
+    private const double ExciterMemorySeconds = 3.0;
+
     private readonly PlaybackPlan _plan;
     private readonly ParallelWorkers _workers;
     private readonly ChannelChain[] _chains;
@@ -57,6 +64,14 @@ internal sealed class DspPipeline : IDisposable
     /// </summary>
     private readonly bool _silentDelta;
     private BandwidthEstimate _bandwidth;
+
+    /// <summary>
+    /// Where the source ends over the last few seconds rather than since the start, for the exciter: a live stream that
+    /// changes source, or a codec whose bandwidth moves with the music, moves its band with it.
+    /// </summary>
+    private readonly CodecBandwidthDetector? _edgeTracker;
+
+    private BandwidthEstimate _recentBandwidth;
     private readonly byte[][] _dsdOutputs;
     private readonly int _sourceChannels;
     private readonly int _outputChannels;
@@ -231,6 +246,11 @@ internal sealed class DspPipeline : IDisposable
             }
         }
 
+        if (plan.ExciteRate > 0 && _detector is not null)
+        {
+            _edgeTracker = new CodecBandwidthDetector(plan.ConversionRate, ExciterMemorySeconds);
+        }
+
         _silentDelta = restore.OutputDelta && (restore.NeuralUpscaler || restore.NeuralRestorer || restore.Exciter)
             && _upscalerModel is null && _restorer is null && plan.ExciteRate == 0;
 
@@ -289,7 +309,7 @@ internal sealed class DspPipeline : IDisposable
 
                 if (plan.ExciteRate > 0)
                 {
-                    chain.Exciter = new HarmonicExciter(plan.ExciteRate);
+                    chain.Exciter = new HarmonicExciter(plan.ExciteRate, plan.ConversionRate);
                 }
 
                 // Output delta: the interpolated input, delayed by exactly the latency of the stages after the
@@ -302,6 +322,18 @@ internal sealed class DspPipeline : IDisposable
                     chain.UpscaledDry = new double[chain.Upscaled.Length];
                     chain.UpscaledDryDelay = stages == 0 ? null : new DelayLine(stages);
                     chain.DryUpsampler = _restorer is null ? null : new TrainingUpsampler();
+                }
+            }
+            else if (plan.ExciteRate > 0)
+            {
+                // At the source rate, in front of the chosen filter, on a copy of its own; for the delta, what went in
+                // (the unrestored source after the restorer) held back by exactly the exciter's latency.
+                chain.Exciter = new HarmonicExciter(plan.ExciteRate, plan.ConversionRate);
+                chain.Excited = new double[conversionCapacity];
+                if (restore.OutputDelta)
+                {
+                    chain.ExcitedDry = new double[conversionCapacity];
+                    chain.ExcitedDryDelay = new DelayLine(chain.Exciter.Latency);
                 }
             }
 
@@ -351,7 +383,11 @@ internal sealed class DspPipeline : IDisposable
         {
             latency += (double)TrainingUpsampler.Latency / plan.PreUpsampleRate;
             latency += (double)(_chains[0].Upscaler?.Latency ?? 0) / plan.PreUpsampleRate;
-            latency += (double)(_chains[0].Exciter?.Latency ?? 0) / plan.PreUpsampleRate;
+        }
+
+        if (!plan.PassThrough && _chains[0].Exciter is { } exciter)
+        {
+            latency += (double)exciter.Latency / exciter.Rate;
         }
 
         if (resampler is not null)
@@ -400,7 +436,7 @@ internal sealed class DspPipeline : IDisposable
         return 2.5 * BlockSecondsOf(chain);
     }
 
-    /// <summary>What the chosen filter converts from: twice the source rate while the upscaler or the exciter runs.</summary>
+    /// <summary>What the chosen filter converts from: twice the source rate while the upscaler, or the exciter, runs there.</summary>
     private static int ResamplerInputRate(PlaybackPlan plan) => plan.PreUpsampleRate > 0 ? plan.PreUpsampleRate : plan.ConversionRate;
 
     /// <summary>What the neural upscaler is doing, or null when it was not asked for.</summary>
@@ -426,7 +462,7 @@ internal sealed class DspPipeline : IDisposable
                 return null;
             }
 
-            if (exciter.TopHz <= 0.0)
+            if (exciter.EdgeHz <= 0.0)
             {
                 return Loc.T("Oversampling exciter: measuring where the music ends");
             }
@@ -435,9 +471,9 @@ internal sealed class DspPipeline : IDisposable
             double upTo = Math.Min(exciter.Rate, _plan.ProcessingRate) / 2000.0;
             double added = exciter.AddedDb;
             return double.IsNegativeInfinity(added)
-                ? Loc.F("Oversampling exciter: nothing to add above {0:0.0} kHz just now", exciter.TopHz / 1000.0)
+                ? Loc.F("Oversampling exciter: nothing to add above {0:0.0} kHz just now", exciter.StartHz / 1000.0)
                 : Loc.F("Oversampling exciter: harmonics from {0:0.0} to {1:0.#} kHz, {2:0} dB under the band above {3:0} kHz",
-                    exciter.TopHz / 1000.0, upTo, -added, exciter.DriveLowHz / 1000.0);
+                    exciter.StartHz / 1000.0, upTo, -added, exciter.DriveLowHz / 1000.0);
         }
     }
 
@@ -483,6 +519,11 @@ internal sealed class DspPipeline : IDisposable
         if (_detector is not null)
         {
             _bandwidth = _detector.Estimate();
+        }
+
+        if (_edgeTracker is not null)
+        {
+            _recentBandwidth = _edgeTracker.Estimate();
         }
     }
 
@@ -759,7 +800,7 @@ internal sealed class DspPipeline : IDisposable
                 SimdMath.Scale(delayed, replayGain);
             }
 
-            if (chain.PreUpsampler is null)
+            if (chain.PreUpsampler is null && chain.Exciter is null)
             {
                 for (int i = 0; i < frames; i++)
                 {
@@ -795,6 +836,7 @@ internal sealed class DspPipeline : IDisposable
         if (c == _detectorChannel)
         {
             _detector?.Push(original);
+            _edgeTracker?.Push(original);
         }
 
         chain.Apodization?.Process(original);
@@ -835,7 +877,8 @@ internal sealed class DspPipeline : IDisposable
 
     /// <param name="dry">
     /// For the output delta after the restorer: the source as it arrived, delayed by the restorer's latency, to be
-    /// interpolated alongside and subtracted at the upscaler's rate. Empty otherwise.
+    /// interpolated alongside and subtracted at the upscaler's rate, or at the source rate after the exciter. Empty
+    /// otherwise.
     /// </param>
     private void ProcessConverted(int c, ChannelChain chain, ReadOnlySpan<double> signal, double volume, ReadOnlySpan<double> dry)
     {
@@ -869,12 +912,7 @@ internal sealed class DspPipeline : IDisposable
 
             if (chain.Exciter is not null)
             {
-                // Above the top of the music as the detector has it so far: nothing until it has been measured, and
-                // then wherever it settles. The restorer has already filled up to the source's Nyquist frequency, and
-                // matches the masters there better than harmonics do, so after it the exciter writes only above that.
-                chain.Exciter.SetTop(_restorer is not null
-                    ? HarmonicExciter.AfterRestorerTop * _plan.ConversionRate
-                    : HarmonicExciter.TopFor(_bandwidth, _plan.ConversionRate));
+                SetExciterEdges(chain.Exciter);
                 chain.Exciter.Process(up);
             }
 
@@ -888,6 +926,30 @@ internal sealed class DspPipeline : IDisposable
             }
 
             signal = up;
+        }
+        else if (chain.Exciter is not null)
+        {
+            Span<double> excited = chain.Excited.AsSpan(0, signal.Length);
+            signal.CopyTo(excited);
+            bool delta = chain.ExcitedDry.Length > 0;
+            if (delta)
+            {
+                Span<double> excitedDry = chain.ExcitedDry.AsSpan(0, signal.Length);
+                (dry.IsEmpty ? signal : dry).CopyTo(excitedDry);
+                chain.ExcitedDryDelay!.Process(excitedDry);
+            }
+
+            SetExciterEdges(chain.Exciter);
+            chain.Exciter.Process(excited);
+            if (delta)
+            {
+                for (int i = 0; i < excited.Length; i++)
+                {
+                    excited[i] -= chain.ExcitedDry[i];
+                }
+            }
+
+            signal = excited;
         }
 
         int count = chain.Resampler!.Process(signal, chain.Processing);
@@ -928,6 +990,25 @@ internal sealed class DspPipeline : IDisposable
         }
 
         chain.OutputCount = bytesOut;
+    }
+
+    /// <summary>
+    /// Where the source ends over the last few seconds, and where the signal reaching the exciter does: the same, or just
+    /// under Nyquist after the restorer, which fills up to it and matches the masters there better than harmonics do,
+    /// so after it the harmonics above the edge go only under its band. Until the source has been measured the exciter
+    /// takes it to run to 0.45 of its rate, and glides to the edge once it is known.
+    /// </summary>
+    private void SetExciterEdges(HarmonicExciter exciter)
+    {
+        (double edge, double wall) = HarmonicExciter.EdgesFor(_recentBandwidth, _plan.ConversionRate);
+        if (_restorer is not null)
+        {
+            exciter.SetEdges(edge, HarmonicExciter.AfterRestorerTop * _plan.ConversionRate, 0.5 * _plan.ConversionRate);
+        }
+        else
+        {
+            exciter.SetEdges(edge, edge, wall);
+        }
     }
 
     private ReadOnlySpan<byte> Interleave()
@@ -1010,6 +1091,9 @@ internal sealed class DspPipeline : IDisposable
         public TrainingUpsampler? PreUpsampler;
         public NeuralUpscaler? Upscaler;
         public HarmonicExciter? Exciter;
+        public double[] Excited = [];
+        public double[] ExcitedDry = [];
+        public DelayLine? ExcitedDryDelay;
         public double[] Upscaled = [];
         public double[] UpscaledDry = [];
         public DelayLine? UpscaledDryDelay;
@@ -1042,6 +1126,7 @@ internal sealed class DspPipeline : IDisposable
             PreUpsampler?.Reset();
             Upscaler?.Reset();
             Exciter?.Reset();
+            ExcitedDryDelay?.Reset();
             UpscaledDryDelay?.Reset();
             DryUpsampler?.Reset();
             Apodization?.Reset();

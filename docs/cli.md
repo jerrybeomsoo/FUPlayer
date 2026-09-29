@@ -59,7 +59,7 @@ and [neural-upscaler.md](neural-upscaler.md).
 | `--restorer <file>` | Which `*restorer.onnx` model. Default is the newest installed |
 | `--neural-upscale` | Neural upscaler: 44.1/48 kHz PCM to 88.2/96 kHz; after the restorer when both are given |
 | `--upscaler <file>` | Which `.onnx` model. Default is the newest installed |
-| `--exciter` | Oversampling exciter: the music's harmonics above where it ends, up to 44.1/48 kHz |
+| `--exciter` | Oversampling exciter: the music's harmonics, faint under it from about 15 kHz and filling above where it ends; up to 44.1/48 kHz when the output runs above the source rate |
 | `--source-type auto\|lossy\|lossless` | How the models read the source. Default `auto` |
 | `--upscaler-level <dB>` | Gain on the synthesised band above the source Nyquist |
 | `--output-delta` | Output what the models changed only: output minus latency-aligned input |

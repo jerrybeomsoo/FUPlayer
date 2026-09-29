@@ -81,16 +81,17 @@ public sealed record PlaybackPlan
     public bool Restore { get; init; }
 
     /// <summary>
-    /// The rate the oversampling exciter runs at, twice the conversion rate, or 0 when it does not run. It follows
-    /// the neural upscaler when that runs, and otherwise the same 2x interpolator takes the source there first.
+    /// The rate the oversampling exciter runs at, or 0 when it does not run: twice the conversion rate when the output
+    /// has room above the source's Nyquist frequency, after the neural upscaler when that runs and otherwise behind the
+    /// same 2x interpolator; the conversion rate itself when it has none, in front of the chosen filter.
     /// </summary>
     public int ExciteRate { get; init; }
 
     /// <summary>
     /// The rate the chain runs at between the source and the chosen filter: twice the conversion rate while the
-    /// upscaler or the exciter runs, or 0 when the filter takes the source as it is.
+    /// upscaler runs or the exciter runs there, or 0 when the filter takes the source's rate.
     /// </summary>
-    public int PreUpsampleRate => UpscaleRate > 0 ? UpscaleRate : ExciteRate;
+    public int PreUpsampleRate => UpscaleRate > 0 ? UpscaleRate : ExciteRate > ConversionRate ? ExciteRate : 0;
 
     public double PcmLevelOffsetDb { get; init; }
 

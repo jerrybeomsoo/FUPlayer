@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.2 — 2026-09-29
+
+### Changed
+
+- **The oversampling exciter runs at any output rate.** At an output at or below the source rate, such as 48 kHz for
+  a 48 kHz stream, it now runs at the source rate instead of standing idle (after the restorer, or for a lossless
+  source) or taking the signal to twice the rate and back through the chosen filter. Above it, it runs at twice the
+  source rate as before.
+- **Its harmonics start at about 15 kHz and fade in.** From three quarters of where the music's spectrum begins to
+  fall, held between 12 and 18 kHz (14.4 kHz for AAC at 256 kbit/s), they rise under the music evenly in decibels,
+  from 50 dB under it to 6 dB under it at that edge, and stay 6 dB under the restorer's or the upscaler's band. On a
+  spectrogram of the output delta they rise out of the floor instead of starting at a wall; the level under the edge
+  moves 0.02 dB on average. The part of them that would only have raised the music's level is taken out first.
+- **Above a codec's edge the fill rises in across its roll-off** to the line it filled to before, and tops up bins the
+  music half fills. On 27 held-out coded stretches the band above the edge is now 0.2 dB from the masters (0.4.1:
+  1.4 dB over), and after the restorer 0.0 dB instead of 0.9 dB under. Above Nyquist nothing changed against hi-res
+  masters ([docs](docs/exciter.md)).
+- **Where the music ends is followed as it plays:** measured over the last three seconds instead of the whole track and
+  glided to over half a second, so the band no longer jumps when the estimate firms up, and it follows a live stream
+  that changes source. It starts at once instead of waiting for the first measurement.
+
 ## 0.4.1 — 2026-09-29
 
 ### Changed

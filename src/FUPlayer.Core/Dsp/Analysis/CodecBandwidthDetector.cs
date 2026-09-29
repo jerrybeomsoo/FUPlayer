@@ -100,16 +100,30 @@ public sealed class CodecBandwidthDetector
     private readonly double[] _above;
 
     private readonly int _sampleRate;
+
+    /// <summary>What each transform already summed is multiplied by as the next is added; 1 keeps them all.</summary>
+    private readonly double _decay;
+
     private int _pendingCount;
     private long _frames;
+
+    /// <summary>How many transforms the sums hold: the count, or less once older ones have faded.</summary>
+    private double _weight;
     private long _samples;
     private long _measuredFrames;
     private BandwidthEstimate _measured;
 
-    public CodecBandwidthDetector(int sampleRate)
+    /// <param name="sampleRate">The rate of the samples pushed.</param>
+    /// <param name="memorySeconds">
+    /// 0 to weigh everything since the start alike, which settles on one answer for a file; otherwise how long a
+    /// transform takes to fade to a third, so the answer follows a stream whose source changes, as live input's does.
+    /// </param>
+    public CodecBandwidthDetector(int sampleRate, double memorySeconds = 0.0)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sampleRate);
+        ArgumentOutOfRangeException.ThrowIfNegative(memorySeconds);
         _sampleRate = sampleRate;
+        _decay = memorySeconds > 0.0 ? Math.Exp(-FftSize / 2.0 / sampleRate / memorySeconds) : 1.0;
         _sum = new double[_plan.Bins];
         _above = new double[_plan.Bins + 1];
 
@@ -294,6 +308,7 @@ public sealed class CodecBandwidthDetector
         Array.Clear(_sum);
         _pendingCount = 0;
         _frames = 0;
+        _weight = 0.0;
         _samples = 0;
         _measuredFrames = 0;
     }
@@ -319,10 +334,11 @@ public sealed class CodecBandwidthDetector
         _plan.Forward(_frame, _re, _im);
         for (int bin = 0; bin < _sum.Length; bin++)
         {
-            _sum[bin] += (_re[bin] * _re[bin]) + (_im[bin] * _im[bin]);
+            _sum[bin] = (_decay * _sum[bin]) + (_re[bin] * _re[bin]) + (_im[bin] * _im[bin]);
         }
 
         _frames++;
+        _weight = (_decay * _weight) + 1.0;
     }
 
     /// <summary>Mean power per frame of the bins between two frequencies, from the sums <see cref="Measure"/> made.</summary>
@@ -330,6 +346,6 @@ public sealed class CodecBandwidthDetector
     {
         int low = Math.Clamp((int)(lowHz / binHz), 0, bins - 1);
         int high = Math.Clamp((int)Math.Ceiling(highHz / binHz), low + 1, bins);
-        return Math.Max(0.0, _above[low] - _above[high]) / _frames / (high - low);
+        return Math.Max(0.0, _above[low] - _above[high]) / _weight / (high - low);
     }
 }

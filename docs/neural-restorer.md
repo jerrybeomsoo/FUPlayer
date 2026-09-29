@@ -12,8 +12,8 @@ the stereo it reduced to a level ratio. What the network writes there is its est
 usually carries at that point, learned from lossless recordings and coded copies of them. It is measured against the
 masters it came from below, and **Output delta** plays what it changed on its own.
 
-The [oversampling exciter](exciter.md) is a stage of its own. After the restorer it writes only above the source's
-Nyquist frequency.
+The [oversampling exciter](exciter.md) is a stage of its own. After the restorer it writes its harmonics 6 dB under
+the restored band and fills only above the source's Nyquist frequency.
 
 The release carries the model this page measures, `neural-restorer.onnx` and `neural-restorer.json`, in the `models`
 folder next to `FUPlayer.exe`. To use another, train it with the scripts in

@@ -1230,18 +1230,6 @@ public sealed class PlaybackEngine : IDisposable
             };
         }
 
-        // The exciter writes from the top of the music upwards. At an output below twice the source rate, a source
-        // that runs to its Nyquist frequency, or one the restorer has filled up to it, leaves it no room at all.
-        if (plan.ExciteRate > 0 && plan.ProcessingRate < plan.ExciteRate && (!lossy || plan.Restore))
-        {
-            plan = plan with
-            {
-                ExciteRate = 0,
-                Limiter = settings.Processing.Limiter || coded || plan.Restore || plan.UpscaleRate > 0,
-                Notes = [.. plan.Notes, Loc.F("Exciter idle: no room above the music below {0}.", AudioRates.Format(plan.ExciteRate))],
-            };
-        }
-
         if (plan.UpscaleRate == 0)
         {
             return plan;
@@ -1253,13 +1241,16 @@ public sealed class PlaybackEngine : IDisposable
         if (!upscalerLossy && plan.ProcessingRate < plan.UpscaleRate)
         {
             string reason = plan.Restore ? Loc.T("restored source") : Loc.T("lossless source");
-            return plan with
+            PlaybackPlan idle = plan with
             {
                 UpscaleRate = 0,
                 SourceIsLossy = false,
                 Limiter = settings.Processing.Limiter || coded || plan.Restore || plan.ExciteRate > 0,
                 Notes = [.. plan.Notes, Loc.F("Neural upscaler idle: {0}, output below {1}.", reason, AudioRates.Format(plan.UpscaleRate))],
             };
+
+            // The exciter ran at twice the source rate behind the upscaler; without it the output's own rate decides.
+            return idle.ExciteRate > 0 ? idle with { ExciteRate = OutputPlanner.ExciteRateFor(idle) } : idle;
         }
 
         return plan with { SourceIsLossy = upscalerLossy };
