@@ -324,11 +324,11 @@ public sealed class RestorationSettings
     public string? NeuralRestorerPath { get; set; }
 
     /// <summary>
-    /// With the restorer, write the music's own harmonics into the band above the codec's edge, in the share of it
-    /// the music's partials call for (<see cref="Dsp.Restoration.HarmonicExciter"/>). Nothing to set: it follows the
-    /// edge and the music by itself.
+    /// Write the music's own harmonics above the top of its spectrum, at twice the source rate, for PCM sources up to
+    /// 48 kHz (<see cref="Dsp.Restoration.HarmonicExciter"/>). Runs with or without the networks; nothing to set, it
+    /// follows the music by itself. Off until asked for, like the networks.
     /// </summary>
-    public bool NeuralRestorerExciter { get; set; } = true;
+    public bool Exciter { get; set; }
 
     /// <summary>Whether the network treats the source as coded or lossless.</summary>
     public UpscalerSource SourceType { get; set; } = UpscalerSource.Automatic;

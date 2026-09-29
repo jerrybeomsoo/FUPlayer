@@ -133,10 +133,6 @@
                 <ToggleSwitch IsChecked="{Binding NeuralRestorer}" OnContent="" OffContent="" />
               </controls:SettingRow>
               <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,4" Text="{Binding RestorerStatus}" IsVisible="{Binding NeuralRestorer}" />
-              <controls:SettingRow Title="Oversampling exciter" IsVisible="{Binding NeuralRestorer}"
-                                   Description="Continues the music's own harmonics into the band above the codec's edge that the restorer fills, made at four times the rate so nothing folds back. It follows the edge and the music by itself: the more the octave below the edge is in partials, the more of the band goes to their harmonics, at the level the restorer set. It adds 26 ms at 48 kHz and 28 at 44.1.">
-                <ToggleSwitch IsChecked="{Binding RestorerExciter}" OnContent="" OffContent="" />
-              </controls:SettingRow>
               <controls:SettingRow Title="Neural upscaler"
                                    Description="44.1/48 kHz sources to 88.2/96 kHz, with the band above the source's own written. ONNX Runtime on the processor, after the restorer and before the filter, about 0.55 s; the limiter runs with it.">
                 <ToggleSwitch IsChecked="{Binding NeuralUpscaler}" OnContent="" OffContent="" />
@@ -147,12 +143,16 @@
                 </controls:SettingRow>
                 <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,4" Text="{Binding UpscalerStatus}" />
               </StackPanel>
+              <controls:SettingRow Title="Oversampling exciter"
+                                   Description="Adds the music's own harmonics above where its spectrum ends, made from the band above 7 kHz at four times the source rate, so they reach 44.1/48 kHz without folding back. Their level follows the music the way hi-res recordings do; nothing to set. PCM up to 48 kHz, about 25 ms.">
+                <ToggleSwitch IsChecked="{Binding Exciter}" OnContent="" OffContent="" />
+              </controls:SettingRow>
               <StackPanel Spacing="0" IsVisible="{Binding HasNeuralModel}">
                 <controls:SettingRow Title="Source type" Description="{Binding SourceTypeDescription}">
                   <ComboBox ItemsSource="{Binding UpscalerSourceChoices}" SelectedItem="{Binding SelectedUpscalerSource}" Width="170" MinWidth="170" />
                 </controls:SettingRow>
                 <controls:SettingRow Title="Output delta"
-                                     Description="Outputs y − x: the networks' output minus their latency-aligned input. Silent when neither runs. Monitoring only.">
+                                     Description="Outputs y − x: what the networks and the exciter added, their output minus their latency-aligned input. Silent when none runs. Monitoring only.">
                   <ToggleSwitch IsChecked="{Binding OutputDelta}" OnContent="" OffContent="" />
                 </controls:SettingRow>
               </StackPanel>

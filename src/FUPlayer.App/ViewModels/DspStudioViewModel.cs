@@ -178,7 +178,8 @@ public sealed partial class DspStudioViewModel : ObservableObject
     private bool _neuralRestorer;
 
     [ObservableProperty]
-    private bool _restorerExciter;
+    [NotifyPropertyChangedFor(nameof(HasNeuralModel))]
+    private bool _exciter;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNeuralModel))]
@@ -452,7 +453,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
     public string RestorerStatus => ModelLibrary.DescribeRestorer();
 
     /// <summary>Either network is on, so the settings they share are shown.</summary>
-    public bool HasNeuralModel => NeuralRestorer || NeuralUpscaler;
+    public bool HasNeuralModel => NeuralRestorer || NeuralUpscaler || Exciter;
 
     /// <summary>
     /// What Source type does, and under Automatic what it decided about whatever is playing: the setting says
@@ -565,7 +566,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
 
     public string LimiterDescription => Limiter
         ? Loc.T("Look-ahead peak limiter, 1 ms: holds inter-sample overs below full scale. Now playing counts engagements.")
-        : Loc.T("Off for lossless sources. Lossy codecs, captures, restored and upscaled audio stay limited: their overs are codec or network products that would alias above 40 kHz or destabilise a DSD modulator.");
+        : Loc.T("Off for lossless sources. Lossy codecs, captures, and restored, upscaled or excited audio stay limited: their overs are codec or processing products that would alias above 40 kHz or destabilise a DSD modulator.");
 
     private PlayerSettings Settings => _services.Settings;
 
@@ -698,8 +699,8 @@ public sealed partial class DspStudioViewModel : ObservableObject
         OnPropertyChanged(nameof(RestorerStatus));
     }
 
-    partial void OnRestorerExciterChanged(bool value) =>
-        Update(value, (bool v) => Settings.Restoration.NeuralRestorerExciter = v);
+    partial void OnExciterChanged(bool value) =>
+        Update(value, (bool v) => Settings.Restoration.Exciter = v);
 
     partial void OnSelectedUpscalerSourceChanged(Choice? value) =>
         Update(value, (UpscalerSource source) => Settings.Restoration.SourceType = source);
@@ -791,7 +792,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
                 Choice.Find(ConvolutionLayoutChoices, s.Processing.ConvolutionUniformBlocks) ?? ConvolutionLayoutChoices[0];
             RemoveUltrasonics = s.Processing.RemoveUltrasonics;
             NeuralRestorer = s.Restoration.NeuralRestorer;
-            RestorerExciter = s.Restoration.NeuralRestorerExciter;
+            Exciter = s.Restoration.Exciter;
             NeuralUpscaler = s.Restoration.NeuralUpscaler;
             SelectedUpscalerSource = Choice.Find(UpscalerSourceChoices, s.Restoration.SourceType) ?? UpscalerSourceChoices[0];
             SelectedUpscalerBand = Choice.Find(UpscalerBandChoices, s.Restoration.UpscalerBandDb) ?? UpscalerBandChoices[1];

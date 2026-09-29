@@ -80,6 +80,18 @@ public sealed record PlaybackPlan
     /// </summary>
     public bool Restore { get; init; }
 
+    /// <summary>
+    /// The rate the oversampling exciter runs at, twice the conversion rate, or 0 when it does not run. It follows
+    /// the neural upscaler when that runs, and otherwise the same 2x interpolator takes the source there first.
+    /// </summary>
+    public int ExciteRate { get; init; }
+
+    /// <summary>
+    /// The rate the chain runs at between the source and the chosen filter: twice the conversion rate while the
+    /// upscaler or the exciter runs, or 0 when the filter takes the source as it is.
+    /// </summary>
+    public int PreUpsampleRate => UpscaleRate > 0 ? UpscaleRate : ExciteRate;
+
     public double PcmLevelOffsetDb { get; init; }
 
     /// <summary>Human-readable explanations of substitutions and limits.</summary>
@@ -114,5 +126,6 @@ public sealed record PlaybackPlan
         && UpscaleRate == other.UpscaleRate
         && (UpscaleRate == 0 || SourceIsLossy == other.SourceIsLossy)
         && Restore == other.Restore
+        && ExciteRate == other.ExciteRate
         && PcmLevelOffsetDb == other.PcmLevelOffsetDb;
 }

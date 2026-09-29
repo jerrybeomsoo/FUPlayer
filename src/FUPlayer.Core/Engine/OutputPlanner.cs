@@ -39,7 +39,8 @@ public static class OutputPlanner
             }
             else if (PlanDsd(source, settings, backend, capabilities, channels, notes) is { } dsd)
             {
-                return WithRestoration(WithUpscaling(dsd, settings.Restoration, notes), settings.Restoration, notes);
+                return WithRestoration(
+                    WithExciter(WithUpscaling(dsd, settings.Restoration, notes), settings.Restoration, notes), settings.Restoration, notes);
             }
             else
             {
@@ -48,9 +49,37 @@ public static class OutputPlanner
         }
 
         return WithRestoration(
-            WithUpscaling(PlanPcm(source, settings, capabilities, channels, notes), settings.Restoration, notes),
+            WithExciter(WithUpscaling(PlanPcm(source, settings, capabilities, channels, notes), settings.Restoration, notes), settings.Restoration, notes),
             settings.Restoration,
             notes);
+    }
+
+    /// <summary>
+    /// Adds the oversampling exciter for a PCM source at 48 kHz or below. It runs at twice the source rate, after the
+    /// upscaler when that runs, so the harmonics it writes can reach past the source's Nyquist frequency; the chosen
+    /// filter then converts from there, and has to accept that conversion. It adds signal, so the limiter runs with it.
+    /// </summary>
+    internal static PlaybackPlan WithExciter(PlaybackPlan plan, RestorationSettings restore, List<string> notes)
+    {
+        if (!restore.Exciter || plan.PassThrough || plan.Source.IsDsd || plan.Filter is null)
+        {
+            return plan;
+        }
+
+        if (plan.ConversionRate is < 16_000 or > 48_000)
+        {
+            notes.Add(Loc.F("The exciter works on sources up to 48 kHz; {0} is played without it.", AudioRates.Format(plan.ConversionRate)));
+            return plan with { Notes = [.. plan.Notes, .. notes.Except(plan.Notes)] };
+        }
+
+        int rate = plan.ConversionRate * 2;
+        if (plan.UpscaleRate == 0 && !ResamplerFactory.IsSupported(plan.Filter, rate, plan.ProcessingRate))
+        {
+            notes.Add(Loc.F("{0} cannot convert {1} to {2}; the exciter is not running.", plan.Filter.Name, AudioRates.Format(rate), AudioRates.Format(plan.ProcessingRate)));
+            return plan with { Notes = [.. plan.Notes, .. notes.Except(plan.Notes)] };
+        }
+
+        return plan with { ExciteRate = rate, Limiter = true, Notes = [.. plan.Notes, .. notes.Except(plan.Notes)] };
     }
 
     /// <summary>

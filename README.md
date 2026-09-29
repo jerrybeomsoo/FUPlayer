@@ -108,9 +108,7 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 - Lossy repair is two neural networks, both in the release, both run on the processor through ONNX Runtime:
   - the **neural restorer** takes coded 44.1 and 48 kHz stereo (Opus, AAC, MP3, Vorbis, 96 kbit/s upwards) back
     towards the lossless recording at the same rate, with about 90 ms of delay: the band above the codec's
-    low-pass, the collapsed stereo, the holes of the weaker encoders ([its page](docs/neural-restorer.md)),
-    and an **oversampling exciter** behind it continues the music's own harmonics into the band above the codec's
-    edge, which the network fills at the right level but as a texture of its own;
+    low-pass, the collapsed stereo, the holes of the weaker encoders ([its page](docs/neural-restorer.md));
   - the **neural upscaler** takes 44.1 and 48 kHz files and captures to 88.2 and 96 kHz, correcting coded passbands
     and synthesising the band above the source Nyquist, with about half a second of delay
     ([its page](docs/neural-upscaler.md)).
@@ -118,6 +116,9 @@ ASIO. Expect rough edges, and expect settings to move between versions.
   Chained, the restorer goes first and the upscaler reads its output as lossless. Neither recovers what a codec
   discarded, and both pages say what they get right and where they are wrong. The scripts in `training/` train
   either from your own files.
+- An **oversampling exciter** writes the music's own harmonics above where its spectrum ends: made from the band
+  above 7 kHz at four times the source rate and written up to 44.1/48 kHz, at the level hi-res masters have there.
+  With or without the networks, off until asked for, nothing to set ([its page](docs/exciter.md)).
 - Measures where a file's spectrum actually ends, which is the only way to tell a coded stream from a
   lossless one when nothing in the container says so.
 

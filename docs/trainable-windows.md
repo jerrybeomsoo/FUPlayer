@@ -100,6 +100,29 @@ for Hann), so transients and pre-echo need measuring as well as log-spectral dis
 7 h 17 min here; a screening round of the three variants at a third of that length is an afternoon of GPU time. A
 change would mean new models, and the player building whatever window the model's metadata names.
 
+#### What the experiment found
+
+Four runs of 12,000 steps from scratch on the M2200, each scored on the same validation stretches through the
+fixed Hann STFT, the mean of its last three validations (`compare_windows.py` in the training workspace):
+
+| Window | Score | LSD above 12 kHz |
+| --- | --- | --- |
+| Hann, first start | 4.064 | 8.26 dB |
+| Hann, second start | 4.056 | 8.36 dB |
+| Nuttall | 3.948 | 8.00 dB |
+| Trainable four-term cosine sum | 4.030 | 8.44 dB |
+
+The two Hann runs differ only in the network's random start: 0.008 in score and 0.10 dB in LSD. Nuttall's window
+beat Hann by 0.113 and 0.31 dB, far more than twice that, with nothing guarded worse. The trainable window learned its
+way back to about Hann (0.40, 0.60, 0.002, 0.001) and gained nothing: the paper's gain came from low leakage, and a
+window free to choose did not choose it.
+
+A full run with Nuttall's window, 32,000 spectral and 16,000 adversarial steps from scratch, was then measured on the
+held-out songs against the model it would replace: log-spectral distance above 12 kHz 7.75 → 7.61 dB and closer on
+every codec family, the mixed level above 16 kHz −0.88 → −0.67 dB, mid 0.93 → 0.86 and side 1.20 → 1.09 dB, frames
+over the masking threshold 0.61 → 0.47 % (Vorbis 1.22 → 0.22 %), fewer lines; a lossless file changed more, −62.0 →
+−54.3 dB. It is the restorer in 0.4.1, and the player takes its window from the model's description.
+
 ### The analyzer
 
 A display, whose window the viewer chooses. There is nothing to train.
@@ -115,6 +138,7 @@ A display, whose window the viewer chooses. There is nothing to train.
    - **The restorer's STFT window** as an experiment: the one place where the paper's mechanism, leakage in front of
      a network, is actually at work in FUPlayer. Worth an afternoon of training to find out, and worth shipping only
      if held-out log-spectral distance improves by more than the spread between seeds without costing transients.
+     Done: Nuttall's fixed window did, a trained one did not, and the restorer in 0.4.1 uses Nuttall's (above).
 
 ## Sources
 

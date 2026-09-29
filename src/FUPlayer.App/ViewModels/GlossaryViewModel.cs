@@ -177,7 +177,7 @@ public sealed partial class GlossaryViewModel : ObservableObject
             ("Neural restorer",
                 "A neural network trained to bring lossy-coded music (MP3, AAC, Opus, Vorbis) back towards the lossless original: it rebuilds high frequencies and stereo detail the codec removed. It runs on the processor with ONNX Runtime."),
             ("Exciter",
-                "A process that adds harmonics to a sound. The oversampling exciter after the neural restorer continues the music's own harmonics into the band a codec cut off, and makes them at four times the sample rate, so that none of them fold back below Nyquist as tones the music never had."),
+                "A process that adds harmonics to a sound. FUPlayer's oversampling exciter makes them from the music above 7 kHz and adds them above where its spectrum ends, up to 44.1 or 48 kHz. It makes them at four times the source rate, so none fold back as tones the music never had."),
             ("Neural upscaler",
                 "A neural network that doubles the sample rate of 44.1 and 48 kHz music and writes plausible content above the original Nyquist frequency, where plain resampling leaves silence."),
             ("LSD (log-spectral distance)",

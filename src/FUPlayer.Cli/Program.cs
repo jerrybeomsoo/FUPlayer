@@ -117,10 +117,11 @@ internal static class Program
               --neural-restore             Neural restorer: coded 44.1/48 kHz stereo back towards lossless,
                                            at the same rate, in about 85 ms
               --restorer <file>            Which *restorer.onnx model to use (default: newest installed)
-              --no-exciter                 Leave out the oversampling exciter that follows the restorer
               --neural-upscale             Neural upscaler: 44.1/48 kHz PCM to 88.2/96 kHz; after the
                                            restorer when both are given
               --upscaler <file>            Which .onnx model to use (default: newest installed)
+              --exciter                    Oversampling exciter: the music's harmonics above where it ends,
+                                           at twice the source rate, up to 44.1/48 kHz
               --source-type auto|lossy|lossless  How the models read the source (default auto)
               --upscaler-level <dB>        Gain on the synthesised band above the source Nyquist
               --output-delta               Output what the models changed only (output minus input)
@@ -874,7 +875,7 @@ internal static class Program
         {
             "dop", "pass-through", "remove-ultrasonics", "no-limiter",
             "gpu", "gpu-fast", "gpu-force", "gpu-hold", "probe", "convolution-layered",
-            "neural-upscale", "neural-restore", "no-exciter", "output-delta", "local-only", "private-msys2", "keep",
+            "neural-upscale", "neural-restore", "exciter", "no-exciter", "output-delta", "local-only", "private-msys2", "keep",
         };
 
         public static Options Parse(IEnumerable<string> args)
@@ -980,7 +981,7 @@ internal static class Program
             settings.Restoration.NeuralUpscaler = Has("neural-upscale");
             settings.Restoration.NeuralUpscalerPath = Get("upscaler") is string model && model.Length > 0 ? Path.GetFullPath(model) : null;
             settings.Restoration.NeuralRestorer = Has("neural-restore");
-            settings.Restoration.NeuralRestorerExciter = !Has("no-exciter");
+            settings.Restoration.Exciter = Has("exciter") && !Has("no-exciter");
             settings.Restoration.NeuralRestorerPath = Get("restorer") is string restorer && restorer.Length > 0 ? Path.GetFullPath(restorer) : null;
             settings.Restoration.UpscalerBandDb = GetDouble("upscaler-level") ?? 0.0;
             settings.Restoration.OutputDelta = Has("output-delta");

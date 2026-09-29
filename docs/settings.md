@@ -57,11 +57,11 @@ Every setting, what it changes, and what it costs. Settings are stored in `%APPD
 | Setting | Options | Notes |
 | --- | --- | --- |
 | Neural restorer | on / off | Coded 44.1/48 kHz stereo back towards lossless at the same rate; 91 ms at 48 kHz, 99 ms at 44.1. See [neural-restorer.md](neural-restorer.md) |
-| Oversampling exciter | on (default) / off | Shown with the restorer on. Continues the music's own harmonics into the band above the codec's edge that the restorer fills, made at four times the rate so nothing folds back, in the share the music's partials call for and at the restorer's level. Nothing to adjust; 26 ms more at 48 kHz, 28 at 44.1. See [neural-restorer.md](neural-restorer.md#the-oversampling-exciter) |
 | Neural upscaler | on / off | 44.1/48 kHz to 88.2/96 kHz; about 0.55 s. With the restorer on, it runs after it and reads its output as lossless. See [neural-upscaler.md](neural-upscaler.md) |
 | Upscaled band level | Quiet −6 dB, Measured, Lifted +3 dB, Strong +6 dB | Gain on what the upscaler writes above the source Nyquist |
+| Oversampling exciter | on / off (default) | The music's own harmonics above where its spectrum ends, made from the band above 7 kHz at four times the source rate and written up to 44.1/48 kHz, at the level hi-res masters have there. With or without the networks; nothing to adjust; about 25 ms. See [exciter.md](exciter.md) |
 | Source type | Automatic, Lossy, Lossless | Automatic treats lossy codecs and captures as coded and PCM, FLAC and ALAC as lossless. The restorer runs only on coded sources |
-| Output delta | on / off | Plays only what the networks changed. For monitoring |
+| Output delta | on / off | Plays only what the networks and the exciter changed. For monitoring |
 
 The peak limiter runs while either network does, whatever its own switch says.
 

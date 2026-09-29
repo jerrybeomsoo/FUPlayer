@@ -1100,7 +1100,8 @@ public sealed class PlaybackEngine : IDisposable
         || a.NeuralRestorerPath != b.NeuralRestorerPath
         || a.SourceType != b.SourceType
         || a.UpscalerBandDb != b.UpscalerBandDb
-        || a.OutputDelta != b.OutputDelta;
+        || a.OutputDelta != b.OutputDelta
+        || a.Exciter != b.Exciter;
 
     /// <summary>
     /// Swaps the live pipeline and releases the old one's accelerator. Only the engine thread calls this; the
@@ -1224,8 +1225,20 @@ public sealed class PlaybackEngine : IDisposable
             plan = plan with
             {
                 Restore = false,
-                Limiter = settings.Processing.Limiter || coded || plan.UpscaleRate > 0,
+                Limiter = settings.Processing.Limiter || coded || plan.UpscaleRate > 0 || plan.ExciteRate > 0,
                 Notes = [.. plan.Notes, Loc.T("Neural restorer idle: lossless source.")],
+            };
+        }
+
+        // The exciter writes from the top of the music upwards. At an output below twice the source rate, a source
+        // that runs to its Nyquist frequency, or one the restorer has filled up to it, leaves it no room at all.
+        if (plan.ExciteRate > 0 && plan.ProcessingRate < plan.ExciteRate && (!lossy || plan.Restore))
+        {
+            plan = plan with
+            {
+                ExciteRate = 0,
+                Limiter = settings.Processing.Limiter || coded || plan.Restore || plan.UpscaleRate > 0,
+                Notes = [.. plan.Notes, Loc.F("Exciter idle: no room above the music below {0}.", AudioRates.Format(plan.ExciteRate))],
             };
         }
 
@@ -1244,7 +1257,7 @@ public sealed class PlaybackEngine : IDisposable
             {
                 UpscaleRate = 0,
                 SourceIsLossy = false,
-                Limiter = settings.Processing.Limiter || coded || plan.Restore,
+                Limiter = settings.Processing.Limiter || coded || plan.Restore || plan.ExciteRate > 0,
                 Notes = [.. plan.Notes, Loc.F("Neural upscaler idle: {0}, output below {1}.", reason, AudioRates.Format(plan.UpscaleRate))],
             };
         }

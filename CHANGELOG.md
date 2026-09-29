@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.4.1 — 2026-09-29
+
+### Changed
+
+- **The oversampling exciter is a stage of its own**, no longer part of the neural restorer, and off until asked
+  for (DSP studio › Lossy repair, `--exciter`). It now runs at twice the source rate, so the harmonics it makes from
+  the music above 7 kHz reach past the source's Nyquist frequency, up to 44.1 or 48 kHz, and show in the analyzer's
+  processed output. Their level is the music's own slope continued 12 dB an octave steeper, which is where hi-res
+  masters lie: on 40 of them from the library, brought to CD rate and excited, +0.5 to +1.5 dB from the masters
+  above Nyquist on average. It adds only what is missing under that line, so the music's own band and the
+  restorer's and upscaler's bands are left alone. PCM sources up to 48 kHz; about 25 ms
+  ([docs](docs/exciter.md)). `--no-exciter` is still accepted and changes nothing.
+- **A new neural restorer**, fitted with Nuttall's window, which the player takes from the model's description. On
+  the held-out songs, against the model it replaces: closer to the masters above 12 kHz for every codec family
+  (log-spectral distance 7.75 → 7.61 dB), the mixed level above 16 kHz −0.88 → −0.67 dB, mid and side 0.93 → 0.86
+  and 1.20 → 1.09 dB, frames over the masking threshold 0.61 → 0.47 % (Vorbis 1.22 → 0.22 %). A lossless file forced
+  through it changes a little more, −62.0 → −54.3 dB ([docs](docs/neural-restorer.md),
+  [why this window](docs/trainable-windows.md)).
+- The Korean interface's descriptions and glossary are shorter.
+
+### Fixed
+
+- Turning the exciter on or off now takes effect at once rather than at the next track.
+
 ## 0.4.0 — 2026-09-29
 
 ### Added
