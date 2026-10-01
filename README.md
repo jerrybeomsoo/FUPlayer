@@ -14,7 +14,7 @@ Now with Neural Restorer and Upscaler.
 [![.NET 9](https://img.shields.io/badge/.NET-9.0-512BD4.svg?style=flat-square&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![Avalonia](https://img.shields.io/badge/UI-Avalonia%2012-8B44AC.svg?style=flat-square)](https://avaloniaui.net/)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6.svg?style=flat-square&logo=windows&logoColor=white)](#requirements)
-[![Version](https://img.shields.io/badge/version-0.4.2-blue.svg?style=flat-square)](#status)
+[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg?style=flat-square)](#status)
 
 <img src="docs/images/dsp-studio.png" alt="The DSP studio, showing a 2,097,153-tap filter and its magnitude response" width="820">
 
