@@ -16,6 +16,12 @@ public enum FilterFamily
     LowRinging,
     Polynomial,
     Iir,
+
+    /// <summary>
+    /// The sinc kept as it is over most of its length and tapered only at the ends, in stages of its own
+    /// (<see cref="Design.TransientAlignedDesign"/>).
+    /// </summary>
+    TransientAligned,
 }
 
 public enum PolynomialKind
@@ -83,7 +89,8 @@ public sealed record FilterPreset
     /// whose character is its short impulse, an interpolating polynomial and an IIR cascade all keep their own length.
     /// </summary>
     public bool SupportsCustomLength =>
-        Family is FilterFamily.Sinc or FilterFamily.GaussianSinc or FilterFamily.NuttallSinc or FilterFamily.Halfband;
+        Family is FilterFamily.Sinc or FilterFamily.GaussianSinc or FilterFamily.NuttallSinc or FilterFamily.Halfband
+            or FilterFamily.TransientAligned;
 
     private readonly WindowKind? _window;
 
@@ -107,6 +114,9 @@ public static class FilterCatalog
 
     /// <summary>Lowest source rate for early roll-off filters.</summary>
     public const int EarlyRollOffMinimumRate = 50_000;
+
+    /// <summary>The transient-aligned filter (<see cref="TransientAlignedDesign"/>).</summary>
+    public const string TransientAlignedId = "transient-aligned";
 
     /// <summary>Filter that brings converted DSD files up to the modulator rate.</summary>
     public const string DsdRemodulationId = "halfband-steep";
@@ -183,6 +193,14 @@ public static class FilterCatalog
         AddNuttall(list, "blackman-nuttall-steep", "Blackman–Nuttall sinc · steep", 0.95, WindowKind.BlackmanNuttall,
             "The four-term cosine window with the lowest sidelobes: about 114 dB right from the edge of the stopband, but it falls only 6 dB an octave from there, so it stays near 120 to 135 dB where the Nuttall window reaches 150 dB and more.",
             PhaseResponse.Linear, PhaseResponse.Minimum);
+
+        list.Add(new FilterPreset
+        {
+            Id = TransientAlignedId, Name = "Transient-Aligned Filter", Group = "Transient-aligned", Family = FilterFamily.TransientAligned,
+            PassbandFraction = 1.0 - TransientAlignedDesign.TransitionFraction, StopbandFraction = 1.0 + TransientAlignedDesign.TransitionFraction,
+            AttenuationDb = TransientAlignedDesign.AttenuationDb,
+            Description = "The ideal sinc kept as it is over most of its length, at least the middle half, and tapered only at the ends, smoothly enough for 150 dB of image rejection from a thousandth of the Nyquist frequency past it. Original samples pass unchanged. 16× first, then a short stage up to 256×. Longer keeps more of it exact; automatic is 0.92 s.",
+        });
 
         list.Add(new FilterPreset
         {

@@ -1098,6 +1098,8 @@ public sealed class PlaybackEngine : IDisposable
         || a.NeuralUpscalerPath != b.NeuralUpscalerPath
         || a.NeuralRestorer != b.NeuralRestorer
         || a.NeuralRestorerPath != b.NeuralRestorerPath
+        || a.RestorerDevice != b.RestorerDevice
+        || a.UpscalerDevice != b.UpscalerDevice
         || a.SourceType != b.SourceType
         || a.UpscalerBandDb != b.UpscalerBandDb
         || a.OutputDelta != b.OutputDelta

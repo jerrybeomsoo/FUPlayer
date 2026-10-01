@@ -51,6 +51,9 @@ public sealed class ResamplerChain
     /// <summary>Taps of the longest FIR in the chain (the filter the user chose), or 0 when there is none.</summary>
     public int Taps => Stages.Count == 0 ? 0 : Stages.Max(s => s.Taps);
 
+    /// <summary>Roughly what the stages' coefficients and spectra hold, for the design cache.</summary>
+    public long MemoryBytes => Stages.Sum(s => s.MemoryBytes);
+
     /// <summary>Extra input samples needed to push everything buffered inside block-based stages out.</summary>
     public int FlushInputSamples =>
         (int)Math.Ceiling(Stages.Sum(s => s.FlushInputSamples * (InputRate / (double)s.InputRate)));

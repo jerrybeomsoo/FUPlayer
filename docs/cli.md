@@ -23,7 +23,7 @@ or, after building, `src/FUPlayer.Cli/bin/Release/net9.0/fuplayer-cli.exe`.
 | `apps` | Applications whose audio can be captured |
 | `capture --app <name\|pid>` | Record one application's output to a float WAV |
 | `bandwidth <files>` | Where each file's spectrum ends, and whether that looks like a codec |
-| `models` | Installed neural restorers and upscalers, and the folders searched |
+| `models` | Installed neural restorers and upscalers, the folders searched, and the graphics adapters they can run on |
 | `upnp` | Be a UPnP renderer that foobar2000 and other controllers play to, until Ctrl+C |
 | `ffmpeg-install` | Download FFmpeg's source, build the LGPL libraries and install them where the player looks |
 
@@ -39,7 +39,7 @@ and [neural-upscaler.md](neural-upscaler.md).
 | `--rate <Hz>` | Fixed PCM output rate |
 | `--limit <Hz>` | Highest PCM output rate to choose automatically |
 | `--dsd 64\|128\|256\|512\|1024` | Highest DSD multiple |
-| `--filter <id>` | Resampling filter, from `filters` |
+| `--filter <id>` | Resampling filter, from `filters`. `transient-aligned` is the [Transient-Aligned Filter](transient-aligned-filter.md) |
 | `--dither <id>` | Dither or noise shaping, from `dithers` |
 | `--modulator <id>` | Delta-sigma modulator, from `modulators` |
 | `--taps <n>` | Filter length at the output rate. 0 uses the filter's own specification |
@@ -59,6 +59,8 @@ and [neural-upscaler.md](neural-upscaler.md).
 | `--restorer <file>` | Which `*restorer.onnx` model. Default is the newest installed |
 | `--neural-upscale` | Neural upscaler: 44.1/48 kHz PCM to 88.2/96 kHz; after the restorer when both are given |
 | `--upscaler <file>` | Which `.onnx` model. Default is the newest installed |
+| `--restorer-device <n\|name>` | Run the restorer on a graphics adapter, by its number in `models` or its name. Default is the processor |
+| `--upscaler-device <n\|name>` | The same for the upscaler |
 | `--exciter` | Oversampling exciter: the music's harmonics, faint under it from about 15 kHz and filling above where it ends; up to 44.1/48 kHz when the output runs above the source rate |
 | `--source-type auto\|lossy\|lossless` | How the models read the source. Default `auto` |
 | `--upscaler-level <dB>` | Gain on the synthesised band above the source Nyquist |

@@ -26,6 +26,7 @@ upscaler; the newest of each kind is used unless the settings name one.
 | Setting | Values | Effect | Command line |
 | --- | --- | --- | --- |
 | Neural restorer | on, off | Runs the network on coded 44.1 and 48 kHz stereo and mono sources. | `--neural-restore`, `--restorer <file>` |
+| Runs on | Processor (default), or a graphics adapter | Shown when Windows lists an adapter. The network runs there through DirectML; an adapter that is missing or cannot open the network leaves it on the processor, and Now playing says which and why. | `--restorer-device <n\|name>` (`models` lists the adapters) |
 | Source type | Automatic, Lossy, Lossless | Shared with the upscaler. Automatic restores lossy codecs and application captures and leaves PCM, FLAC, ALAC and the other lossless formats alone; Lossy restores everything; Lossless nothing. | `--source-type auto\|lossy\|lossless` |
 | Output delta | on, off | Shared with the upscaler. Outputs what the networks changed: their output minus the latency-aligned input. For monitoring. | `--output-delta` |
 
@@ -102,7 +103,23 @@ The design follows what the two codecs it mostly meets actually do, as their spe
 - **Processor:** 5.1 million parameters, one thread. On the machine that trained it, a four-core i7-7820HQ laptop,
   with the graphics card training at the same time, the network alone ran 8.7 times faster than real time at 44.1
   kHz, and the whole pipeline with the restorer on, from a 44.1 kHz file to 88.2 kHz output, 4.7 times.
+- **Graphics adapter** (Runs on): the same laptop's Quadro M2200 ran a call of four frames in 1.9 ms against 2.1 ms
+  on the processor, and 128 s of 48 kHz Vorbis restored to 48 kHz PCM at 6.4 times real time against 5.4, with the
+  processor free for the rest. The output matches the processor's to within 7 × 10⁻⁶ of the heads' peak.
 - **Memory:** the model file is 19.4 MB.
+
+### On a graphics adapter
+
+On Windows the player is built with ONNX Runtime's DirectML package and uses the DirectML.dll that Windows itself
+has (System32, from Windows 10 version 1903); Microsoft's DirectML redistributable is not open source and is left out.
+Elsewhere there is nothing to list and the networks stay on the processor.
+
+DirectML is fast only on shapes it has compiled whole. A session that had been called with six frames and then with
+four ran every later call five times slower, 20.8 ms instead of 4.3, so on an adapter each size of call gets a
+session of its own, opened the first time that size is asked for, with the frame count fixed when it opens. That also
+lets DirectML compile the graph as one piece: the restorer's call went from 4.1 to 1.9 ms and the upscaler's from 8.4
+to 5.9 ms. The stages make one call of each size before playback starts, so the sessions are open by the first block.
+An adapter takes one call at a time, so the upscaler's two channels take turns on it.
 
 ## How the reference model was made
 

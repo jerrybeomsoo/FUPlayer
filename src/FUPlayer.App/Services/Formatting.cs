@@ -31,13 +31,25 @@ public static class Formatting
 
     public static string Count(long value) => value.ToString("N0", CultureInfo.CurrentCulture);
 
-    public static string Operations(double perSecond) => perSecond switch
+    /// <summary>
+    /// Multiply-adds per second, to three significant figures: "1.48 T ops/s" rather than the "1479.8 G ops/s" a
+    /// scale that stopped at giga gave a filter of tens of millions of taps run tap by tap.
+    /// </summary>
+    public static string Operations(double perSecond)
     {
-        >= 1e9 => (perSecond / 1e9).ToString("0.0", CultureInfo.CurrentCulture) + " G ops/s",
-        >= 1e6 => (perSecond / 1e6).ToString("0.0", CultureInfo.CurrentCulture) + " M ops/s",
-        >= 1e3 => (perSecond / 1e3).ToString("0", CultureInfo.CurrentCulture) + " k ops/s",
-        _ => perSecond.ToString("0", CultureInfo.CurrentCulture) + " ops/s",
-    };
+        (double scale, string unit) = perSecond switch
+        {
+            >= 1e12 => (1e12, " T ops/s"),
+            >= 1e9 => (1e9, " G ops/s"),
+            >= 1e6 => (1e6, " M ops/s"),
+            >= 1e3 => (1e3, " k ops/s"),
+            _ => (1.0, " ops/s"),
+        };
+
+        double value = perSecond / scale;
+        string format = value >= 100 ? "0" : value >= 10 ? "0.0" : "0.00";
+        return value.ToString(scale == 1.0 ? "0" : format, CultureInfo.CurrentCulture) + unit;
+    }
 
     public static string FileSize(long bytes) => bytes switch
     {

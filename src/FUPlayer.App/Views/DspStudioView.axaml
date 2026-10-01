@@ -129,15 +129,23 @@
               <Border Classes="divider" Margin="0,10" />
               <TextBlock Classes="h3" Text="Lossy repair" />
               <controls:SettingRow Title="Neural restorer"
-                                   Description="Coded 44.1/48 kHz stereo (Opus, AAC, MP3, Vorbis) back towards the lossless recording at the same rate. ONNX Runtime on the processor, first in the chain, 91 ms at 48 kHz and 99 at 44.1; the limiter runs with it.">
+                                   Description="Coded 44.1/48 kHz stereo (Opus, AAC, MP3, Vorbis) back towards the lossless recording at the same rate. ONNX Runtime, first in the chain, 91 ms at 48 kHz and 99 at 44.1; the limiter runs with it.">
                 <ToggleSwitch IsChecked="{Binding NeuralRestorer}" OnContent="" OffContent="" />
               </controls:SettingRow>
-              <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,4" Text="{Binding RestorerStatus}" IsVisible="{Binding NeuralRestorer}" />
+              <StackPanel Spacing="0" IsVisible="{Binding NeuralRestorer}">
+                <controls:SettingRow Title="Runs on" Description="{Binding SelectedRestorerDevice.Description}" IsVisible="{Binding HasGraphicsAdapters}">
+                  <ComboBox ItemsSource="{Binding DeviceChoices}" SelectedItem="{Binding SelectedRestorerDevice}" Width="170" MinWidth="170" />
+                </controls:SettingRow>
+                <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,4" Text="{Binding RestorerStatus}" />
+              </StackPanel>
               <controls:SettingRow Title="Neural upscaler"
-                                   Description="44.1/48 kHz sources to 88.2/96 kHz, with the band above the source's own written. ONNX Runtime on the processor, after the restorer and before the filter, about 0.55 s; the limiter runs with it.">
+                                   Description="44.1/48 kHz sources to 88.2/96 kHz, with the band above the source's own written. ONNX Runtime, after the restorer and before the filter, about 0.55 s; the limiter runs with it.">
                 <ToggleSwitch IsChecked="{Binding NeuralUpscaler}" OnContent="" OffContent="" />
               </controls:SettingRow>
               <StackPanel Spacing="0" IsVisible="{Binding NeuralUpscaler}">
+                <controls:SettingRow Title="Runs on" Description="{Binding SelectedUpscalerDevice.Description}" IsVisible="{Binding HasGraphicsAdapters}">
+                  <ComboBox ItemsSource="{Binding DeviceChoices}" SelectedItem="{Binding SelectedUpscalerDevice}" Width="170" MinWidth="170" />
+                </controls:SettingRow>
                 <controls:SettingRow Title="Upscaled band level" Description="{Binding SelectedUpscalerBand.Description}">
                   <ComboBox ItemsSource="{Binding UpscalerBandChoices}" SelectedItem="{Binding SelectedUpscalerBand}" Width="170" MinWidth="170" />
                 </controls:SettingRow>
@@ -204,7 +212,8 @@
                   <TextBlock Classes="eyebrow" Text="BLOCK DELAY" />
                   <TextBlock Text="{Binding BlockDelayText}" FontWeight="SemiBold" Classes="numeric" />
                 </StackPanel>
-                <StackPanel Grid.Column="3" Spacing="3" Margin="0,0,16,0">
+                <StackPanel Grid.Column="3" Spacing="3" Margin="0,0,16,0"
+                            ToolTip.Tip="Multiply-adds per second for one channel, worked out from how the filter is convolved. In the frequency domain the cost grows with the logarithm of the length, so a very long filter can cost less than a short one convolved tap by tap.">
                   <TextBlock Classes="eyebrow" Text="COST PER CHANNEL" />
                   <TextBlock Text="{Binding CostText}" FontWeight="SemiBold" Classes="numeric" />
                   <ProgressBar Minimum="0" Maximum="1" Value="{Binding CostFraction}" MinWidth="0" MinHeight="4" Height="4" />

@@ -67,6 +67,20 @@ public sealed class HalfbandInterpolatorStage : IRateStage
 
     public int MaxOutput(int inputSamples) => checked(inputSamples * 2);
 
+    /// <summary>The whole half-band filter at the output rate: 1 at the centre, the odd taps either side, zeros between.</summary>
+    public double[] ImpulseResponse()
+    {
+        int k = HalfLength;
+        var response = new double[(4 * k) + 1];
+        response[2 * k] = 1.0;
+        for (int m = 0; m < 2 * k; m++)
+        {
+            response[1 + (2 * m)] = _odd[(2 * k) - 1 - m];
+        }
+
+        return response;
+    }
+
     public IRateStageState CreateState() => new State(this);
 
     /// <remarks>

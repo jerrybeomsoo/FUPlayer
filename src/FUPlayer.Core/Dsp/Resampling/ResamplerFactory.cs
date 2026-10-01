@@ -72,6 +72,13 @@ public static class ResamplerFactory
     private const double MinimumCascadeAttenuation = 150.0;
     private const int CacheCapacity = 12;
 
+    /// <summary>
+    /// What the design cache may hold beyond the chain asked for last. A chain of tens of millions of taps keeps half a
+    /// gigabyte of partition spectra, and twelve were kept whatever their size: looking at a few filters in the DSP
+    /// studio with the longest length chosen held several gigabytes, next to the one the player was using.
+    /// </summary>
+    private const long CacheBudgetBytes = 1L << 30;
+
     private static readonly object CacheLock = new();
     private static readonly LinkedList<KeyValuePair<string, ResamplerChain>> Cache = new();
 
@@ -106,8 +113,10 @@ public static class ResamplerFactory
         lock (CacheLock)
         {
             Cache.AddFirst(new KeyValuePair<string, ResamplerChain>(key, chain));
-            while (Cache.Count > CacheCapacity)
+            long held = Cache.Sum(entry => entry.Value.MemoryBytes);
+            while (Cache.Count > 1 && (Cache.Count > CacheCapacity || held > CacheBudgetBytes))
             {
+                held -= Cache.Last!.Value.Value.MemoryBytes;
                 Cache.RemoveLast();
             }
         }
@@ -152,6 +161,11 @@ public static class ResamplerFactory
         if (preset.Family == FilterFamily.None)
         {
             throw new NotSupportedException("The bit-perfect filter cannot change the sample rate.");
+        }
+
+        if (preset.Family == FilterFamily.TransientAligned)
+        {
+            return TransientAligned(preset, inputRate, outputRate, taps, convolution, options);
         }
 
         var notes = new List<string>();
@@ -213,6 +227,137 @@ public static class ResamplerFactory
 
         return new ResamplerChain(inputRate, outputRate, stages, summary);
     }
+
+    /// <summary>
+    /// Multiple of the source rate the transient-aligned filter's long first stage runs to; a second, short stage of the
+    /// same kind takes it on from there, up to <see cref="TransientAlignedSecondLimit"/> times the source rate.
+    /// </summary>
+    internal const int TransientAlignedFirstMultiple = 16;
+
+    /// <summary>Highest multiple of the source rate the transient-aligned stages reach; half-band stages go on from there.</summary>
+    internal const int TransientAlignedSecondLimit = 256;
+
+    /// <summary>
+    /// Input samples the transient-aligned second stage spans. It interpolates a signal that holds nothing above the
+    /// source's Nyquist frequency, so its response may take everything from there to the first image to close, and its
+    /// tapers are a few samples long; this span keeps about two thirds of it the sinc's own.
+    /// </summary>
+    internal const int TransientAlignedSecondSpan = 64;
+
+    /// <summary>How much shorter than for interpolation the automatic length is when the output rate is the lower one.</summary>
+    private const int TransientAlignedDecimationShortening = 8;
+
+    /// <summary>
+    /// The transient-aligned filter's own stages, whatever the staging setting says, since its stages are what it is: a long
+    /// one from the source rate to 16 times it, or to the largest whole multiple of it under the output rate if that is
+    /// lower, and a short one from 16 times up to 256 times, each cut off at its own input's Nyquist frequency, so that each
+    /// passes the samples it is given through unchanged and computes only those in between. Half-band stages go on above
+    /// 256 times. An output rate that is not a whole multiple of where those stop is reached by the family bridge, from
+    /// twice the source rate at least: 44.1 to 48 kHz is the long stage to 88.2 kHz and the bridge from there, rather than
+    /// one stage of 160 phases convolved tap by tap, and 44.1 to 768 kHz the long stage to 705.6 kHz and the bridge. A
+    /// lower output rate is one stage cut off at its Nyquist frequency, an eighth as long by default: there it removes what
+    /// would fold over, and none of the samples it keeps were there before.
+    /// </summary>
+    private static ResamplerChain TransientAligned(
+        FilterPreset preset, int inputRate, int outputRate, int taps, ConvolutionMode convolution, ConvolutionOptions options)
+    {
+        var notes = new List<string>();
+        var stages = new List<IRateStage>();
+        double bandHz = inputRate / 2.0 * (1.0 + (2.0 * TransientAlignedDesign.TransitionFraction));
+
+        // What the stages after the long one are designed to, a little past the filter's own figure, so that the chain as a
+        // whole keeps it: Kaiser's estimate of the length a stopband needs is a few decibels short at these depths.
+        double attenuation = TransientAlignedDesign.AttenuationDb + 10.0;
+        if (outputRate < inputRate)
+        {
+            stages.Add(TransientAlignedStage(preset, inputRate, outputRate, taps, outputRate, inputRate, second: false, notes, convolution, options));
+        }
+        else
+        {
+            int firstMultiple = Math.Clamp(outputRate / inputRate, 2, TransientAlignedFirstMultiple);
+            int rate = inputRate * firstMultiple;
+            stages.Add(TransientAlignedStage(preset, inputRate, rate, taps, outputRate, inputRate, second: false, notes, convolution, options));
+            if (firstMultiple == TransientAlignedFirstMultiple && outputRate / rate >= 2)
+            {
+                int secondMultiple = Math.Min(outputRate / rate, TransientAlignedSecondLimit / TransientAlignedFirstMultiple);
+                stages.Add(TransientAlignedStage(preset, rate, rate * secondMultiple, 0, outputRate, inputRate, second: true, notes, convolution, options));
+                rate *= secondMultiple;
+                while ((long)rate * 2 <= outputRate)
+                {
+                    stages.Add(new HalfbandInterpolatorStage(rate, bandHz, attenuation));
+                    rate *= 2;
+                }
+            }
+
+            if (rate != outputRate)
+            {
+                stages.Add(FamilyBridge(rate, outputRate, bandHz, attenuation));
+            }
+        }
+
+        string summary = $"{preset.Name}: " + string.Join(" → ", stages.Select(s => s.Description));
+        if (notes.Count > 0)
+        {
+            summary += $" ({string.Join("; ", notes)})";
+        }
+
+        return new ResamplerChain(inputRate, outputRate, stages, summary);
+    }
+
+    /// <summary>
+    /// One transient-aligned stage. The first is as long as asked for, or <see cref="TransientAlignedDesign.DefaultLength"/>,
+    /// and closes within a thousandth of its cut-off; the second spans <see cref="TransientAlignedSecondSpan"/> input
+    /// samples and closes anywhere between the source's band and the first image of it.
+    /// </summary>
+    private static IRateStage TransientAlignedStage(
+        FilterPreset preset, int inputRate, int outputRate, int taps, int finalRate, int sourceRate, bool second,
+        List<string> notes, ConvolutionMode convolution, ConvolutionOptions options)
+    {
+        (int up, int down) = AudioRates.Ratio(inputRate, outputRate);
+        int period = Math.Max(up, down);
+        double prototypeRate = (double)up * inputRate;
+        double halfWidth;
+        int length;
+        if (second)
+        {
+            // Flat to just past the source's band, closed from the image of it: half the gap between the two either side
+            // of this stage's own Nyquist frequency, less a margin.
+            double gapHz = (inputRate / 2.0) - (sourceRate / 2.0 * (1.0 + (2.0 * TransientAlignedDesign.TransitionFraction)));
+            halfWidth = 0.9 * gapHz / prototypeRate;
+            length = (TransientAlignedSecondSpan * up) + 1;
+        }
+        else
+        {
+            halfWidth = TransientAlignedDesign.TransitionFraction / (2.0 * period);
+            length = taps > 0
+                ? ScaleTaps(taps, outputRate, finalRate, notes)
+                : outputRate < inputRate
+                    ? TransientAlignedDesign.DefaultLength(period) / TransientAlignedDecimationShortening | 1
+                    : TransientAlignedDesign.DefaultLength(period);
+            if (length > MaxPrototypeLength)
+            {
+                notes.Add(Loc.F("{0:N0} taps is longer than this build will design, so {1:N0} were used", length, MaxPrototypeLength));
+                length = MaxPrototypeLength;
+            }
+        }
+
+        double[] prototype = TransientAlignedDesign.Lowpass(length, period, up, halfWidth, out TransientAlignedShape shape);
+        double cutoffHz = prototypeRate / (2.0 * period);
+        string name = Loc.F(
+            "{0} {1}→{2}, {3:0.#} % exact sinc, ±{4} at {5}",
+            preset.Name, AudioRates.FormatShort(inputRate), AudioRates.FormatShort(outputRate), 100.0 * shape.ExactShare,
+            FormatHz(shape.HalfWidth * prototypeRate), FormatHz(cutoffHz));
+        return convolution == ConvolutionMode.Automatic && FftPolyphaseStage.Suits(inputRate, outputRate, prototype.Length, options)
+            ? FrequencyDomain(inputRate, outputRate, prototype, name, options)
+            : new PolyphaseStage(inputRate, outputRate, prototype,
+                Loc.F("{0} ({1:N0} taps, {2:N0} per phase, tap by tap)", name, prototype.Length, (prototype.Length + up - 1) / up));
+    }
+
+    /// <summary>A frequency in hertz or kilohertz: "22 Hz", "22.05 kHz", "297 kHz".</summary>
+    private static string FormatHz(double hz) =>
+        hz >= 1000.0
+            ? (hz / 1000.0).ToString(hz >= 100_000.0 ? "0" : "0.##", System.Globalization.CultureInfo.CurrentCulture) + " kHz"
+            : hz.ToString("0.#", System.Globalization.CultureInfo.CurrentCulture) + " Hz";
 
     private static FilterPreset SubstituteIfNeeded(FilterPreset preset, List<string> notes, bool allowPolynomial, bool allowIir)
     {

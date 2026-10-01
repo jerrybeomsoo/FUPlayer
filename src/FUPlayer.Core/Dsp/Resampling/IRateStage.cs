@@ -10,7 +10,7 @@ public interface IRateStage
     /// <summary>Delay introduced by the stage (impulse peak), in output samples.</summary>
     double DelayOutputSamples { get; }
 
-    /// <summary>Approximate multiply-adds per output sample, used for DSP load estimates.</summary>
+    /// <summary>Approximate multiply-adds per output sample, used for DSP load estimates and shown as the cost.</summary>
     double CostPerOutputSample { get; }
 
     /// <summary>
@@ -22,6 +22,17 @@ public interface IRateStage
 
     /// <summary>Length of the stage's FIR prototype in taps, or 0 when the stage is not an FIR.</summary>
     int Taps => 0;
+
+    /// <summary>
+    /// What the stage puts out for a unit impulse at its input, worked out from its coefficients rather than by
+    /// running it, or null for a stage that has none to give (a recursive one). The same samples as streaming the
+    /// impulse through, up to where they start: the filter's analysis takes a long filter's response from here,
+    /// because streaming an impulse through tens of millions of taps took minutes.
+    /// </summary>
+    double[]? ImpulseResponse() => null;
+
+    /// <summary>Roughly how much memory the stage's coefficients and spectra hold, for the design cache.</summary>
+    long MemoryBytes => 8L * Taps;
 
     /// <summary>
     /// Input samples the stage may hold before it produces output (block-based stages); 0 when it works

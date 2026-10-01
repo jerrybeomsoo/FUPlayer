@@ -18,13 +18,14 @@ What the Windows package contains:
 | HarfBuzzSharp and [HarfBuzz](https://github.com/harfbuzz/harfbuzz) (`libHarfBuzzSharp.dll`) | Text shaping | MIT (HarfBuzzSharp), Old MIT (HarfBuzz) | the same two files |
 | [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) 8 | MVVM helpers | MIT | `CommunityToolkit-License.md`, `CommunityToolkit-ThirdPartyNotices.txt` |
 | [TagLib#](https://github.com/mono/taglib-sharp) 2.3 | Tag and cover-art reading | LGPL-2.1-only | `LGPL-2.1.txt` |
-| [ONNX Runtime](https://github.com/microsoft/onnxruntime) 1.30 (`Microsoft.ML.OnnxRuntime`, CPU build) | Running the neural restorer and upscaler | MIT, and the licenses of the code it builds in, Eigen's MPL-2.0 among them | `onnxruntime-LICENSE.txt`, `onnxruntime-ThirdPartyNotices.txt` |
+| [ONNX Runtime](https://github.com/microsoft/onnxruntime) 1.24 (`Microsoft.ML.OnnxRuntime.DirectML`, the DirectML build) | Running the neural restorer and upscaler, on the processor or a graphics adapter | MIT, and the licenses of the code it builds in, Eigen's MPL-2.0 among them | `onnxruntime-LICENSE.txt`, `onnxruntime-ThirdPartyNotices.txt` |
 
 Not in the package:
 
 | Component | Used for | License | Source |
 |---|---|---|---|
 | [FFmpeg](https://ffmpeg.org) 9.0.1 (optional, built by the user) | Decoding of MP3, AAC/ALAC, WavPack, APE, Ogg, Opus, DST and more | LGPL-2.1-or-later (built without GPL/nonfree parts) | https://ffmpeg.org/download.html |
+| DirectML (`DirectML.dll`) | Running the networks on a graphics adapter | Microsoft's own terms | part of Windows 10 version 1903 and later; loaded from Windows' System32, never distributed with FUPlayer |
 | xUnit.net (tests only) | Unit tests | Apache-2.0 | https://github.com/xunit/xunit |
 | The training scripts' Python packages: PyTorch and torchaudio, NumPy, soundfile, ONNX, ONNX Runtime | Training the models, on the user's machine | BSD-3-Clause, BSD-2-Clause, BSD-3-Clause, BSD-3-Clause, Apache-2.0, MIT | installed with pip; see `training/*/requirements.txt` |
 | qaac and Apple's CoreAudioToolbox (optional, training only) | Apple AAC copies for the training corpus | qaac: its own terms; CoreAudioToolbox: Apple's | never distributed with FUPlayer |
@@ -65,8 +66,12 @@ unmodified `TagLibSharp.dll` NuGet assembly, which can be replaced by the user.
 ## ONNX Runtime
 
 The neural restorer and upscaler run their networks through Microsoft's ONNX Runtime, referenced as the unmodified
-`Microsoft.ML.OnnxRuntime` NuGet package (MIT); its third-party notices are in `licenses/`. Only the CPU execution
-provider is used.
+`Microsoft.ML.OnnxRuntime.DirectML` NuGet package (MIT) on Windows and `Microsoft.ML.OnnxRuntime` elsewhere; its
+third-party notices are in `licenses/`. The processor execution provider is used unless a network is set to run on a
+graphics adapter, when the DirectML execution provider is. That provider calls `DirectML.dll`, which is part of Windows.
+The package's own dependency, `Microsoft.AI.DirectML`, is Microsoft's redistributable of that DLL under a license that
+is not an open-source one: every project excludes all of its files (`Directory.Build.targets`), so no `DirectML.dll`
+ships with FUPlayer, and the one Windows has in System32 is the one loaded.
 
 ## Algorithms and published data
 

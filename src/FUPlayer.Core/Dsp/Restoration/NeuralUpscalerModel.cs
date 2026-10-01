@@ -29,13 +29,13 @@ public sealed class NeuralUpscalerModel : IDisposable
 
     public const string Extension = ".onnx";
 
-    private readonly InferenceSession _session;
+    private readonly NetworkSessions _sessions;
     private readonly string[] _inputNames;
     private readonly string[] _outputNames = ["out_re", "out_im"];
 
-    private NeuralUpscalerModel(InferenceSession session, string path, bool conditioned)
+    private NeuralUpscalerModel(NetworkSessions sessions, string path, bool conditioned)
     {
-        _session = session;
+        _sessions = sessions;
         Path = path;
         IsConditioned = conditioned;
         _inputNames = conditioned ? ["re", "im", "lossy"] : ["re", "im"];
@@ -46,36 +46,32 @@ public sealed class NeuralUpscalerModel : IDisposable
     /// <summary>True when the network takes the lossy/lossless source flag.</summary>
     public bool IsConditioned { get; }
 
+    /// <summary>The graphics adapter the network runs on, or null for the processor.</summary>
+    public GraphicsAdapter? Adapter => _sessions.Adapter;
+
+    /// <summary>Why the adapter asked for could not open the network, which then runs on the processor; null otherwise.</summary>
+    public string? AdapterFailure => _sessions.AdapterFailure;
+
     /// <summary>
-    /// Opens a model. Inference uses the processor: this build ships the processor runtime alone, which
-    /// is MIT licensed throughout.
+    /// Opens a model on the processor, on <paramref name="threads"/> threads (0 lets ONNX Runtime choose), or on a
+    /// graphics adapter (<see cref="InferenceDevices"/>), falling back to the processor when the adapter cannot open it.
     /// </summary>
-    public static NeuralUpscalerModel Load(string path, int threads = 0)
+    public static NeuralUpscalerModel Load(string path, int threads = 0, GraphicsAdapter? adapter = null)
     {
-        var options = new SessionOptions
-        {
-            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
-            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
-        };
-
-        if (threads > 0)
-        {
-            options.IntraOpNumThreads = threads;
-        }
-
-        var session = new InferenceSession(path, options);
+        var sessions = new NetworkSessions(path, adapter, threads);
+        InferenceSession session = sessions.Main;
         foreach (string name in new[] { "re", "im" })
         {
             if (!session.InputMetadata.TryGetValue(name, out NodeMetadata? meta)
                 || meta.Dimensions.Length != 3 || meta.Dimensions[1] != Bins)
             {
-                session.Dispose();
+                sessions.Dispose();
                 throw new InvalidDataException($"{System.IO.Path.GetFileName(path)} is not a neural upscaler: it has no '{name}' input of {Bins} bins.");
             }
         }
 
         bool conditioned = session.InputMetadata.TryGetValue("lossy", out NodeMetadata? flag) && flag.Dimensions.Length == 1;
-        return new NeuralUpscalerModel(session, path, conditioned);
+        return new NeuralUpscalerModel(sessions, path, conditioned);
     }
 
     /// <summary>
@@ -93,14 +89,14 @@ public sealed class NeuralUpscalerModel : IDisposable
         using var runOptions = new RunOptions();
         if (!IsConditioned)
         {
-            _session.Run(runOptions, _inputNames, [inRe, inIm], _outputNames, [resRe, resIm]);
+            _sessions.Run(frames, runOptions, _inputNames, [inRe, inIm], _outputNames, [resRe, resIm]);
             return;
         }
 
         float[] flag = [lossy ? 1.0f : 0.0f];
         using var inFlag = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance, flag.AsMemory(), [1]);
-        _session.Run(runOptions, _inputNames, [inRe, inIm, inFlag], _outputNames, [resRe, resIm]);
+        _sessions.Run(frames, runOptions, _inputNames, [inRe, inIm, inFlag], _outputNames, [resRe, resIm]);
     }
 
-    public void Dispose() => _session.Dispose();
+    public void Dispose() => _sessions.Dispose();
 }

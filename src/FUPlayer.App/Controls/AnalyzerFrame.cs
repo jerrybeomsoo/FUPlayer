@@ -34,26 +34,66 @@ public sealed record AnalyzerFrame(
     internal FrequencyAxis Axis => new(Scale, TopHz);
 }
 
-/// <summary>Maps frequencies to 0 … 1 along a logarithmic (from 20 Hz) or linear (from 0 Hz) axis.</summary>
+/// <summary>Maps frequencies to 0 … 1 along a logarithmic (from 20 Hz), linear or mel (both from 0 Hz) axis.</summary>
 internal readonly record struct FrequencyAxis(FrequencyScale Scale, double MaximumHz)
 {
     public const double LogMinimumHz = 20.0;
+
+    /// <summary>Where the mel axis puts grid lines, before it thins out their labels to fit.</summary>
+    private static readonly double[] MelGrid =
+    [
+        0, 100, 200, 300, 500, 700, 1_000, 1_500, 2_000, 3_000, 4_000, 5_000, 7_000, 10_000, 15_000, 20_000, 30_000,
+        40_000, 50_000, 70_000, 100_000, 150_000, 200_000, 300_000, 400_000,
+    ];
 
     public double MinimumHz => Scale == FrequencyScale.Logarithmic ? LogMinimumHz : 0.0;
 
     private double Top => Math.Max(MaximumHz, LogMinimumHz * 2);
 
-    public double ToFraction(double hz) => Scale == FrequencyScale.Logarithmic
-        ? Math.Log(Math.Max(hz, LogMinimumHz) / LogMinimumHz) / Math.Log(Top / LogMinimumHz)
-        : hz / Top;
+    public double ToFraction(double hz) => Scale switch
+    {
+        FrequencyScale.Logarithmic => Math.Log(Math.Max(hz, LogMinimumHz) / LogMinimumHz) / Math.Log(Top / LogMinimumHz),
+        FrequencyScale.Mel => Mel(Math.Max(hz, 0.0)) / Mel(Top),
+        _ => hz / Top,
+    };
 
-    public double ToHz(double fraction) => Scale == FrequencyScale.Logarithmic
-        ? LogMinimumHz * Math.Pow(Top / LogMinimumHz, fraction)
-        : fraction * Top;
+    public double ToHz(double fraction) => Scale switch
+    {
+        FrequencyScale.Logarithmic => LogMinimumHz * Math.Pow(Top / LogMinimumHz, fraction),
+        FrequencyScale.Mel => 700.0 * (Math.Pow(10.0, fraction * Mel(Top) / 2595.0) - 1.0),
+        _ => fraction * Top,
+    };
+
+    /// <summary>Mels for a frequency: 2595·log10(1 + f/700).</summary>
+    public static double Mel(double hz) => 2595.0 * Math.Log10(1.0 + (hz / 700.0));
 
     /// <summary>Grid frequencies for an axis <paramref name="pixels"/> long, each flagged when it should carry a label.</summary>
     public IEnumerable<(double Hz, bool Labelled)> Ticks(double pixels)
     {
+        if (Scale == FrequencyScale.Mel)
+        {
+            // Fixed round frequencies, labelled wherever the last label is far enough behind to leave room.
+            double lastLabel = double.NegativeInfinity;
+            foreach (double hz in MelGrid)
+            {
+                if (hz > Top * (1 + 1e-9))
+                {
+                    yield break;
+                }
+
+                double at = ToFraction(hz) * pixels;
+                bool labelled = at - lastLabel >= 48;
+                if (labelled)
+                {
+                    lastLabel = at;
+                }
+
+                yield return (hz, labelled);
+            }
+
+            yield break;
+        }
+
         if (Scale == FrequencyScale.Logarithmic)
         {
             bool dense = pixels / Math.Log10(Top / LogMinimumHz) > 200;

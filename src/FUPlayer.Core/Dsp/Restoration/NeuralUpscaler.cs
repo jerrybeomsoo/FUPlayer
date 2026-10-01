@@ -141,6 +141,10 @@ public sealed class NeuralUpscaler
         _outRe = new float[Bins * _span];
         _outIm = new float[Bins * _span];
 
+        // One call on silence before there is a stream: ONNX Runtime prepares a shape the first time it sees it, and on a
+        // graphics adapter the first call of a size opens a session of its own, which takes about half a second.
+        _model.Run(_inRe, _inIm, _span, _outRe, _outIm);
+
         Latency = ((chunkFrames + Context) * H) + N;
         _ready = new double[Latency + N + (chunkFrames * H)];
         Reset();

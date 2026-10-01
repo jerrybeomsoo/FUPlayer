@@ -69,4 +69,14 @@
     </Content>
   </ItemGroup>
 
+  <!--
+    ONNX Runtime's DirectML build depends on Microsoft.AI.DirectML, Microsoft's DirectML redistributable, whose licence
+    is not an open-source one. Every project that could carry it names it here only to take none of its files: no
+    DirectML.dll beside the executables, no build step copying one there. The DirectML.dll that loads is the one Windows
+    has in System32, which is what a player that has to stay redistributable can rely on.
+  -->
+  <ItemGroup Condition="'$(FuPlayerDirectML)' == 'true'">
+    <PackageReference Include="Microsoft.AI.DirectML" ExcludeAssets="all" PrivateAssets="all" />
+  </ItemGroup>
+
 </Project>

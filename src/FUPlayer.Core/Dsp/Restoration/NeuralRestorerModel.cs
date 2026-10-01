@@ -33,13 +33,13 @@ public sealed class NeuralRestorerModel : IDisposable
     /// <summary>Restorer files end in this, which is how they are told from upscalers in the models folders.</summary>
     public const string Suffix = "restorer.onnx";
 
-    private readonly InferenceSession _session;
+    private readonly NetworkSessions _sessions;
     private readonly string[] _inputNames;
     private readonly string[] _outputNames;
 
-    private NeuralRestorerModel(InferenceSession session, string path, (int Channels, int Frames)[] states, double[] window)
+    private NeuralRestorerModel(NetworkSessions sessions, string path, (int Channels, int Frames)[] states, double[] window)
     {
-        _session = session;
+        _sessions = sessions;
         Path = path;
         StateShapes = states;
         WindowCoefficients = window;
@@ -48,6 +48,12 @@ public sealed class NeuralRestorerModel : IDisposable
     }
 
     public string Path { get; }
+
+    /// <summary>The graphics adapter the network runs on, or null for the processor.</summary>
+    public GraphicsAdapter? Adapter => _sessions.Adapter;
+
+    /// <summary>Why the adapter asked for could not open the network, which then runs on the processor; null otherwise.</summary>
+    public string? AdapterFailure => _sessions.AdapterFailure;
 
     /// <summary>Channels and frames of each state tensor, the batch dimension of one left out: the look-ahead layer's first.</summary>
     public IReadOnlyList<(int Channels, int Frames)> StateShapes { get; }
@@ -71,17 +77,14 @@ public sealed class NeuralRestorerModel : IDisposable
         return value;
     }
 
-    /// <summary>Opens a restorer. Inference uses the processor, on as many threads as asked for.</summary>
-    public static NeuralRestorerModel Load(string path, int threads = 1)
+    /// <summary>
+    /// Opens a restorer on the processor, on as many threads as asked for, or on a graphics adapter
+    /// (<see cref="InferenceDevices"/>), falling back to the processor when the adapter cannot open it.
+    /// </summary>
+    public static NeuralRestorerModel Load(string path, int threads = 1, GraphicsAdapter? adapter = null)
     {
-        var options = new SessionOptions
-        {
-            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
-            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
-            IntraOpNumThreads = Math.Max(1, threads),
-        };
-
-        var session = new InferenceSession(path, options);
+        var sessions = new NetworkSessions(path, adapter, Math.Max(1, threads));
+        InferenceSession session = sessions.Main;
         try
         {
             string name = System.IO.Path.GetFileName(path);
@@ -115,11 +118,11 @@ public sealed class NeuralRestorerModel : IDisposable
                 throw new InvalidDataException($"{name}: its state is not laid out as a restorer's with a look-ahead of {Lookahead} frames.");
             }
 
-            return new NeuralRestorerModel(session, path, [.. states], ReadWindow(path));
+            return new NeuralRestorerModel(sessions, path, [.. states], ReadWindow(path));
         }
         catch
         {
-            session.Dispose();
+            sessions.Dispose();
             throw;
         }
     }
@@ -183,7 +186,7 @@ public sealed class NeuralRestorerModel : IDisposable
             }
 
             using var runOptions = new RunOptions();
-            _session.Run(runOptions, _inputNames, inputs, _outputNames, outputs);
+            _sessions.Run(frames, runOptions, _inputNames, inputs, _outputNames, outputs);
         }
         finally
         {
@@ -200,5 +203,5 @@ public sealed class NeuralRestorerModel : IDisposable
         }
     }
 
-    public void Dispose() => _session.Dispose();
+    public void Dispose() => _sessions.Dispose();
 }

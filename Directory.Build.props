@@ -20,6 +20,8 @@
     <!-- Audio code uses fixed-size buffers and pointer arithmetic in hot loops. -->
     <Optimize Condition="'$(Configuration)' == 'Release'">true</Optimize>
     <TieredPGO>true</TieredPGO>
+    <!-- ONNX Runtime's DirectML build on Windows, so the networks can run on a graphics adapter; the processor build elsewhere. -->
+    <FuPlayerDirectML Condition="'$(FuPlayerDirectML)' == ''">$([MSBuild]::IsOSPlatform('Windows'))</FuPlayerDirectML>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -29,7 +31,7 @@
     <Copyright>Copyright (c) 2026 FUPlayer contributors</Copyright>
     <!-- The project's own code is MIT; TagLib# and the optional FFmpeg libraries remain LGPL (see THIRD-PARTY-NOTICES.md). -->
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <Version>0.4.2</Version>
+    <Version>0.5.0</Version>
     <Description>Free Upscaling Player</Description>
   </PropertyGroup>
 </Project>

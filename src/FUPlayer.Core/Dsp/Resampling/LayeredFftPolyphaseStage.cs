@@ -122,7 +122,7 @@ public sealed class LayeredFftPolyphaseStage : IRateStage
 
         DelayOutputSamples = FirDesign.PeakIndex(prototype);
         Description = Loc.F("{0} ({1:N0} taps, {2:N0} per phase, {3})", name, PrototypeLength, TapsPerPhase, plan);
-        CostPerOutputSample = plan.CostPerOutputSample;
+        CostPerOutputSample = _levels.Sum(band => PartitionPlan.LevelMultiplyAdds(band.Block, band.Count, up));
     }
 
     public int InputRate { get; }
@@ -151,11 +151,45 @@ public sealed class LayeredFftPolyphaseStage : IRateStage
 
     public int Taps => PrototypeLength;
 
+    public long MemoryBytes => _levels.Sum(band => 16L * Up * band.Count * (band.Block + 1));
+
     public int FlushInputSamples => Plan.HeadBlock;
 
     public string Description { get; }
 
     public int MaxOutput(int inputSamples) => ((inputSamples / Plan.HeadBlock) + 1) * Plan.HeadBlock * Up;
+
+    /// <summary>The prototype, transformed back out of every band's partition spectra, as the uniform stage does it.</summary>
+    public double[] ImpulseResponse()
+    {
+        var response = new double[PrototypeLength];
+        Parallel.For(0, Up, phase =>
+        {
+            for (int level = 0; level < _levels.Length; level++)
+            {
+                PartitionLevel band = _levels[level];
+                var re = new double[band.Block + 1];
+                var im = new double[band.Block + 1];
+                var taps = new double[band.FftSize];
+                for (int part = 0; part < band.Count; part++)
+                {
+                    _partitionRe[level][(phase * band.Count) + part].CopyTo(re, 0);
+                    _partitionIm[level][(phase * band.Count) + part].CopyTo(im, 0);
+                    _transforms[level].Inverse(re, im, taps);
+                    for (int k = 0; k < band.Block; k++)
+                    {
+                        long index = phase + ((long)(band.Offset + (part * band.Block) + k) * Up);
+                        if (index < PrototypeLength)
+                        {
+                            response[index] = taps[k];
+                        }
+                    }
+                }
+            }
+        });
+
+        return response;
+    }
 
     public IRateStageState CreateState() => CreateState(1);
 

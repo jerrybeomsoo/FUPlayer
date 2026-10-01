@@ -119,7 +119,7 @@ public sealed class FftPolyphaseStage : IRateStage
         Description = Loc.F("{0} ({1:N0} taps, {2:N0} per phase, {3:N0} × {4:N0}-point FFT)", name, PrototypeLength, TapsPerPhase, Partitions, FftSize);
 
         // One forward transform per block, one inverse per phase, plus the partition multiply-accumulates.
-        CostPerOutputSample = PartitionPlan.LevelCost(BlockSamples, Partitions, up);
+        CostPerOutputSample = PartitionPlan.LevelMultiplyAdds(BlockSamples, Partitions, up);
     }
 
     public int InputRate { get; }
@@ -155,6 +155,39 @@ public sealed class FftPolyphaseStage : IRateStage
     public double DirectCostPerOutputSample => TapsPerPhase;
 
     public int Taps => PrototypeLength;
+
+    public long MemoryBytes => 16L * Up * Partitions * Bins;
+
+    /// <summary>
+    /// The prototype, which is the stage's response to an impulse at its first input, transformed back out of the
+    /// partition spectra: the stage keeps no other copy of it, and a long one would be a quarter of a gigabyte more.
+    /// </summary>
+    public double[] ImpulseResponse()
+    {
+        var response = new double[PrototypeLength];
+        Parallel.For(0, Up, phase =>
+        {
+            var re = new double[Bins];
+            var im = new double[Bins];
+            var taps = new double[FftSize];
+            for (int part = 0; part < Partitions; part++)
+            {
+                _partitionRe[(phase * Partitions) + part].CopyTo(re, 0);
+                _partitionIm[(phase * Partitions) + part].CopyTo(im, 0);
+                _plan.Inverse(re, im, taps);
+                for (int k = 0; k < BlockSamples; k++)
+                {
+                    long index = phase + ((long)((part * BlockSamples) + k) * Up);
+                    if (index < PrototypeLength)
+                    {
+                        response[index] = taps[k];
+                    }
+                }
+            }
+        });
+
+        return response;
+    }
 
     public int FlushInputSamples => BlockSamples;
 

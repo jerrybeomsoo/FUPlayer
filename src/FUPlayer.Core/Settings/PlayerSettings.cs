@@ -98,6 +98,9 @@ public enum FrequencyScale
 {
     Logarithmic,
     Linear,
+
+    /// <summary>The mel scale, 2595·log10(1 + f/700): nearly linear under 700 Hz and nearly logarithmic above it.</summary>
+    Mel,
 }
 
 public enum AnalyzerAveraging
@@ -322,6 +325,16 @@ public sealed class RestorationSettings
 
     /// <summary>The restorer model file, or null for the newest one in the models folders.</summary>
     public string? NeuralRestorerPath { get; set; }
+
+    /// <summary>
+    /// Where the restorer runs: empty for the processor, or a graphics adapter's name as
+    /// <see cref="Dsp.Restoration.InferenceDevices"/> lists it, reached through DirectML. An adapter that is not there,
+    /// or that cannot open the network, leaves it on the processor, and Now playing says so.
+    /// </summary>
+    public string RestorerDevice { get; set; } = string.Empty;
+
+    /// <summary>Where the upscaler runs, in the same terms as <see cref="RestorerDevice"/>.</summary>
+    public string UpscalerDevice { get; set; } = string.Empty;
 
     /// <summary>
     /// Write the music's own harmonics into its top octave and above the top of its spectrum, for PCM sources up to

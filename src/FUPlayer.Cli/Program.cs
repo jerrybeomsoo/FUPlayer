@@ -84,7 +84,8 @@ internal static class Program
               capture --app <name|pid>     Record one application's output to a WAV file
                       --seconds <n> --out <file>
               bandwidth <files…>           Report where each file's spectrum ends
-              models                       List the installed neural restorer and upscaler models
+              models                       List the installed neural restorer and upscaler models, and the
+                                           graphics adapters they can run on
               --models <folder>            Keep models somewhere other than the settings folder
               info <file>                  Show format, tags and the processing plan for a file
               render <files…> --out <dir>  Process files faster than real time into WAV/DSF
@@ -120,6 +121,8 @@ internal static class Program
               --neural-upscale             Neural upscaler: 44.1/48 kHz PCM to 88.2/96 kHz; after the
                                            restorer when both are given
               --upscaler <file>            Which .onnx model to use (default: newest installed)
+              --restorer-device <n|name>   Run the restorer on a graphics adapter listed by 'models'
+              --upscaler-device <n|name>   Run the upscaler on one (default: both on the processor)
               --exciter                    Oversampling exciter: the music's harmonics, faint under it from
                                            about 15 kHz and filling above where it ends; up to 44.1/48 kHz
                                            when the output runs above the source rate
@@ -535,6 +538,7 @@ internal static class Program
         if (upscalers.Count == 0)
         {
             Console.WriteLine("  None installed. See training/neural-upscaler.");
+            ListAdapters();
             return 0;
         }
 
@@ -544,7 +548,26 @@ internal static class Program
         }
 
         Console.WriteLine($"  {ModelLibrary.DescribeUpscaler()}");
+        ListAdapters();
         return 0;
+    }
+
+    /// <summary>The graphics adapters the networks can run on, numbered as --restorer-device and --upscaler-device take them.</summary>
+    private static void ListAdapters()
+    {
+        Console.WriteLine();
+        Console.WriteLine("Graphics adapters (DirectML), for --restorer-device and --upscaler-device:");
+        IReadOnlyList<GraphicsAdapter> adapters = InferenceDevices.Adapters;
+        if (adapters.Count == 0)
+        {
+            Console.WriteLine("  None: the networks run on the processor.");
+            return;
+        }
+
+        for (int i = 0; i < adapters.Count; i++)
+        {
+            Console.WriteLine($"  {i + 1}  {adapters[i].Name}, {adapters[i].MemoryBytes / 1073741824.0:0.#} GB");
+        }
     }
 
     private static int ListGpus()
@@ -911,6 +934,28 @@ internal static class Program
         public double? GetDouble(string name) =>
             double.TryParse(Get(name), NumberStyles.Float, CultureInfo.InvariantCulture, out double value) ? value : null;
 
+        /// <summary>
+        /// A network's device: nothing or "cpu" for the processor, or a graphics adapter by its number in 'models' or by
+        /// its name. A name that is not there is kept, and the network then runs on the processor and says why.
+        /// </summary>
+        private static string Adapter(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value.Trim().ToLowerInvariant() is "cpu" or "processor")
+            {
+                return string.Empty;
+            }
+
+            IReadOnlyList<GraphicsAdapter> adapters = InferenceDevices.Adapters;
+            if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int number))
+            {
+                return number >= 1 && number <= adapters.Count
+                    ? adapters[number - 1].Name
+                    : throw new ArgumentException($"There is no graphics adapter {number}: 'models' lists {adapters.Count}.");
+            }
+
+            return value.Trim();
+        }
+
         public PlayerSettings ToSettings(double defaultVolume)
         {
             var settings = new PlayerSettings();
@@ -985,6 +1030,8 @@ internal static class Program
             settings.Restoration.Exciter = Has("exciter") && !Has("no-exciter");
             settings.Restoration.NeuralRestorerPath = Get("restorer") is string restorer && restorer.Length > 0 ? Path.GetFullPath(restorer) : null;
             settings.Restoration.UpscalerBandDb = GetDouble("upscaler-level") ?? 0.0;
+            settings.Restoration.RestorerDevice = Adapter(Get("restorer-device"));
+            settings.Restoration.UpscalerDevice = Adapter(Get("upscaler-device"));
             settings.Restoration.OutputDelta = Has("output-delta");
             settings.Restoration.SourceType = Get("source-type")?.ToLowerInvariant() switch
             {

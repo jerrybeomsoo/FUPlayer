@@ -156,6 +156,7 @@ public sealed partial class AnalyzerViewModel : ObservableObject
     [
         new("Logarithmic", FrequencyScale.Logarithmic),
         new("Linear", FrequencyScale.Linear),
+        new("Mel", FrequencyScale.Mel),
     ];
 
     public IReadOnlyList<Choice> FloorChoices { get; } =

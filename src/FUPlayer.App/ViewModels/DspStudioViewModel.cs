@@ -103,6 +103,12 @@ public sealed partial class DspStudioViewModel : ObservableObject
     private readonly bool _ready;
     private bool _suspend;
     private int _generation;
+
+    /// <summary>
+    /// The analysis running now, cancelled when a newer one starts. A superseded analysis used to run to the end and be
+    /// thrown away, and with a long filter several of them ran side by side, each holding gigabytes.
+    /// </summary>
+    private CancellationTokenSource? _refreshCancellation;
     private FilterAnalysisResult? _analysis;
     private NoiseCurve? _noise;
     private string? _analysisMessage;
@@ -184,6 +190,17 @@ public sealed partial class DspStudioViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNeuralModel))]
     private bool _neuralUpscaler;
+
+    /// <summary>Where the networks can run: the processor and the graphics adapters, built when the settings are read.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasGraphicsAdapters))]
+    private IReadOnlyList<Choice> _deviceChoices = [];
+
+    [ObservableProperty]
+    private Choice? _selectedRestorerDevice;
+
+    [ObservableProperty]
+    private Choice? _selectedUpscalerDevice;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SourceTypeDescription))]
@@ -455,6 +472,34 @@ public sealed partial class DspStudioViewModel : ObservableObject
     /// <summary>Either network is on, so the settings they share are shown.</summary>
     public bool HasNeuralModel => NeuralRestorer || NeuralUpscaler || Exciter;
 
+    /// <summary>There is somewhere other than the processor for the networks to run, so each gets its device row.</summary>
+    public bool HasGraphicsAdapters => DeviceChoices.Count > 1;
+
+    /// <summary>
+    /// The processor, then each graphics adapter DirectX lists. An adapter the settings name that is not there now stays
+    /// in the list, marked, so that the row does not show the setting as something it is not.
+    /// </summary>
+    private static IReadOnlyList<Choice> ListDevices(params string[] saved)
+    {
+        var choices = new List<Choice> { new("Processor", string.Empty, "ONNX Runtime on the processor.") };
+        foreach (GraphicsAdapter adapter in InferenceDevices.Adapters)
+        {
+            choices.Add(new Choice(adapter.Name, adapter.Name, Loc.F(
+                "DirectML on this adapter, {0:0.#} GB of its own memory. Back on the processor when it cannot open the network.",
+                adapter.MemoryBytes / 1073741824.0)));
+        }
+
+        foreach (string name in saved.Distinct())
+        {
+            if (name.Length > 0 && !choices.Any(c => Equals(c.Value, name)))
+            {
+                choices.Add(new Choice(name, name, Loc.T("Not present now, so the network runs on the processor.")));
+            }
+        }
+
+        return choices;
+    }
+
     /// <summary>
     /// What Source type does, and under Automatic what it decided about whatever is playing: the setting says
     /// how a source is read, and only the engine knows which way it went for this one.
@@ -699,6 +744,12 @@ public sealed partial class DspStudioViewModel : ObservableObject
         OnPropertyChanged(nameof(RestorerStatus));
     }
 
+    partial void OnSelectedRestorerDeviceChanged(Choice? value) =>
+        Update(value, (string device) => Settings.Restoration.RestorerDevice = device);
+
+    partial void OnSelectedUpscalerDeviceChanged(Choice? value) =>
+        Update(value, (string device) => Settings.Restoration.UpscalerDevice = device);
+
     partial void OnExciterChanged(bool value) =>
         Update(value, (bool v) => Settings.Restoration.Exciter = v);
 
@@ -794,6 +845,9 @@ public sealed partial class DspStudioViewModel : ObservableObject
             NeuralRestorer = s.Restoration.NeuralRestorer;
             Exciter = s.Restoration.Exciter;
             NeuralUpscaler = s.Restoration.NeuralUpscaler;
+            DeviceChoices = ListDevices(s.Restoration.RestorerDevice, s.Restoration.UpscalerDevice);
+            SelectedRestorerDevice = Choice.Find(DeviceChoices, s.Restoration.RestorerDevice) ?? DeviceChoices[0];
+            SelectedUpscalerDevice = Choice.Find(DeviceChoices, s.Restoration.UpscalerDevice) ?? DeviceChoices[0];
             SelectedUpscalerSource = Choice.Find(UpscalerSourceChoices, s.Restoration.SourceType) ?? UpscalerSourceChoices[0];
             SelectedUpscalerBand = Choice.Find(UpscalerBandChoices, s.Restoration.UpscalerBandDb) ?? UpscalerBandChoices[1];
             OutputDelta = s.Restoration.OutputDelta;
@@ -825,7 +879,20 @@ public sealed partial class DspStudioViewModel : ObservableObject
         int analysisRate = SelectedAnalysisRate?.Value is int rate ? rate : 44_100;
         IsAnalyzing = true;
 
-        RefreshResult result = await Task.Run(() => Compute(snapshot, focused, analysisRate));
+        _refreshCancellation?.Cancel();
+        _refreshCancellation?.Dispose();
+        var cancellation = new CancellationTokenSource();
+        _refreshCancellation = cancellation;
+        RefreshResult result;
+        try
+        {
+            result = await Task.Run(() => Compute(snapshot, focused, analysisRate, cancellation.Token));
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
         if (generation != _generation)
         {
             return;
@@ -864,7 +931,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
         UpdatePlot();
     }
 
-    private RefreshResult Compute(PlayerSettings settings, FilterPreset? focused, int analysisRate)
+    private RefreshResult Compute(PlayerSettings settings, FilterPreset? focused, int analysisRate, CancellationToken cancellation)
     {
         IAudioBackend backend = _services.Backends.Resolve(settings.Output.BackendId);
         // Previews must never open the device: they use what the Output page probed, or a permissive guess.
@@ -929,7 +996,8 @@ public sealed partial class DspStudioViewModel : ObservableObject
                             ThresholdTapsPerPhase = settings.Processing.ConvolutionThresholdTaps,
                             MaxBlockMilliseconds = settings.Processing.ConvolutionMaxBlockMs,
                             LayeredBlocks = !settings.Processing.ConvolutionUniformBlocks,
-                        });
+                        },
+                        cancellation: cancellation);
                     if (analysed.Family == FilterFamily.None || output == analysisRate)
                     {
                         message = Loc.T("No rate conversion happens for this source with the current settings.");

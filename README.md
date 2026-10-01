@@ -80,8 +80,12 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 
 - Integer-ratio polyphase resampling to any rate the device supports, up to 1.536 MHz PCM.
 - Filter lengths from a few hundred taps up to **33,554,432 taps**, counted at the output rate.
-- 36 filters: Kaiser-, Gaussian- and Nuttall-windowed sinc in several steepnesses, apodizing, early roll-off, half-band,
-  short low-ringing FIR, linear and cubic interpolation, and elliptic IIR.
+- 37 filters: Kaiser-, Gaussian- and Nuttall-windowed sinc in several steepnesses, apodizing, early roll-off, half-band,
+  short low-ringing FIR, linear and cubic interpolation, elliptic IIR, and the Transient-Aligned Filter.
+- The **Transient-Aligned Filter** keeps the ideal sinc exactly as it is over most of its length and tapers only its
+  ends; cut off at the source's Nyquist frequency, it passes the original samples through bit for bit, in stages of
+  its own up to 256 times the source rate. FUPlayer's own design of the idea behind Rob Watts' WTA filter
+  ([its page](docs/transient-aligned-filter.md)).
 - Linear, minimum and intermediate phase variants where the design allows them.
 - Single-stage conversion, or a cascade with half-band stages for a fraction of the cost.
 - Direct convolution or partitioned overlap-save FFT, with the crossover, the FFT window and the partition
@@ -105,7 +109,8 @@ ASIO. Expect rough edges, and expect settings to move between versions.
   FLAC rather than 16-bit WAV.
 - Now playing shows what a captured application or a UPnP stream is playing, from the application's Windows
   media session, with its icon when there is no cover.
-- Lossy repair is two neural networks, both in the release, both run on the processor through ONNX Runtime:
+- Lossy repair is two neural networks, both in the release, both run through ONNX Runtime, each on the processor or
+  on a graphics adapter (DirectML):
   - the **neural restorer** takes coded 44.1 and 48 kHz stereo (Opus, AAC, MP3, Vorbis, 96 kbit/s upwards) back
     towards the lossless recording at the same rate, with about 90 ms of delay: the band above the codec's
     low-pass, the collapsed stereo, the holes of the weaker encoders ([its page](docs/neural-restorer.md));
@@ -128,7 +133,8 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 - Filter magnitude, passband, impulse, step and noise-shaping plots, computed from the filter that will actually
   run, before you commit to it.
 - Group delay, added block delay, tap count and arithmetic cost per channel shown for the current settings.
-- Live spectrum, spectrogram and waterfall of the source or the processed signal, with peak hold.
+- Live spectrum, spectrogram and waterfall of the source or the processed signal, on a logarithmic, linear or mel
+  frequency scale, with peak hold.
 - Per-channel level meters, limiter and clipping counters, and a band-edge ringing detector.
 
 **Performance**
@@ -137,6 +143,7 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 - Optional OpenCL offload of the convolution to a GPU, in 64-bit or 32-bit arithmetic, with the split between
   CPU and GPU measured during playback rather than assumed.
 - A device must reproduce the processor's own output before it is used for anything.
+- The neural networks can each run on a graphics adapter through DirectML, with the DirectML.dll Windows has.
 
 **Interface**
 
@@ -277,6 +284,10 @@ stopband attenuation. Lengthening it narrows the transition band rather than add
 The cost of that is delay. A linear-phase FIR of N taps has a group delay of exactly (N-1)/2 output samples,
 which is 186 ms at 262,144 taps and 24 seconds at 33.5 million. The DSP studio shows the figure before you
 select the length. Minimum-phase variants remove almost all of it, at the price of a non-flat phase response.
+
+The Transient-Aligned Filter is the one built the other way round: instead of shaping the whole sinc with a window,
+it keeps the sinc as it is and shapes only its ends, so the waveform around each transient is rebuilt as the ideal
+filter would rebuild it ([how, and why that length of taper](docs/transient-aligned-filter.md)).
 
 ### Two ways to convolve
 

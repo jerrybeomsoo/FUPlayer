@@ -23,6 +23,7 @@ as lossless.
 | Setting | Values | Effect | Command line |
 | --- | --- | --- | --- |
 | Neural upscaler | on, off | Runs the network on 44.1 and 48 kHz PCM sources. | `--neural-upscale`, `--upscaler <file>` |
+| Runs on | Processor (default), or a graphics adapter | Shown when Windows lists an adapter. The network runs there through DirectML; an adapter that is missing or cannot open the network leaves it on the processor, and Now playing says which and why. | `--upscaler-device <n\|name>` (`models` lists the adapters) |
 | Source type | Automatic, Lossy, Lossless | Automatic reads lossy codecs and application captures as lossy, PCM, FLAC, ALAC and other lossless formats as lossless. Lossy: passband correction and synthesis above the cutoff. Lossless: passband left as it is, synthesis above Nyquist only. | `--source-type auto\|lossy\|lossless` |
 | Upscaled band level | Quiet −6 dB, Measured 0 dB, Lifted +3 dB, Strong +6 dB | Gain on the frequency bins above the source Nyquist, applied after the network; nothing of the recording moves. | `--upscaler-level <dB>` |
 | Output delta | on, off | Outputs y − x: the upscaler's output minus its latency-aligned input. Silent when the upscaler is idle. For monitoring. | `--output-delta` |
@@ -92,7 +93,11 @@ call: 128 frames held the sound 0.92 s at 7.8× real time, 64 frames 0.55 s at 7
 5.1×, 16 frames 0.27 s at 3.3×. 64 is what the player uses.
 
 The network runs on the processor through ONNX Runtime (MIT), with a quarter of the logical processors
-for its own threads. The graphics card is not needed.
+for its own threads, or on a graphics adapter through DirectML (Runs on; see
+[the restorer's page](neural-restorer.md#on-a-graphics-adapter) for how). On the same laptop's Quadro M2200 a call of
+116 frames took 7.0 ms against 19.8 ms on the processor, both channels together 12.3 ms against 28.7, and 128 s of
+48 kHz Vorbis to 88.2 kHz PCM ran 10.7 times real time against 6.9; the output matches the processor's to within
+5 × 10⁻⁶ of its peak. A graphics card is not needed.
 
 ## How the reference model was made
 

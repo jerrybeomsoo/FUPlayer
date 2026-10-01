@@ -15,6 +15,13 @@
 
   <ItemGroup>
     <PackageReference Include="TagLibSharp" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(FuPlayerDirectML)' == 'true'">
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(FuPlayerDirectML)' != 'true'">
     <PackageReference Include="Microsoft.ML.OnnxRuntime" />
   </ItemGroup>
 

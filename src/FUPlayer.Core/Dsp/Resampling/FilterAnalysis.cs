@@ -40,9 +40,15 @@ public sealed record FilterAnalysisResult
     public IReadOnlyList<string> Stages { get; init; } = [];
 }
 
-/// <summary>Computes the measured impulse, step and frequency response of a filter preset for given rates.</summary>
+/// <summary>
+/// Computes the impulse, step and frequency response of a filter preset for given rates: the chosen filter's from its
+/// coefficients, and whatever follows it in the chain by running it.
+/// </summary>
 public static class FilterAnalysis
 {
+    /// <summary>Input samples run through a chain at a time, so a cancelled analysis stops within one of them.</summary>
+    private const int Piece = 1 << 16;
+
     public static FilterAnalysisResult Analyze(
         FilterPreset preset,
         int inputRate,
@@ -51,7 +57,8 @@ public static class FilterAnalysis
         int taps = 0,
         ConvolutionMode convolution = ConvolutionMode.Automatic,
         int points = 1600,
-        ConvolutionOptions options = default)
+        ConvolutionOptions options = default,
+        CancellationToken cancellation = default)
     {
         if (preset.Family == FilterFamily.None || inputRate == outputRate)
         {
@@ -69,26 +76,19 @@ public static class FilterAnalysis
         }
 
         ResamplerChain chain = ResamplerFactory.Create(preset, inputRate, outputRate, staging, taps, convolution, options);
+        cancellation.ThrowIfCancellationRequested();
         double ratio = (double)outputRate / inputRate;
-        // The window has to cover the whole impulse, and the group delay alone does not say how long that is: a
-        // minimum-phase filter has almost no delay but exactly as many taps as its linear-phase twin. Sizing on the
-        // delay cut long minimum-phase filters in half, which made the plotted stopband tens of decibels worse than
-        // the filter really is. Block-based stages hold input back on top of that.
-        double outputSamples = Math.Max(chain.DelayOutputSamples * 3.0, chain.Taps * 1.25);
-        int inputLength = (int)Math.Ceiling(outputSamples / ratio) + 2 * chain.FlushInputSamples + 1024;
-        var input = new double[inputLength];
-        input[0] = 1.0;
-        var output = new double[chain.MaxOutput(inputLength)];
-        int produced = chain.CreateState().Process(input, output);
-
-        var impulse = new double[produced];
+        double[] impulse = ChainImpulse(chain, cancellation);
+        int produced = impulse.Length;
         for (int i = 0; i < produced; i++)
         {
-            impulse[i] = output[i] / ratio;
+            impulse[i] /= ratio;
         }
 
+        cancellation.ThrowIfCancellationRequested();
         double maxFrequency = outputRate > inputRate ? Math.Min(outputRate / 2.0, inputRate) : outputRate / 2.0;
         ResponseCurve magnitude = FilterResponse.Fir(impulse, outputRate, maxFrequency, points);
+        cancellation.ThrowIfCancellationRequested();
 
         int peak = FirDesign.PeakIndex(impulse);
         double threshold = Math.Abs(impulse[peak]) * 1e-4;
@@ -139,5 +139,67 @@ public static class FilterAnalysis
             Taps = chain.Taps,
             Stages = chain.Stages.Select(s => s.Description).ToArray(),
         };
+    }
+
+    /// <summary>
+    /// What the chain puts out for a unit impulse. The first stage is the chosen filter and the only long one, and it
+    /// answers from its coefficients; what follows it (half-band stages, a bridge between the rate families) is short
+    /// and is run. Running the impulse through the first stage as well took minutes for tens of millions of taps at a
+    /// rational ratio, where each output sample is a tap-by-tap sum over a whole phase and the run had been sized in
+    /// the prototype's taps rather than in output samples: 33,554,432 taps at 44.1 → 48 kHz asked for 42 million
+    /// output samples, fifteen minutes of audio, each 210,000 taps long.
+    /// </summary>
+    private static double[] ChainImpulse(ResamplerChain chain, CancellationToken cancellation)
+    {
+        IRateStage first = chain.Stages[0];
+        double[]? head = first.ImpulseResponse();
+        if (head is null)
+        {
+            // A recursive first stage has no coefficients to read: run the whole chain for long enough to cover its
+            // decay. The window has to cover the whole impulse, and the group delay alone does not say how long that is:
+            // a minimum-phase filter has almost no delay, which is why the taps count as well.
+            double span = Math.Max(chain.DelayOutputSamples * 3.0, chain.Taps * 1.25);
+            int length = (int)Math.Ceiling(span * chain.InputRate / chain.OutputRate) + (2 * chain.FlushInputSamples) + 1024;
+            var impulse = new double[length];
+            impulse[0] = 1.0;
+            return Run(chain, impulse, cancellation);
+        }
+
+        if (chain.Stages.Count == 1)
+        {
+            return head;
+        }
+
+        // The rest, from the first stage's output rate, with room behind the first stage's response for its own delay
+        // and for the blocks it may hold back.
+        var rest = new ResamplerChain(first.OutputRate, chain.OutputRate, chain.Stages.Skip(1).ToArray(), string.Empty);
+        double restRatio = (double)rest.OutputRate / rest.InputRate;
+        int tail = (int)Math.Ceiling(rest.DelayOutputSamples * 3.0 / restRatio) + (2 * rest.FlushInputSamples) + 1024;
+        var input = new double[head.Length + tail];
+        head.CopyTo(input, 0);
+        return Run(rest, input, cancellation);
+    }
+
+    /// <summary>Runs samples through a chain a piece at a time, so a cancelled analysis stops within one.</summary>
+    private static double[] Run(ResamplerChain chain, double[] input, CancellationToken cancellation)
+    {
+        ResamplerChainState state = chain.CreateState();
+        var piece = new double[chain.MaxOutput(Piece)];
+        var output = new double[chain.MaxOutput(input.Length) + piece.Length];
+        int produced = 0;
+        for (int at = 0; at < input.Length; at += Piece)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            int count = state.Process(input.AsSpan(at, Math.Min(Piece, input.Length - at)), piece);
+            if (produced + count > output.Length)
+            {
+                Array.Resize(ref output, Math.Max(output.Length * 2, produced + count));
+            }
+
+            piece.AsSpan(0, count).CopyTo(output.AsSpan(produced));
+            produced += count;
+        }
+
+        return output[..produced];
     }
 }

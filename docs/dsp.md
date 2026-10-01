@@ -77,6 +77,13 @@ shift. Intermediate phase convolves a linear-phase and a minimum-phase design th
 **Apodizing** filters close before the source Nyquist frequency instead of at it, so ringing and aliasing
 already recorded in the file are attenuated rather than passed on.
 
+**Transient-aligned.** One filter is not described by those four numbers. The Transient-Aligned Filter keeps the
+sinc itself over most of its length, coefficient for coefficient, and tapers only its two ends, along the running
+sum of a Kaiser kernel, as briefly as closing within a thousandth of the Nyquist frequency at 150 dB allows. It is
+cut off exactly at the source Nyquist frequency, so the original samples come out bit for bit and only the ones in
+between are computed, and it has stages of its own. `TransientAlignedDesign` builds it; [its page](transient-aligned-filter.md)
+has the design, the measurements and what is published about the filter it follows.
+
 ## Two delays, only one of them the filter's
 
 A long filter adds two different delays, and only one of them is inherent.

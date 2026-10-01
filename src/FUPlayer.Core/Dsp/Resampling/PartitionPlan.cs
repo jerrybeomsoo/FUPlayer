@@ -82,6 +82,15 @@ public sealed class PartitionPlan
         TransformCost(block, up) + (count * PartitionCost(block));
 
     /// <summary>
+    /// What a band costs per output sample in the units the other stages report, multiply-adds: the transforms'
+    /// floating-point operations two to a multiply-add, and four real multiply-adds for each bin of a partition's
+    /// complex product. <see cref="LevelCost"/> is the model the layout is chosen by and counts both a little
+    /// differently, so shown next to a tap-by-tap stage it had overstated the frequency domain about twofold.
+    /// </summary>
+    public static double LevelMultiplyAdds(int block, int count, int up) =>
+        (TransformCost(block, up) / 2.0) + (count * 4.0 * (block + 1) / block);
+
+    /// <summary>
     /// The cheapest division of <paramref name="tapsPerPhase"/> taps that still answers within
     /// <paramref name="headBlock"/> input samples.
     /// </summary>

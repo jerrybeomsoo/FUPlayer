@@ -102,6 +102,8 @@ public sealed class SettingsStore
         }
 
         settings.Library.Folders ??= [];
+        settings.Restoration.RestorerDevice ??= string.Empty;
+        settings.Restoration.UpscalerDevice ??= string.Empty;
         settings.Output.Channels = Math.Clamp(settings.Output.Channels, 1, 32);
         settings.Output.FirstChannel = Math.Max(0, settings.Output.FirstChannel);
         settings.Output.BufferMilliseconds = Math.Clamp(settings.Output.BufferMilliseconds, 0, 1000);

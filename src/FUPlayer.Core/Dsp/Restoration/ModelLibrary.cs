@@ -123,9 +123,9 @@ public static class ModelLibrary
     }
 
     private static readonly Lock UpscalerGate = new();
-    private static (string Path, DateTime Written, NeuralUpscalerModel Model)? _upscaler;
+    private static (string Path, DateTime Written, string Device, NeuralUpscalerModel Model)? _upscaler;
     private static readonly Lock RestorerGate = new();
-    private static (string Path, DateTime Written, NeuralRestorerModel Model)? _restorer;
+    private static (string Path, DateTime Written, string Device, NeuralRestorerModel Model)? _restorer;
 
     /// <summary>Whether a model file is a restorer, by its name.</summary>
     public static bool IsRestorerFile(string path) =>
@@ -142,9 +142,10 @@ public static class ModelLibrary
     /// Opens the neural upscaler, or returns null with the reason. The model is opened once and kept: it is
     /// 40 MB of weights, the pipeline is rebuilt on every settings change and every change of format, and an
     /// inference session is safe to share between channels and between pipelines. A file rewritten on disk is
-    /// noticed by its time stamp and opened again.
+    /// noticed by its time stamp and opened again, and so is one asked for on another device: <paramref name="device"/> is
+    /// a graphics adapter's name (<see cref="InferenceDevices"/>), or empty for the processor.
     /// </summary>
-    public static NeuralUpscalerModel? TryLoadUpscaler(string? path, out string? failure)
+    public static NeuralUpscalerModel? TryLoadUpscaler(string? path, string? device, out string? failure)
     {
         failure = null;
         path ??= ListUpscalers().FirstOrDefault();
@@ -159,13 +160,15 @@ public static class ModelLibrary
             try
             {
                 DateTime written = File.GetLastWriteTimeUtc(path);
-                if (_upscaler is { } cached && cached.Path == path && cached.Written == written)
+                device ??= string.Empty;
+                if (_upscaler is { } cached && cached.Path == path && cached.Written == written && cached.Device == device)
                 {
                     return cached.Model;
                 }
 
-                NeuralUpscalerModel model = NeuralUpscalerModel.Load(path, Math.Max(1, Environment.ProcessorCount / 4));
-                _upscaler = (path, written, model);
+                NeuralUpscalerModel model = NeuralUpscalerModel.Load(
+                    path, Math.Max(1, Environment.ProcessorCount / 4), InferenceDevices.Find(device));
+                _upscaler = (path, written, device, model);
                 return model;
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException
@@ -179,9 +182,9 @@ public static class ModelLibrary
 
     /// <summary>
     /// Opens the neural restorer, or returns null with the reason. Opened once and kept, like the upscaler, and shared
-    /// by every pipeline that plays with it.
+    /// by every pipeline that plays with it, on the device asked for.
     /// </summary>
-    public static NeuralRestorerModel? TryLoadRestorer(string? path, out string? failure)
+    public static NeuralRestorerModel? TryLoadRestorer(string? path, string? device, out string? failure)
     {
         failure = null;
         path ??= ListRestorers().FirstOrDefault();
@@ -196,15 +199,16 @@ public static class ModelLibrary
             try
             {
                 DateTime written = File.GetLastWriteTimeUtc(path);
-                if (_restorer is { } cached && cached.Path == path && cached.Written == written)
+                device ??= string.Empty;
+                if (_restorer is { } cached && cached.Path == path && cached.Written == written && cached.Device == device)
                 {
                     return cached.Model;
                 }
 
                 // One thread: the network's layers are small enough that handing them between threads costs more
                 // than it saves, and the rest of the chain wants the cores.
-                NeuralRestorerModel model = NeuralRestorerModel.Load(path, threads: 1);
-                _restorer = (path, written, model);
+                NeuralRestorerModel model = NeuralRestorerModel.Load(path, threads: 1, InferenceDevices.Find(device));
+                _restorer = (path, written, device, model);
                 return model;
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException

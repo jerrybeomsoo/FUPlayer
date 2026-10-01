@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.5.0 — 2026-10-01
+
+### Added
+
+- **The Transient-Aligned Filter**, a new resampling filter (`transient-aligned`). It keeps the ideal reconstruction
+  filter, the sinc, exactly as it is over most of its length, and tapers only its two ends, just smoothly enough for
+  150 dB of image rejection from a thousandth of the Nyquist frequency past it. It is cut off at the source's
+  Nyquist frequency, so the original samples come out bit for bit. It runs in its own stages: 16 times the source
+  rate, then a short stage of the same kind up to 256 times. The automatic length is 0.92 s (647,217 taps at 16
+  times), half of it the sinc's own; at 1,015,809 taps 68 % is, at 33,554,433 taps 99 %. It is FUPlayer's own design
+  of the idea behind Rob Watts' WTA filter. Its page sets out what is published about that filter, checks an AI
+  model's claims about it against the sources, and gives the measurements ([docs](docs/transient-aligned-filter.md)).
+- **The neural restorer and upscaler can run on a graphics adapter** (DSP studio › Lossy repair › Runs on,
+  `--restorer-device`, `--upscaler-device`; `models` lists the adapters). They use DirectML, through ONNX Runtime's
+  DirectML build and the DirectML.dll that Windows has; nothing proprietary ships. On a Quadro M2200 the upscaler ran
+  10.7 times real time against 6.9 on the processor, and the restorer 6.4 against 5.4. Each network has its own
+  setting, an adapter that is missing or cannot open it leaves it on the processor, and Now playing says where it
+  runs ([docs](docs/neural-restorer.md#on-a-graphics-adapter)).
+- **A mel frequency scale** for the analyzer in Now playing, beside the logarithmic and linear ones.
+
+### Fixed
+
+- **The filter view in DSP studio no longer loads for minutes at long lengths.** It used to stream an impulse
+  through the whole conversion, sized in the wrong unit: 33,554,432 taps from 44.1 to 48 kHz took about a quarter of
+  an hour. The response is now read from the filter's own coefficients: 0.8 s for that case, 3.6 s for 16 times at
+  the same length. An analysis no longer wanted is stopped, and the filter cache keeps at most 1 GB instead of up to
+  twelve filters of half a gigabyte each.
+- **Cost per channel** counted frequency-domain stages in floating-point operations and the rest in multiply-adds;
+  every stage now counts multiply-adds, so frequency-domain figures are about half what they were and comparable
+  with the rest, and large values read "1.48 T ops/s" instead of "1479.8 G ops/s".
+- **The magnitude plot** of a long filter showed one frequency bin per point, often far below the worst stopband
+  sidelobe near it. It now shows the quietest and the loudest bin around each point.
+
 ## 0.4.2 — 2026-09-29
 
 ### Changed

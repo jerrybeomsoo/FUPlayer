@@ -23,7 +23,7 @@ Every setting, what it changes, and what it costs. Settings are stored in `%APPD
 | Setting | Options | Notes |
 | --- | --- | --- |
 | Filter length | Automatic, 16,384 to 33,554,432 taps | Counted at the output rate. Sets transition width and group delay |
-| Filter staging | Single stage, Multi-stage | Multi-stage is roughly half the cost, at the price of a cascade of responses |
+| Filter staging | Single stage, Multi-stage | Multi-stage is roughly half the cost, at the price of a cascade of responses. The [Transient-Aligned Filter](transient-aligned-filter.md) keeps its own stages |
 | Convolution | Frequency domain, Tap by tap | Tap by tap adds no block latency and hides the three settings below |
 | Crossover, in taps a phase | Built-in 1,024, 256 to 262,144, Never | Where the FFT path takes over from direct convolution |
 | Longest block (FFT window) | Cheapest, 100 ms down to 1.5 ms | Latency against arithmetic. Does not change the output samples |
@@ -59,6 +59,7 @@ Every setting, what it changes, and what it costs. Settings are stored in `%APPD
 | Neural restorer | on / off | Coded 44.1/48 kHz stereo back towards lossless at the same rate; 91 ms at 48 kHz, 99 ms at 44.1. See [neural-restorer.md](neural-restorer.md) |
 | Neural upscaler | on / off | 44.1/48 kHz to 88.2/96 kHz; about 0.55 s. With the restorer on, it runs after it and reads its output as lossless. See [neural-upscaler.md](neural-upscaler.md) |
 | Upscaled band level | Quiet −6 dB, Measured, Lifted +3 dB, Strong +6 dB | Gain on what the upscaler writes above the source Nyquist |
+| Runs on (under each network) | Processor, or a graphics adapter | Shown when Windows lists an adapter. The network runs there through DirectML; one that is missing or cannot open it leaves it on the processor, and Now playing says why. See [neural-restorer.md](neural-restorer.md#on-a-graphics-adapter) |
 | Oversampling exciter | on / off (default) | The music's own harmonics, made from the band above 7 kHz: faint under the music from about 15 kHz, and above where its spectrum ends at the level hi-res masters have there, up to 44.1/48 kHz when the output runs above the source rate. At any output rate, with or without the networks; nothing to adjust; about 25 ms. See [exciter.md](exciter.md) |
 | Source type | Automatic, Lossy, Lossless | Automatic treats lossy codecs and captures as coded and PCM, FLAC and ALAC as lossless. The restorer runs only on coded sources |
 | Output delta | on / off | Plays only what the networks and the exciter changed. For monitoring |

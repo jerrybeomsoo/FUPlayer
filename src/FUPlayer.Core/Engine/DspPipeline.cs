@@ -127,19 +127,22 @@ internal sealed class DspPipeline : IDisposable
         // sound only by the interpolator.
         if (plan.UpscaleRate > 0)
         {
-            _upscalerModel = ModelLibrary.TryLoadUpscaler(settings.Restoration.NeuralUpscalerPath, out string? upscalerFailure);
+            string device = settings.Restoration.UpscalerDevice;
+            _upscalerModel = ModelLibrary.TryLoadUpscaler(settings.Restoration.NeuralUpscalerPath, device, out string? upscalerFailure);
             UpscalerStatus = _upscalerModel is null
                 ? Loc.F("Neural upscaler not running: {0}", upscalerFailure)
-                : plan.Restore
+                : (plan.Restore
                     ? Loc.F("Neural upscaler: {0} at {1}, after the restorer", Path.GetFileName(_upscalerModel.Path), AudioRates.Format(plan.UpscaleRate))
-                    : Loc.F("Neural upscaler: {0} at {1}", Path.GetFileName(_upscalerModel.Path), AudioRates.Format(plan.UpscaleRate));
+                    : Loc.F("Neural upscaler: {0} at {1}", Path.GetFileName(_upscalerModel.Path), AudioRates.Format(plan.UpscaleRate)))
+                  + ". " + InferenceDevices.Describe(device, _upscalerModel.Adapter, _upscalerModel.AdapterFailure);
         }
 
         // The restorer runs at the source rate on both channels at once, so it sits in front of the per-channel
         // chains. Without its model the source goes on unrestored.
         if (plan.Restore)
         {
-            NeuralRestorerModel? restorerModel = ModelLibrary.TryLoadRestorer(settings.Restoration.NeuralRestorerPath, out string? restorerFailure);
+            string device = settings.Restoration.RestorerDevice;
+            NeuralRestorerModel? restorerModel = ModelLibrary.TryLoadRestorer(settings.Restoration.NeuralRestorerPath, device, out string? restorerFailure);
             if (restorerModel is null)
             {
                 RestorerStatus = Loc.F("Neural restorer not running: {0}", restorerFailure);
@@ -149,7 +152,8 @@ internal sealed class DspPipeline : IDisposable
                 _restorer = new NeuralRestorer(restorerModel, plan.Source.SampleRate);
                 RestorerStatus = Loc.F(
                     "Neural restorer: {0} at {1}, {2:0} ms", Path.GetFileName(restorerModel.Path), AudioRates.Format(plan.Source.SampleRate),
-                    1000.0 * _restorer.Latency / plan.Source.SampleRate);
+                    1000.0 * _restorer.Latency / plan.Source.SampleRate)
+                    + ". " + InferenceDevices.Describe(device, restorerModel.Adapter, restorerModel.AdapterFailure);
                 _restored = [new double[InputBlock], new double[InputBlock]];
                 if (settings.Restoration.OutputDelta)
                 {

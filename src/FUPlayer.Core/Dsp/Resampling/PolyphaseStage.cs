@@ -67,9 +67,27 @@ public sealed class PolyphaseStage : IRateStage
 
     public int Taps => PrototypeLength;
 
+    public long MemoryBytes => 8L * Up * TapsPerPhase;
+
     public string Description { get; }
 
     public int MaxOutput(int inputSamples) => (int)Math.Min(int.MaxValue, (long)inputSamples * Up / Down + 2);
+
+    /// <summary>
+    /// Output n takes phase (n·down) mod up ending at input (n·down) div up, so an impulse at the first input comes out
+    /// as every down-th tap of the prototype: h[0], h[down], h[2·down], …, read back out of the phases.
+    /// </summary>
+    public double[] ImpulseResponse()
+    {
+        var response = new double[(PrototypeLength + Down - 1) / Down];
+        for (int n = 0; n < response.Length; n++)
+        {
+            long index = (long)n * Down;
+            response[n] = _phases[(int)(index % Up)][TapsPerPhase - 1 - (int)(index / Up)];
+        }
+
+        return response;
+    }
 
     /// <summary>One phase's coefficients, oldest tap first, so an accelerator can upload the same filter.</summary>
     internal double[] Phase(int index) => _phases[index];

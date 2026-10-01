@@ -118,6 +118,8 @@ public sealed partial class GlossaryViewModel : ObservableObject
                 "Linear phase delays every frequency by the same time, so the waveform keeps its shape, with ringing on both sides of a transient. Minimum phase puts all the ringing after the transient but delays the frequencies near the cut-off a little more than the rest. Intermediate phase lies between the two."),
             ("Group delay",
                 "How long a filter delays the signal. For a linear-phase filter it is half its length: 1,048,576 taps at 705.6 kHz is about 0.74 seconds. It does not change the sound, only when it arrives."),
+            ("Transient-aligned filter",
+                "A reconstruction filter that keeps the ideal sinc exactly over most of its length and shapes only its ends, so that the waveform around each transient is rebuilt as the ideal, endless filter would rebuild it. The original samples pass unchanged. FUPlayer's own design of an idea Rob Watts described for Chord Electronics' converters; see docs/transient-aligned-filter.md."),
             ("Apodizing filter",
                 "A filter that is already fully closed below the source's Nyquist frequency. It gives up a little of the top octave to remove ringing and aliasing that the recording's own converters left at the band edge."),
             ("Impulse and step response",
@@ -175,7 +177,7 @@ public sealed partial class GlossaryViewModel : ObservableObject
 
         Group("Neural processing",
             ("Neural restorer",
-                "A neural network trained to bring lossy-coded music (MP3, AAC, Opus, Vorbis) back towards the lossless original: it rebuilds high frequencies and stereo detail the codec removed. It runs on the processor with ONNX Runtime."),
+                "A neural network trained to bring lossy-coded music (MP3, AAC, Opus, Vorbis) back towards the lossless original: it rebuilds high frequencies and stereo detail the codec removed. It runs with ONNX Runtime, on the processor or a graphics adapter."),
             ("Exciter",
                 "A process that adds harmonics to a sound. FUPlayer's oversampling exciter makes them from the music above 7 kHz at twice the rate it runs at, so none fold back as tones the music never had. They fade in under the music from about 15 kHz and fill what is missing above where its spectrum ends, up to 44.1 or 48 kHz when the output allows."),
             ("Neural upscaler",
@@ -190,6 +192,8 @@ public sealed partial class GlossaryViewModel : ObservableObject
                 "FFmpeg is a widely used library that decodes almost every audio format. FUPlayer uses its LGPL-licensed parts as separate files that can be replaced, as the LGPL requires, and can build them from the official source for you."),
             ("OpenCL and GPU offload",
                 "OpenCL lets programs run calculations on a graphics card. FUPlayer can move the convolution of long filters there, leaving the processor free for the rest."),
+            ("DirectML",
+                "Windows' own way of running neural networks on a graphics adapter. FUPlayer can run the restorer and the upscaler through it, each on the device chosen for it. Whether that is faster depends on the card and the network: a large network gains most, a small one called often can lose to the trips to the card."),
             ("Loopback capture",
                 "Taking what another application plays before it reaches the speakers, so that it can go through the player's processing. Live input works this way.")),
     ];

@@ -41,16 +41,60 @@ public static class FilterResponse
 
         new FftPlan(size).Forward(re, im);
         double binWidth = sampleRate / size;
-        for (int i = 0; i < points; i++)
+        if (binWidth * 2 > resolution)
         {
-            int bin = Math.Min((int)Math.Round(frequencies[i] / binWidth), size / 2);
-            var value = new Complex(re[bin], im[bin]);
-            magnitude[i] = ToDb(value.Magnitude);
-            phase[i] = value.Phase;
+            for (int i = 0; i < points; i++)
+            {
+                int bin = Math.Min((int)Math.Round(frequencies[i] / binWidth), size / 2);
+                var value = new Complex(re[bin], im[bin]);
+                magnitude[i] = ToDb(value.Magnitude);
+                phase[i] = value.Phase;
+            }
+
+            Unwrap(phase);
+            return new ResponseCurve(frequencies, magnitude, phase);
         }
 
-        Unwrap(phase);
-        return new ResponseCurve(frequencies, magnitude, phase);
+        // Many bins to a point, as for any filter of more than about a hundred thousand taps: each point shows the
+        // quietest and the loudest bin around it, one after the other at the same frequency, and the plot draws the span
+        // between them. One bin read at each point showed whichever stopband sidelobe it landed on, often tens of
+        // decibels under the worst one, and a narrow dip or peak in the passband could fall between two points unseen.
+        var spanFrequencies = new double[2 * points];
+        var spanMagnitude = new double[2 * points];
+        var spanPhase = new double[2 * points];
+        for (int i = 0; i < points; i++)
+        {
+            int from = Math.Clamp((int)Math.Ceiling((frequencies[i] - (resolution / 2)) / binWidth), 0, size / 2);
+            int to = Math.Clamp((int)Math.Floor((frequencies[i] + (resolution / 2)) / binWidth), from, size / 2);
+            int quietest = from;
+            int loudest = from;
+            double low = double.PositiveInfinity;
+            double high = double.NegativeInfinity;
+            for (int bin = from; bin <= to; bin++)
+            {
+                double power = (re[bin] * re[bin]) + (im[bin] * im[bin]);
+                if (power < low)
+                {
+                    low = power;
+                    quietest = bin;
+                }
+
+                if (power > high)
+                {
+                    high = power;
+                    loudest = bin;
+                }
+            }
+
+            spanFrequencies[2 * i] = spanFrequencies[(2 * i) + 1] = frequencies[i];
+            spanMagnitude[2 * i] = ToDb(Math.Sqrt(low));
+            spanMagnitude[(2 * i) + 1] = ToDb(Math.Sqrt(high));
+            spanPhase[2 * i] = Math.Atan2(im[quietest], re[quietest]);
+            spanPhase[(2 * i) + 1] = Math.Atan2(im[loudest], re[loudest]);
+        }
+
+        Unwrap(spanPhase);
+        return new ResponseCurve(spanFrequencies, spanMagnitude, spanPhase);
     }
 
     /// <summary>Response of a biquad cascade sampled uniformly on [0, maxFrequency].</summary>

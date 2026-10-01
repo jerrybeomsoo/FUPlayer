@@ -72,6 +72,7 @@ million-tap filter.
 | `RealFftPlan` | Real-input FFT: a complex transform of half the length plus an untangling pass |
 | `FirKernel` | The direct convolution inner loop, vectorised |
 | `FirDesign` | Windowed-sinc design, minimum-phase and intermediate-phase transforms |
+| `TransientAlignedDesign` | The transient-aligned filter: the sinc kept as it is, tapered only at its ends |
 | `DeltaSigmaModulator` | 1-bit modulation with the noise transfer functions in `ModulatorCatalog` |
 | `PcmQuantizer` | Dither and noise shaping from `DitherCatalog` |
 

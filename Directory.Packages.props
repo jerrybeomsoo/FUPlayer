@@ -11,9 +11,23 @@
     <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.1.2" />
     <!-- MVVM helpers (MIT) -->
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <!-- Neural upscaler inference (MIT) -->
+    <!--
+      Neural network inference (MIT): on Windows the DirectML build, which runs on the processor and on graphics
+      adapters, and elsewhere the processor build. 1.24.4 is the newest DirectML build.
+    -->
     <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
+    <!--
+      DirectML's redistributable, which the DirectML build depends on, is Microsoft's own licence, not open source.
+      Every project names it only to leave all of its files out (Directory.Build.targets); Windows' own DirectML.dll,
+      in System32 since Windows 10 version 1903, is the one loaded.
+    -->
+    <PackageVersion Include="Microsoft.AI.DirectML" Version="1.15.4" />
     <!-- Tag reading (LGPL-2.1, dynamically linked assembly) -->
     <PackageVersion Include="TagLibSharp" Version="2.3.0" />
+    <!-- Tests (Apache-2.0 / MIT) -->
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
   </ItemGroup>
 </Project>
