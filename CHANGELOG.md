@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.5.1 — 2026-10-18
+
+### Added
+
+- **Tracks page under Library** for finding individual songs. Every search word must match the title, artist,
+  album, album artist, genre or file name, ignoring case, Japanese kana type and character width. Rows show covers
+  and ratings read from FLAC/Ogg and ID3 tags, with sorting by title, artist, album, rating or recently changed.
+  Double-click or Enter plays that track alone; the menu also plays the results from a selected track, plays next,
+  queues or shows the file ([guide](docs/library.md#tracks), [PR #3](https://github.com/jerrybeomsoo/FUPlayer/pull/3)).
+- **Stop after this track**, a transport toggle beside repeat, saved between desktop runs and remaining enabled
+  after stopping. It stops automatic advancement while keeping explicit Next available
+  ([guide](docs/library.md#stop-after-this-track), [PR #2](https://github.com/jerrybeomsoo/FUPlayer/pull/2)).
+
+### Fixed
+
+- **A flat music folder can show its separate albums.** Tracks are grouped by album title and album artist rather
+  than folder alone; different track artists do not split a compilation. Old caches are regrouped without a rescan,
+  and albums sharing a folder use their embedded covers
+  ([guide](docs/library.md#albums), [PR #1](https://github.com/jerrybeomsoo/FUPlayer/pull/1)).
+
+### Known limitations
+
+- **Large flat-folder caches load more slowly.** A synthetic cache with 4,683 entries and 1,146 albums took 7.7 to
+  8.8 seconds to load, versus 0.04 to 0.14 seconds before regrouping, because folder-cover discovery is repeated.
+- **Late stop-toggle changes can miss the audible boundary.** Enabling in the final buffered part can let the next
+  track play, and disabling then can still stop. The desktop restores the saved mode; engine consumers using only
+  the settings constructor or `ApplySettings` must set the live property separately
+  ([details](docs/library.md#known-limitations)).
+
+These three changes were contributed by
+[horseman777777-sketch](https://github.com/horseman777777-sketch).
+
 ## 0.5.0 — 2026-10-01
 
 ### Added

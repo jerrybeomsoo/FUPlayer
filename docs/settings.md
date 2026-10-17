@@ -82,6 +82,13 @@ order. The automatic dither setting picks by output rate. See [dsp.md](dsp.md) f
 | Low-latency FIFO | Halves the engine FIFO. Faster response, higher dropout risk |
 | Instant pause | Pause switches straight to silence instead of fading |
 
+## Library and Tracks
+
+Music folders are scanned for tracks and grouped within each folder by album title and album artist.
+Library retains its field-scoped album search. The Tracks page under Library provides all-term track search,
+covers, file ratings, and sorting by title, artist, album, rating or recently changed. Ratings are read from
+the files and are not editable here. See [library.md](library.md).
+
 ## Settings page
 
 ### Language
@@ -97,6 +104,11 @@ translation shows in English. The command line tool is always in English.
 
 Gapless playback, ReplayGain (off, track, album), clipping prevention for positive ReplayGain, polarity
 inversion, and the time display format.
+
+The transport bar also has *Stop after this track*, beside repeat. It is saved as
+`Playback.StopAfterCurrent` (false by default), remains enabled after stopping and is restored by the desktop
+player at startup. Explicit Next still advances. Changes during the final buffered part of a track can take
+effect on the wrong side of the audible boundary; see [library.md](library.md#known-limitations).
 
 ### FFmpeg
 

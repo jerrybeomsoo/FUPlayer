@@ -14,7 +14,7 @@ Now with Neural Restorer and Upscaler.
 [![.NET 9](https://img.shields.io/badge/.NET-9.0-512BD4.svg?style=flat-square&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![Avalonia](https://img.shields.io/badge/UI-Avalonia%2012-8B44AC.svg?style=flat-square)](https://avaloniaui.net/)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6.svg?style=flat-square&logo=windows&logoColor=white)](#requirements)
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg?style=flat-square)](#status)
+[![Version](https://img.shields.io/badge/version-0.5.1-blue.svg?style=flat-square)](#status)
 
 <img src="docs/images/dsp-studio.png" alt="The DSP studio, showing a 2,097,153-tap filter and its magnitude response" width="820">
 
@@ -71,7 +71,7 @@ bypasses the DAC's modulator as well.
 
 ## Status
 
-Version 0.3, early but working. The playback engine, the DSP chain, the decoders, both Windows audio back-ends
+Version 0.5.1, early but working. The playback engine, the DSP chain, the decoders, both Windows audio back-ends
 and the desktop interface are all functional, and PCM-to-DSD playback has been confirmed on real hardware over
 ASIO. Expect rough edges, and expect settings to move between versions.
 
@@ -156,8 +156,13 @@ ASIO. Expect rough edges, and expect settings to move between versions.
 
 **Library and playback**
 
-- Folder-based library with tag reading, cover art, album and artist views, and a search syntax
+- Folder-scanned library with tag reading, cover art, album and artist views, and a search syntax
   (`+artist:bach album:cello`).
+- Albums sharing a folder are separated by album title and album artist; old caches are regrouped on load.
+- A *Tracks* page under Library finds individual songs, with covers, file ratings and five sort choices.
+  Search requires every word and ignores case, Japanese kana type and character width.
+- *Stop after this track*, beside repeat, stops automatic queue advancement and is saved between runs.
+  See the [library guide](docs/library.md), including the known cache-loading and late-toggle limitations in 0.5.1.
 - Watches its folders and rescans quietly in the background.
 - Gapless playback, ReplayGain, queue with drag reordering, speaker distance and level calibration.
 - FLAC, WAV, AIFF, DSF and DFF decoded natively. Anything else through optional FFmpeg libraries, which
@@ -415,6 +420,7 @@ build/ffmpeg/                 script that builds LGPL FFmpeg libraries
 | [docs/dsp.md](docs/dsp.md) | The signal processing in detail, with the arithmetic |
 | [docs/cli.md](docs/cli.md) | Every `fuplayer-cli` command and option |
 | [docs/settings.md](docs/settings.md) | Every setting, what it changes, and what it costs |
+| [docs/library.md](docs/library.md) | Album grouping, individual track search, file ratings and stop-after-current playback |
 | [docs/neural-restorer.md](docs/neural-restorer.md) | The neural restorer: how it runs, how its model was trained, and what it measures |
 | [docs/neural-upscaler.md](docs/neural-upscaler.md) | The neural upscaler: how it runs, how its model was trained, and what it measures |
 | [docs/building-ffmpeg.md](docs/building-ffmpeg.md) | Building the LGPL FFmpeg DLLs, from the player or from source |

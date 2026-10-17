@@ -22,11 +22,11 @@
     to keep.
 
 .EXAMPLE
-    pwsh build/package.ps1 -Version 0.5.0
+    pwsh build/package.ps1 -Version 0.5.1
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = "0.5.0",
+    [string]$Version = "0.5.1",
     [string]$Runtime = "win-x64",
     [switch]$FrameworkDependent,
     [switch]$IncludeFFmpeg

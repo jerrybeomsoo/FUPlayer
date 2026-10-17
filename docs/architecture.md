@@ -103,6 +103,13 @@ with their visibility toggled, so the spectrogram history and scroll positions s
 cover cache. Setting changes are debounced for 400 ms before they reach `PlaybackEngine.ApplySettings`, which
 decides whether the change needs the stream restarted or can be applied to the running pipeline.
 
+`MusicLibrary` scans folders and caches track tags. `AlbumGrouping` separates tracks within a folder by album
+title and album artist and regroups older caches when loaded. `TracksViewModel` builds a flat view for all-term
+search and five sort orders, with visible rows sharing the queue's 96-pixel cover thumbnails. Ratings are read by
+`MetadataReader.Rating` and cached on each `LibraryTrack`; a value of -1 marks entries that still need a rating
+read. The transport view model saves `Playback.StopAfterCurrent` and sets the engine's live property directly.
+Current cache-loading and playback-boundary limitations are described in [library.md](library.md#known-limitations).
+
 Custom drawing lives in `Controls`: `ResponsePlot`, `SpectrumView`, `SpectrogramView`, `WaterfallView`,
 `LevelMeterBar`, `SeekBar` and `VolumeKnob` are all direct `Render` implementations rather than composed
 elements, because they redraw at 30 frames a second.
