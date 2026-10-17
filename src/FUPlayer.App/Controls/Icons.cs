@@ -16,6 +16,7 @@ public static class Icons
     public static readonly Geometry Shuffle = Parse("M3,7 H7 C11,7 13,17 17,17 H21 M18,14 L21,17 L18,20 M3,17 H7 C8.6,17 9.7,15.6 10.7,13.8 M13.3,10.2 C14.3,8.4 15.4,7 17,7 H21 M18,4 L21,7 L18,10");
     public static readonly Geometry Repeat = Parse("M4,12 V10 C4,7.8 5.8,6 8,6 H19 M16,3 L19,6 L16,9 M20,12 V14 C20,16.2 18.2,18 16,18 H5 M8,21 L5,18 L8,15");
     public static readonly Geometry RepeatOne = Parse("M4,12 V10 C4,7.8 5.8,6 8,6 H19 M16,3 L19,6 L16,9 M20,12 V14 C20,16.2 18.2,18 16,18 H5 M8,21 L5,18 L8,15 M11,10.8 L12.6,9.8 V14.4");
+    public static readonly Geometry StopAfterCurrent = Parse("M3,12 H14 M10,8 L14,12 L10,16 M18.5,6 V18");
     public static readonly Geometry NowPlaying = Parse("M3,12 A9,9 0 1 0 21,12 A9,9 0 1 0 3,12 Z M9.5,12 A2.5,2.5 0 1 0 14.5,12 A2.5,2.5 0 1 0 9.5,12 Z");
     public static readonly Geometry Queue = Parse("M4,6 H20 M4,11 H20 M4,16 H12 M15.5,14 L20.5,17 L15.5,20 Z");
     public static readonly Geometry Library = Parse("M4,4 H10 V10 H4 Z M14,4 H20 V10 H14 Z M4,14 H10 V20 H4 Z M14,14 H20 V20 H14 Z");

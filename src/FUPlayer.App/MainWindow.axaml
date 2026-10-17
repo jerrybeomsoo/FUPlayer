@@ -155,6 +155,9 @@
             <Button Classes="icon" Classes.on="{Binding IsRepeatOn}" Command="{Binding CycleRepeatCommand}" ToolTip.Tip="Repeat: off, all, one">
               <controls:LineIcon Data="{Binding RepeatIcon}" Width="18" Height="18" />
             </Button>
+            <Button Classes="icon" Classes.on="{Binding StopAfterCurrent}" Command="{Binding ToggleStopAfterCurrentCommand}" ToolTip.Tip="Stop after this track">
+              <controls:LineIcon Data="{x:Static controls:Icons.StopAfterCurrent}" Width="18" Height="18" />
+            </Button>
           </StackPanel>
           <Grid ColumnDefinitions="Auto,*,Auto">
             <TextBlock Text="{Binding PositionText}" Classes="secondary small numeric" VerticalAlignment="Center" MinWidth="48" TextAlignment="Right" />

@@ -12,6 +12,7 @@
   "Stop and release the output device  (Ctrl+Period)": "정지하고 출력 장치를 놓아주기  (Ctrl+.)",
   "Next  (Ctrl+Right)": "다음 곡  (Ctrl+→)",
   "Repeat: off, all, one": "반복: 끔, 전체, 한 곡",
+  "Stop after this track": "이 곡이 끝나면 정지",
   "Total, remaining in track, remaining in queue": "전체 시간, 곡의 남은 시간, 대기열의 남은 시간",
   "The soft limiter is catching overs. Lower the volume for a clean signal.": "소프트 리미터가 오버를 잡고 있습니다. 깨끗한 신호를 원하면 볼륨을 낮추세요.",
   "LIMIT": "리미트",

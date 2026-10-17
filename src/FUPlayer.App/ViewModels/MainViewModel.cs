@@ -129,6 +129,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _shuffle;
 
+    /// <summary>Stop when the playing track ends instead of going on to the next.</summary>
+    [ObservableProperty]
+    private bool _stopAfterCurrent;
+
     [ObservableProperty]
     private bool _hasPlan;
 
@@ -199,6 +203,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         PlaybackSettings playback = services.Settings.Playback;
         Repeat = playback.Repeat;
         Shuffle = playback.Shuffle;
+        StopAfterCurrent = playback.StopAfterCurrent;
+        services.Engine.StopAfterCurrent = StopAfterCurrent;
         services.Engine.SetQueueOptions(Repeat, Shuffle);
         RefreshVolumeRange();
         VolumeDb = services.Engine.VolumeDb;
@@ -381,6 +387,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         Shuffle = !Shuffle;
         ApplyQueueOptions();
+    }
+
+    [RelayCommand]
+    private void ToggleStopAfterCurrent() => StopAfterCurrent = !StopAfterCurrent;
+
+    partial void OnStopAfterCurrentChanged(bool value)
+    {
+        _services.Engine.StopAfterCurrent = value;
+        if (_ready)
+        {
+            _services.Settings.Playback.StopAfterCurrent = value;
+            _services.NotifySettingsChanged(applyToEngine: false);
+        }
     }
 
     [RelayCommand]

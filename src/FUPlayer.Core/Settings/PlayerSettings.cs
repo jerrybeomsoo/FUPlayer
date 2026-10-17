@@ -488,6 +488,9 @@ public sealed class PlaybackSettings
 
     public bool Gapless { get; set; } = true;
 
+    /// <summary>Stop when the playing track ends (the transport bar's toggle).</summary>
+    public bool StopAfterCurrent { get; set; }
+
     public TimeDisplayMode TimeDisplay { get; set; } = TimeDisplayMode.Elapsed;
 
     /// <summary>

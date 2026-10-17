@@ -84,6 +84,8 @@ public sealed class PlaybackEngine : IDisposable
     private int _reportedIndex = -1;
     private CounterBaseline _baseline;
 
+    private bool _stopAfterCurrent;
+
     public PlaybackEngine(PlayerSettings settings, AudioBackendRegistry backends, ICaptureProvider? capture = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -146,6 +148,13 @@ public sealed class PlaybackEngine : IDisposable
             _muted = value;
             ApplyLiveGain();
         }
+    }
+
+    /// <summary>Stop when the playing track ends instead of moving on to the next one.</summary>
+    public bool StopAfterCurrent
+    {
+        get => Volatile.Read(ref _stopAfterCurrent);
+        set => Volatile.Write(ref _stopAfterCurrent, value);
     }
 
     public void Play(int index, TimeSpan start = default) => Post(new PlayCommand(index, start), interrupt: true);
@@ -775,7 +784,7 @@ public sealed class PlaybackEngine : IDisposable
         bool wasTestTone = _decoder is TestToneDecoder || _captureProcessId > 0 || _decoder is NetworkStreamDecoder;
         CloseDecoder();
 
-        if (!wasTestTone)
+        if (!wasTestTone && !StopAfterCurrent)
         {
             PlaybackSettings playback = _settings.Playback;
             int next = Queue.NextIndex(finished, playback.Repeat, playback.Shuffle, userRequested: false);
