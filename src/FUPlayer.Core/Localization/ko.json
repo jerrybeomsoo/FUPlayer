@@ -610,7 +610,7 @@
   "Show in folder": "폴더에서 보기",
   "HI-RES": "고해상도",
   "Build your library": "라이브러리 만들기",
-  "Point FUPlayer at the folders that hold your music. Each folder becomes an album; tags and covers are read in the background and cached.": "음악이 든 폴더를 FUPlayer에 알려 주세요. 폴더 하나가 앨범 하나가 되며, 태그와 커버는 백그라운드에서 읽어 저장해 둡니다.",
+  "Point FUPlayer at the folders that hold your music. Tracks are grouped into albums by their album tags; tags and covers are read in the background and cached.": "음악이 든 폴더를 FUPlayer에 알려 주세요. 곡은 앨범 태그에 따라 앨범으로 묶이며, 태그와 커버는 백그라운드에서 읽어 저장해 둡니다.",
   "Add a music folder": "음악 폴더 추가",
   "ALBUM": "앨범",
   "Close": "닫기",

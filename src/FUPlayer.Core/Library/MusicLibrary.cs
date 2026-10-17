@@ -53,7 +53,7 @@ public sealed record LibraryTrack
     public TimeSpan Duration => TimeSpan.FromSeconds(DurationSeconds);
 }
 
-/// <summary>An album: the playable files of one folder.</summary>
+/// <summary>An album: the playable files of one folder that share an album tag (and album artist).</summary>
 public sealed record LibraryAlbum
 {
     public required string Folder { get; init; }
@@ -82,7 +82,7 @@ public sealed record LibraryAlbum
 
 public readonly record struct LibraryScanProgress(int Folders, int Tracks, string? CurrentFolder);
 
-/// <summary>Folder-based music library with a JSON cache and field-scoped search syntax.</summary>
+/// <summary>Folder-scanned music library with a JSON cache and field-scoped search syntax.</summary>
 public sealed class MusicLibrary
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
@@ -115,7 +115,7 @@ public sealed class MusicLibrary
             List<LibraryAlbum>? albums = await JsonSerializer.DeserializeAsync<List<LibraryAlbum>>(stream, JsonOptions, cancellation).ConfigureAwait(false);
             if (albums is not null)
             {
-                Publish(albums);
+                Publish(AlbumGrouping.Regroup(albums, BuildAlbum)); // caches written one album per folder are split here
             }
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
@@ -193,7 +193,7 @@ public sealed class MusicLibrary
                     tracks++;
                 }
 
-                albums.Add(BuildAlbum(folder, albumTracks));
+                albums.AddRange(AlbumGrouping.Build(folder, albumTracks, BuildAlbum));
             }
         }
 

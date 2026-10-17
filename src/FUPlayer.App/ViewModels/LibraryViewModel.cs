@@ -78,7 +78,7 @@ public sealed partial class AlbumViewModel : ObservableObject
 
         string[] words = album.Title.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         Initials = string.Concat(words.Take(2).Select(w => char.ToUpperInvariant(w[0])));
-        PlaceholderBrush = CreatePlaceholder(album.Folder);
+        PlaceholderBrush = CreatePlaceholder(LibraryViewModel.AlbumKey(album));
     }
 
     public LibraryAlbum Album { get; }
@@ -608,12 +608,16 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
         Rows = rows;
     }
 
+    /// <summary>An album's identity: one folder can hold several albums.</summary>
+    internal static string AlbumKey(LibraryAlbum album) => $"{album.Folder}\u001f{album.Title}\u001f{album.Artist}";
+
     private AlbumViewModel GetAlbum(LibraryAlbum album)
     {
-        if (!_albums.TryGetValue(album.Folder, out AlbumViewModel? vm) || !ReferenceEquals(vm.Album, album))
+        string key = AlbumKey(album);
+        if (!_albums.TryGetValue(key, out AlbumViewModel? vm) || !ReferenceEquals(vm.Album, album))
         {
             vm = new AlbumViewModel(album, this, _services.Covers);
-            _albums[album.Folder] = vm;
+            _albums[key] = vm;
         }
 
         return vm;
