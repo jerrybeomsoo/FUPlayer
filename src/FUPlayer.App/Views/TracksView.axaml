@@ -1,0 +1,63 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:FUPlayer.App.ViewModels"
+             xmlns:controls="using:FUPlayer.App.Controls"
+             x:Class="FUPlayer.App.Views.TracksView"
+             x:DataType="vm:TracksViewModel">
+  <Grid RowDefinitions="Auto,Auto,*" Margin="28,22,28,16">
+    <StackPanel Spacing="4">
+      <TextBlock Classes="h1" Text="Tracks" />
+      <TextBlock Classes="secondary" TextWrapping="Wrap"
+                 Text="Find single tracks across the library. Every word you type must appear in the title, artist, album, genre or file name. Double-click or Enter plays that track by itself." />
+    </StackPanel>
+
+    <Grid Grid.Row="1" ColumnDefinitions="Auto,420,Auto,*" Margin="0,16,0,10">
+      <controls:LineIcon Data="{x:Static controls:Icons.Search}" Width="16" Height="16" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
+      <TextBox Grid.Column="1" Text="{Binding SearchText}" PlaceholderText="Search tracks" />
+      <ComboBox Grid.Column="2" ItemsSource="{Binding SortChoices}" SelectedItem="{Binding SelectedSort}" Width="170" Margin="10,0,0,0" VerticalAlignment="Center" />
+      <TextBlock Grid.Column="3" Text="{Binding Summary}" Classes="secondary" VerticalAlignment="Center" Margin="14,0,0,0" />
+    </Grid>
+
+    <Grid Grid.Row="2" RowDefinitions="Auto,*">
+      <Grid ColumnDefinitions="52,*,0.8*,0.8*,80,60" Margin="12,0,24,6">
+        <TextBlock Grid.Column="1" Text="TITLE" Classes="eyebrow" />
+        <TextBlock Grid.Column="2" Text="ARTIST" Classes="eyebrow" />
+        <TextBlock Grid.Column="3" Text="ALBUM" Classes="eyebrow" />
+        <TextBlock Grid.Column="4" Text="RATING" Classes="eyebrow" />
+        <TextBlock Grid.Column="5" Text="LENGTH" Classes="eyebrow" TextAlignment="Right" />
+      </Grid>
+
+      <ListBox Grid.Row="1" x:Name="List" ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}" Background="Transparent">
+        <ListBox.ItemTemplate>
+          <DataTemplate x:DataType="vm:TrackRowViewModel">
+            <Grid ColumnDefinitions="52,*,0.8*,0.8*,80,60" Background="Transparent">
+              <Grid.ContextFlyout>
+                <MenuFlyout>
+                  <MenuItem Header="Play this track only" Command="{Binding PlayOnlyCommand}" />
+                  <MenuItem Header="Play the results from here" Command="{Binding PlayFromHereCommand}" />
+                  <MenuItem Header="Play next" Command="{Binding PlayNextCommand}" />
+                  <MenuItem Header="Add to queue" Command="{Binding EnqueueCommand}" />
+                  <Separator />
+                  <MenuItem Header="Show in folder" Command="{Binding ShowInFolderCommand}" />
+                </MenuFlyout>
+              </Grid.ContextFlyout>
+              <Border Width="40" Height="40" CornerRadius="5" ClipToBounds="True" HorizontalAlignment="Left" VerticalAlignment="Center"
+                      Background="{StaticResource SurfaceHighBrush}">
+                <Panel>
+                  <controls:LineIcon Data="{x:Static controls:Icons.Music}" Width="16" Height="16" Foreground="{StaticResource TextMutedBrush}"
+                                     IsVisible="{Binding !HasThumbnail}" />
+                  <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
+                </Panel>
+              </Border>
+              <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,0,12,0" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="2" Text="{Binding Artist}" Classes="secondary" TextTrimming="CharacterEllipsis" Margin="0,0,12,0" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="3" Text="{Binding Album}" Classes="secondary" TextTrimming="CharacterEllipsis" Margin="0,0,12,0" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="4" Text="{Binding RatingText}" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="5" Text="{Binding DurationText}" Classes="secondary numeric" TextAlignment="Right" VerticalAlignment="Center" />
+            </Grid>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+    </Grid>
+  </Grid>
+</UserControl>

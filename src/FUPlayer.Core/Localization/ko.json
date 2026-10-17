@@ -1123,5 +1123,18 @@
   "The exciter works on sources up to 48 kHz; {0} is played without it.": "익사이터는 48 kHz 이하 원본에서만 동작합니다. {0}은(는) 익사이터 없이 재생합니다.",
   "{0} cannot convert {1} to {2}; the exciter runs at the source rate.": "{0}은(는) {1}을(를) {2}(으)로 변환하지 못해서 익사이터를 원본 레이트로 돌립니다.",
   "Off for lossless sources. Lossy codecs, captures, and restored, upscaled or excited audio stay limited: their overs are codec or processing products that would alias above 40 kHz or destabilise a DSD modulator.": "무손실 음원에서는 꺼집니다. 손실 코덱, 캡처, 복원·업스케일·익사이터를 거친 오디오는 계속 제한합니다. 그 오버는 코덱이나 처리가 만든 것이라, 40 kHz 위로 에일리어싱되거나 DSD 모듈레이터를 불안정하게 합니다.",
-  "Adds the music's own harmonics, made from the band above 7 kHz: faint under the music from about 15 kHz, then filling what is missing above where its spectrum ends, up to the output's top (44.1/48 kHz at twice the source rate). Their level follows the music; nothing to set. PCM up to 48 kHz, about 25 ms.": "7 kHz 위 대역으로 음악 자신의 배음을 만들어 더합니다. 약 15 kHz부터 음악 아래로 옅게 시작해, 스펙트럼이 끝나는 곳 위의 빈 부분을 출력 상한까지(원본 2배 레이트면 44.1/48 kHz) 채웁니다. 레벨은 음악을 따라가며 조절할 것은 없습니다. 48 kHz 이하 PCM, 약 25 ms."
+  "Adds the music's own harmonics, made from the band above 7 kHz: faint under the music from about 15 kHz, then filling what is missing above where its spectrum ends, up to the output's top (44.1/48 kHz at twice the source rate). Their level follows the music; nothing to set. PCM up to 48 kHz, about 25 ms.": "7 kHz 위 대역으로 음악 자신의 배음을 만들어 더합니다. 약 15 kHz부터 음악 아래로 옅게 시작해, 스펙트럼이 끝나는 곳 위의 빈 부분을 출력 상한까지(원본 2배 레이트면 44.1/48 kHz) 채웁니다. 레벨은 음악을 따라가며 조절할 것은 없습니다. 48 kHz 이하 PCM, 약 25 ms.",
+  "Tracks": "곡",
+  "Find single tracks across the library. Every word you type must appear in the title, artist, album, genre or file name. Double-click or Enter plays that track by itself.": "라이브러리에서 곡을 하나씩 찾습니다. 입력한 단어가 모두 제목·아티스트·앨범·장르·파일 이름에 들어 있는 곡만 남깁니다. 더블클릭이나 Enter 는 그 곡만 재생합니다.",
+  "Search tracks": "곡 검색",
+  "ARTIST": "아티스트",
+  "RATING": "별점",
+  "LENGTH": "길이",
+  "Title": "제목",
+  "Artist": "아티스트",
+  "Album": "앨범",
+  "Rating": "별점",
+  "Recently changed": "최근 바뀐 파일",
+  "Play the results from here": "검색 결과를 여기부터 재생",
+  "{0} of {1} tracks": "{1}곡 중 {0}곡"
 }

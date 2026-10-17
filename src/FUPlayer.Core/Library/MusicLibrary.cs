@@ -49,6 +49,9 @@ public sealed record LibraryTrack
 
     public bool HasEmbeddedCover { get; init; }
 
+    /// <summary>Stars (0-5) stored in the file; 0 for none, -1 in caches written before ratings were read.</summary>
+    public int Rating { get; init; } = -1;
+
     [JsonIgnore]
     public TimeSpan Duration => TimeSpan.FromSeconds(DurationSeconds);
 }
@@ -187,7 +190,7 @@ public sealed class MusicLibrary
                 {
                     cancellation.ThrowIfCancellationRequested();
                     var info = new FileInfo(file);
-                    albumTracks.Add(known.TryGetValue(file, out LibraryTrack? cached) && cached.FileSize == info.Length && cached.ModifiedUtc == info.LastWriteTimeUtc
+                    albumTracks.Add(known.TryGetValue(file, out LibraryTrack? cached) && cached.FileSize == info.Length && cached.ModifiedUtc == info.LastWriteTimeUtc && cached.Rating >= 0
                         ? cached
                         : ReadTrack(file, info));
                     tracks++;
@@ -290,6 +293,7 @@ public sealed class MusicLibrary
             FileSize = info.Length,
             ModifiedUtc = info.LastWriteTimeUtc,
             HasEmbeddedCover = metadata.HasEmbeddedPicture,
+            Rating = metadata.Rating ?? 0,
         };
     }
 

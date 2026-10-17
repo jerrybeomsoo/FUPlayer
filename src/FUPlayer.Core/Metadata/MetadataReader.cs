@@ -136,6 +136,7 @@ public static partial class MetadataReader
                 BitrateKbps = properties?.AudioBitrate ?? 0,
                 Codec = properties?.Description,
                 Format = format,
+                Rating = ReadRating(file),
             };
         }
         catch (Exception ex) when (IsTagFailure(ex))

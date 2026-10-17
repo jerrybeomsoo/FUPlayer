@@ -179,6 +179,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         NowPlaying = new NowPlayingViewModel(services);
         Queue = new QueueViewModel(services, dialogs);
         Library = new LibraryViewModel(services, dialogs, Queue);
+        Tracks = new TracksViewModel(services, Queue);
         Dsp = new DspStudioViewModel(services);
         Output = new OutputViewModel(services, dialogs);
         Calibration = new CalibrationViewModel(services);
@@ -190,6 +191,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         NowPlayingNav = new NavItem("NowPlaying", "Now playing", Icons.NowPlaying, NowPlaying);
         QueueNav = new NavItem("Queue", "Queue", Icons.Queue, Queue);
         LibraryNav = new NavItem("Library", "Library", Icons.Library, Library);
+        TracksNav = new NavItem("Tracks", "Tracks", Icons.Search, Tracks, isChild: true);
         DspNav = new NavItem("Dsp", "DSP studio", Icons.Dsp, Dsp);
         OutputNav = new NavItem("Output", "Output", Icons.Output, Output);
         LiveInputNav = new NavItem("LiveInput", "Live input", Icons.LiveInput, LiveInput);
@@ -197,7 +199,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         CalibrationNav = new NavItem("Calibration", "Calibration", Icons.Calibration, Calibration);
         SettingsNav = new NavItem("Settings", "Settings", Icons.Settings, General);
         GlossaryNav = new NavItem("Glossary", "Glossary", Icons.Glossary, Glossary, isChild: true);
-        Navigation = [NowPlayingNav, QueueNav, LibraryNav, LiveInputNav, UpnpInputNav, DspNav, OutputNav, CalibrationNav, SettingsNav, GlossaryNav];
+        Navigation = [NowPlayingNav, QueueNav, LibraryNav, TracksNav, LiveInputNav, UpnpInputNav, DspNav, OutputNav, CalibrationNav, SettingsNav, GlossaryNav];
         SelectedNav = Navigation.FirstOrDefault(n => n.Key == services.Settings.Ui.LastPage) ?? NowPlayingNav;
 
         PlaybackSettings playback = services.Settings.Playback;
@@ -228,6 +230,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public LibraryViewModel Library { get; }
 
+    /// <summary>Single tracks across the library, by search.</summary>
+    public TracksViewModel Tracks { get; }
+
     public DspStudioViewModel Dsp { get; }
 
     public OutputViewModel Output { get; }
@@ -248,6 +253,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public NavItem QueueNav { get; }
 
     public NavItem LibraryNav { get; }
+
+    public NavItem TracksNav { get; }
 
     public NavItem DspNav { get; }
 

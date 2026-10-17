@@ -54,6 +54,9 @@ public sealed record TrackMetadata
 
     public bool HasEmbeddedPicture { get; init; }
 
+    /// <summary>Stars (0-5) stored in the file, or null when it has no rating.</summary>
+    public int? Rating { get; init; }
+
     public string DisplayTitle => string.IsNullOrWhiteSpace(Title) ? Path.GetFileNameWithoutExtension(FilePath) : Title;
 
     public string DisplayArtist => FirstNonEmpty(Artist, AlbumArtist) ?? Loc.T("Unknown artist");

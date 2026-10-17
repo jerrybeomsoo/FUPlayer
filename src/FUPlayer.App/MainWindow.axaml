@@ -91,6 +91,9 @@
         <Panel IsVisible="{Binding LibraryNav.IsSelected}">
           <views:LibraryView DataContext="{Binding Library}" />
         </Panel>
+        <Panel IsVisible="{Binding TracksNav.IsSelected}">
+          <views:TracksView DataContext="{Binding Tracks}" />
+        </Panel>
         <Panel IsVisible="{Binding LiveInputNav.IsSelected}">
           <views:LiveInputView DataContext="{Binding LiveInput}" />
         </Panel>
