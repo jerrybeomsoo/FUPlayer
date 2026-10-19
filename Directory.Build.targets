@@ -59,7 +59,7 @@
     so a model written there by one program cannot be seen by another started normally. The folder
     next to the executable is the same folder for everybody.
   -->
-  <ItemGroup Condition="Exists('$(FuPlayerRepositoryRoot)models') and ('$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe')">
+  <ItemGroup Condition="'$(FuPlayerSkipModelCopy)' != 'true' and Exists('$(FuPlayerRepositoryRoot)models') and ('$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe')">
     <Content Include="$(FuPlayerRepositoryRoot)models\*.json;$(FuPlayerRepositoryRoot)models\*.onnx"
              Exclude="$(FuPlayerRepositoryRoot)models\*.funet.json;$(FuPlayerRepositoryRoot)models\*.fumodel.json">
       <Link>models\%(Filename)%(Extension)</Link>

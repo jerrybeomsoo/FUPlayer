@@ -1,0 +1,25 @@
+// Project kernels, derived from GpuKernels.cs by build/gpu/prepare-kernels.py.
+#version 450
+#ifdef REAL_IS_DOUBLE
+#extension GL_ARB_gpu_shader_fp64 : require
+#define real_t double
+#define REAL_ARG(i) packDouble2x32(p.args[i])
+#else
+#define real_t float
+#define REAL_ARG(i) uintBitsToFloat(p.args[i].x)
+#endif
+layout(local_size_x_id=0, local_size_y=1, local_size_z=1) in;
+layout(push_constant, std430) uniform Arguments { uvec2 args[12]; uvec2 extent; } p;
+layout(set=0, binding=0, std430) buffer Buffer0 { real_t accRe[]; };
+layout(set=0, binding=1, std430) buffer Buffer1 { real_t resultBuffer[]; };
+void main() {
+if (gl_GlobalInvocationID.x >= p.extent.x || gl_GlobalInvocationID.y >= p.extent.y) return;
+int n = int(p.args[2].x);
+int block = int(p.args[3].x);
+int lanes = int(p.args[4].x);
+real_t scale = REAL_ARG(5);
+    int i = int(gl_GlobalInvocationID.x);
+    int lane = int(gl_GlobalInvocationID.y);
+    resultBuffer[i * lanes + lane] = accRe[lane * n + block + i] * scale;
+
+}

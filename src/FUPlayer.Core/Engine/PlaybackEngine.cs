@@ -62,9 +62,18 @@ public sealed class PlaybackEngine : IDisposable
     private int _captureProcessId;
     private double[][] _pcmBlock = [];
     private byte[][] _dsdBlock = [];
+    private bool _fileLookahead;
+    private long _fileTimelineOrigin;
+    private long _fileTimelineDiscard;
+    private long _fileTimelineInput;
+    private bool _prefillPausedStream;
 
     // Shared with the UI and device threads.
     private volatile DspPipeline? _pipeline;
+    private readonly object _openingGate = new();
+    private CancellationTokenSource? _openingPipeline;
+    private volatile bool _networkStopRequested;
+    private volatile PlaybackStatus? _networkPaused;
     private volatile IAudioStream? _stream;
     private volatile RenderSource? _render;
     private volatile SpscByteRing? _ring;
@@ -157,7 +166,11 @@ public sealed class PlaybackEngine : IDisposable
         set => Volatile.Write(ref _stopAfterCurrent, value);
     }
 
-    public void Play(int index, TimeSpan start = default) => Post(new PlayCommand(index, start), interrupt: true);
+    public void Play(int index, TimeSpan start = default)
+    {
+        _networkStopRequested = false;
+        Post(new PlayCommand(index, start), interrupt: true);
+    }
 
     public void PlayPause()
     {
@@ -184,6 +197,7 @@ public sealed class PlaybackEngine : IDisposable
 
         render.Paused = true;
         SetState(EngineState.Paused);
+        if (_settings.Processing.NetworkDsp) Post(new NetworkPauseCommand(), interrupt: true);
     }
 
     public void Resume()
@@ -193,16 +207,27 @@ public sealed class PlaybackEngine : IDisposable
             return;
         }
 
+        if (_settings.Processing.NetworkDsp)
+        {
+            Post(new NetworkResumeCommand(), interrupt: true);
+            return;
+        }
         render.Paused = false;
         SetState(EngineState.Playing);
         _spaceAvailable.Set();
     }
 
-    public void Stop() => Post(new StopCommand(), interrupt: true);
+    public void Stop()
+    {
+        _networkStopRequested = true;
+        Post(new StopCommand(), interrupt: true);
+        lock (_openingGate) _openingPipeline?.Cancel();
+        _pipeline?.CancelNetwork();
+    }
 
-    public void Next() => Post(new SkipCommand(1), interrupt: true);
+    public void Next() { _networkStopRequested = false; Post(new SkipCommand(1), interrupt: true); }
 
-    public void Previous() => Post(new SkipCommand(-1), interrupt: true);
+    public void Previous() { _networkStopRequested = false; Post(new SkipCommand(-1), interrupt: true); }
 
     public void Seek(TimeSpan position) => Post(new SeekCommand(position), interrupt: true);
 
@@ -212,13 +237,13 @@ public sealed class PlaybackEngine : IDisposable
     /// <summary>Changes repeat and shuffle without touching the audio path.</summary>
     public void SetQueueOptions(RepeatMode repeat, bool shuffle) => Post(new QueueOptionsCommand(repeat, shuffle), interrupt: false);
 
-    public void PlayTestTone(TestToneMode mode) => Post(new TestToneCommand(mode), interrupt: true);
+    public void PlayTestTone(TestToneMode mode) { _networkStopRequested = false; Post(new TestToneCommand(mode), interrupt: true); }
 
     /// <summary>
     /// Plays another application's output. Like the test tone this does not touch the queue: a live
     /// source has no place in a list of tracks and nothing follows it.
     /// </summary>
-    public void PlayCapture(int processId) => Post(new CaptureCommand(processId), interrupt: true);
+    public void PlayCapture(int processId) { _networkStopRequested = false; Post(new CaptureCommand(processId), interrupt: true); }
 
     /// <summary>
     /// Plays a stream from a network address, as a UPnP controller asks for: another source outside the queue, like
@@ -227,6 +252,7 @@ public sealed class PlaybackEngine : IDisposable
     public void PlayNetworkStream(NetworkStreamRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        _networkStopRequested = false;
         Post(new NetworkStreamCommand(request), interrupt: true);
     }
 
@@ -263,6 +289,7 @@ public sealed class PlaybackEngine : IDisposable
 
     public PlaybackStatus GetStatus()
     {
+        if (_networkPaused is { } held) return held with { State = EngineState.Paused, DspLoad = 0 };
         (Marker? marker, TimeSpan position) = ComputePlayback();
 
         // Each read once: the engine thread closes the stream and swaps the pipeline while this runs on the UI's
@@ -310,6 +337,9 @@ public sealed class PlaybackEngine : IDisposable
             Plan = pipeline?.Plan,
             ResamplerSummary = pipeline?.ResamplerSummary,
             Acceleration = pipeline?.AccelerationSummary,
+            NetworkRoundTripMilliseconds = pipeline?.NetworkRoundTripMilliseconds,
+            NetworkServer = pipeline?.NetworkServer,
+            NetworkRetransmits = pipeline?.NetworkRetransmits ?? 0,
             Upscaler = pipeline?.UpscalerStatus,
             IsUpscaling = pipeline?.IsUpscaling ?? false,
             Restorer = pipeline?.RestorerStatus,
@@ -349,6 +379,9 @@ public sealed class PlaybackEngine : IDisposable
             return;
         }
 
+        _networkStopRequested = true;
+        lock (_openingGate) _openingPipeline?.Cancel();
+        _pipeline?.CancelNetwork();
         Post(new ShutdownCommand(), interrupt: true);
         _disposed = true;
 
@@ -407,7 +440,8 @@ public sealed class PlaybackEngine : IDisposable
             }
             catch (Exception ex) when (IsRecoverable(ex))
             {
-                ReportError(Loc.F("Playback stopped: {0}", ex.Message));
+                if (!_networkStopRequested || ex is not (IOException or OperationCanceledException or ObjectDisposedException))
+                    ReportError(Loc.F("Playback stopped: {0}", ex.Message));
                 try
                 {
                     StopInternal();
@@ -447,6 +481,29 @@ public sealed class PlaybackEngine : IDisposable
     {
         switch (command)
         {
+            case NetworkPauseCommand:
+                if (_state == EngineState.Paused && _pipeline?.NetworkServer is not null)
+                {
+                    _networkPaused = GetStatus();
+                    DisposeTransition();
+                    SetPipeline(null);
+                }
+                break;
+            case NetworkResumeCommand:
+                if (_state != EngineState.Paused) break;
+                if (_networkPaused is { } held)
+                {
+                    _networkPaused = null;
+                    if (held.IsTestTone) StartTestTone(_testToneMode);
+                    else if (held.IsCapture) StartCapture(held.CaptureProcessId);
+                    else if (held.IsStream && _network is { } request) StartNetworkStream(request);
+                    else StartPlayback(held.CurrentIndex, held.Position, keepPaused: false);
+                }
+                else if (_render is { } resumed)
+                {
+                    resumed.Paused = false; SetState(EngineState.Playing);
+                }
+                break;
             case PlayCommand play:
                 StartPlayback(play.Index, play.Start, keepPaused: false);
                 break;
@@ -540,9 +597,10 @@ public sealed class PlaybackEngine : IDisposable
         bool written = decoder.Format.IsDsd
             ? pipeline.ProcessDsd(_dsdBlock, count, writer)
             : pipeline.ProcessPcm(_pcmBlock, count, writer);
+        if (_fileLookahead) _fileTimelineInput += count;
 
         // Start a new device only once the FIFO holds audio, so playback does not open with underruns.
-        if (!_streamStarted && _ring is { } ring && ring.Count >= ring.Capacity / 2)
+        if ((!_streamStarted || _prefillPausedStream) && _ring is { } ring && ring.Count >= ring.Capacity / 2)
         {
             StartStream();
         }
@@ -607,7 +665,7 @@ public sealed class PlaybackEngine : IDisposable
                 catch (Exception ex) when (IsRecoverable(ex))
                 {
                     decoder.Dispose();
-                    ReportError(Loc.F("Playback could not start: {0}", ex.Message));
+                    if (!_networkStopRequested) ReportError(Loc.F("Playback could not start: {0}", ex.Message));
                     StopInternal();
                 }
 
@@ -644,7 +702,7 @@ public sealed class PlaybackEngine : IDisposable
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
-            ReportError(Loc.F("The capture could not restart: {0}", ex.Message));
+            if (!_networkStopRequested) ReportError(Loc.F("The capture could not restart: {0}", ex.Message));
             StopInternal();
         }
     }
@@ -666,7 +724,7 @@ public sealed class PlaybackEngine : IDisposable
         catch (Exception ex) when (IsRecoverable(ex))
         {
             _network = null;
-            ReportError(Loc.F(NetworkStreamErrorFormat, request.Controller, ex.Message));
+            if (!_networkStopRequested) ReportError(Loc.F(NetworkStreamErrorFormat, request.Controller, ex.Message));
             StopInternal();
         }
     }
@@ -685,51 +743,73 @@ public sealed class PlaybackEngine : IDisposable
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
-            ReportError(Loc.F("Test tone could not start: {0}", ex.Message));
+            if (!_networkStopRequested) ReportError(Loc.F("Test tone could not start: {0}", ex.Message));
             StopInternal();
         }
     }
 
+    private DspPipeline CreatePipeline(PlaybackPlan plan)
+    {
+        if (!_settings.Processing.NetworkDsp) return new DspPipeline(plan, _settings, _workers);
+        using var opening = new CancellationTokenSource();
+        lock (_openingGate)
+        {
+            _openingPipeline = opening;
+            if (_networkStopRequested) opening.Cancel();
+        }
+        try { return new DspPipeline(plan, _settings, _workers, opening.Token); }
+        finally { lock (_openingGate) _openingPipeline = null; }
+    }
+
     private void StartPipeline(int index, IAudioDecoder decoder, TrackMetadata? metadata, PlaybackPlan plan, TimeSpan start, bool keepPaused)
     {
+        _networkPaused = null;
         bool paused = keepPaused && _render is { Paused: true };
+        bool prefill = !paused && _streamStarted && _render is { Paused: true };
         SetPipeline(null);
         EnsureWorkers();
+        DspPipeline pipeline = CreatePipeline(plan);
         try
         {
-            EnsureStream(plan);
-        }
-        catch (Exception ex) when (plan.Output.Kind == OutputSampleKind.NativeDsd && IsRecoverable(ex))
-        {
-            // Some drivers advertise ASIO DSD mode but refuse it when a stream opens: fall back to DoP.
-            _nativeDsdRefused = true;
-            ReportError(Loc.F("Native DSD could not be started ({0}); sending DSD as DoP instead.", ex.Message));
-            plan = PlanFor(decoder);
-            EnsureStream(plan);
-        }
+            try
+            {
+                EnsureStream(plan, pipeline);
+            }
+            catch (Exception ex) when (plan.Output.Kind == OutputSampleKind.NativeDsd && IsRecoverable(ex))
+            {
+                // Some drivers advertise native DSD but refuse it when a stream opens.
+                _nativeDsdRefused = true;
+                ReportError(Loc.F("Native DSD could not be started ({0}); sending DSD as DoP instead.", ex.Message));
+                pipeline.Dispose();
+                plan = PlanFor(decoder);
+                pipeline = CreatePipeline(plan);
+                EnsureStream(plan, pipeline);
+            }
+            AllocateBlocks(decoder.Format, pipeline.InputBlock);
+            if (start > TimeSpan.Zero && decoder.CanSeek)
+            {
+                decoder.Seek(decoder.ToPosition(start));
+            }
 
-        var pipeline = new DspPipeline(plan, _settings, _workers);
-        AllocateBlocks(decoder.Format, pipeline.InputBlock);
-        if (start > TimeSpan.Zero && decoder.CanSeek)
-        {
-            decoder.Seek(decoder.ToPosition(start));
-        }
+            ClearRing();
+            PrepareFileLookahead(decoder, pipeline);
+            RenderSource render = _render!;
+            render.EndOfStream = false;
+            _prefillPausedStream = prefill;
+            render.Paused = paused || prefill;
+            _draining = false;
+            _drainFlushed = false;
+            lock (_statusGate)
+            {
+                _markers.Clear();
+                _baseline = default;
+            }
 
-        ClearRing();
-        RenderSource render = _render!;
-        render.EndOfStream = false;
-        render.Paused = paused;
-        _draining = false;
-        _drainFlushed = false;
-        lock (_statusGate)
-        {
-            _markers.Clear();
-            _baseline = default;
+            Volatile.Write(ref _reportedIndex, int.MinValue);
+            pipeline.SetVolume(CurrentVolumeLinear(plan));
+            SetPipeline(pipeline);
         }
-
-        Volatile.Write(ref _reportedIndex, int.MinValue);
-        pipeline.SetVolume(CurrentVolumeLinear(plan));
-        SetPipeline(pipeline);
+        catch { pipeline.Dispose(); throw; }
         AttachDecoder(index, decoder, metadata, pipeline);
 
         SetState(paused ? EngineState.Paused : EngineState.Playing);
@@ -743,7 +823,7 @@ public sealed class PlaybackEngine : IDisposable
         _decoderItem = item ?? (index >= 0 ? Queue.Get(index) : null);
         pipeline.SetReplayGain(ReplayGainFor(metadata));
         var marker = new Marker(
-            _ring!.WriteTotal,
+            FileMarkerPosition(pipeline),
             index,
             _decoderItem,
             decoder.Position,
@@ -825,7 +905,7 @@ public sealed class PlaybackEngine : IDisposable
 
     private void ContinueTransition()
     {
-        StartStream();
+        if (!_prefillPausedStream) StartStream();
         PendingTransition transition = _transition!;
         if (!transition.Flushed)
         {
@@ -835,6 +915,7 @@ public sealed class PlaybackEngine : IDisposable
             }
 
             transition.Flushed = true;
+            StartStream();
         }
 
         if (_ring!.Count > 0)
@@ -865,7 +946,7 @@ public sealed class PlaybackEngine : IDisposable
 
     private void ContinueDrain()
     {
-        StartStream();
+        if (!_prefillPausedStream) StartStream();
         if (!_drainFlushed)
         {
             if (!_pipeline!.Flush(_writer!))
@@ -875,6 +956,7 @@ public sealed class PlaybackEngine : IDisposable
 
             _drainFlushed = true;
             _render!.EndOfStream = true;
+            StartStream();
         }
 
         if (_ring!.Count > 0 || _render is { Paused: true })
@@ -902,6 +984,11 @@ public sealed class PlaybackEngine : IDisposable
 
     private void SeekInternal(TimeSpan position)
     {
+        if (_networkPaused is { } held)
+        {
+            _networkPaused = held with { Position = position < TimeSpan.Zero ? TimeSpan.Zero : position > held.Duration ? held.Duration : position };
+            return;
+        }
         if (_pipeline is null)
         {
             return;
@@ -933,6 +1020,7 @@ public sealed class PlaybackEngine : IDisposable
         _pipeline.Reset();
         _decoder.Seek(_decoder.ToPosition(position));
         ClearRing();
+        PrepareFileLookahead(_decoder, _pipeline);
         lock (_statusGate)
         {
             _markers.Clear();
@@ -1088,6 +1176,13 @@ public sealed class PlaybackEngine : IDisposable
             || a.Processing.GpuForce != b.Processing.GpuForce
             || a.Processing.GpuPhaseShare != b.Processing.GpuPhaseShare
             || a.Processing.GpuRetimeWhilePlaying != b.Processing.GpuRetimeWhilePlaying
+            || a.Processing.NetworkDsp != b.Processing.NetworkDsp
+            || a.Processing.NetworkDspHost != b.Processing.NetworkDspHost
+            || a.Processing.NetworkDspPort != b.Processing.NetworkDspPort
+            || a.Processing.RemoteResampling != b.Processing.RemoteResampling
+            || a.Processing.RemoteRestorer != b.Processing.RemoteRestorer
+            || a.Processing.RemoteUpscaler != b.Processing.RemoteUpscaler
+            || a.Processing.PreprocessFiles != b.Processing.PreprocessFiles
             || a.Speakers.Enabled != b.Speakers.Enabled)
         {
             return true;
@@ -1130,6 +1225,8 @@ public sealed class PlaybackEngine : IDisposable
 
     private void StopInternal()
     {
+        _networkPaused = null;
+        _prefillPausedStream = false;
         DisposeTransition();
         CloseDecoder();
         SetPipeline(null);
@@ -1140,7 +1237,10 @@ public sealed class PlaybackEngine : IDisposable
             _markers.Clear();
         }
 
+        bool alreadyStopped = _state == EngineState.Stopped;
         SetState(EngineState.Stopped);
+        // A failed opening never reached Playing, but callers still need completion rather than an endless wait.
+        if (alreadyStopped && !_disposed) StateChanged?.Invoke(this, EngineState.Stopped);
     }
 
     private bool TryOpenDecoder(int index, [NotNullWhen(true)] out IAudioDecoder? decoder, out TrackMetadata? metadata)
@@ -1297,7 +1397,7 @@ public sealed class PlaybackEngine : IDisposable
         _workerThreads = desired;
     }
 
-    private void EnsureStream(PlaybackPlan plan)
+    private void EnsureStream(PlaybackPlan plan, DspPipeline pipeline)
     {
         OutputFormat format = plan.Output;
 
@@ -1307,7 +1407,8 @@ public sealed class PlaybackEngine : IDisposable
             Math.Max(
                 _settings.Processing.FifoMilliseconds / (_settings.Output.LowLatencyFifo ? 2 : 1),
                 2 * _settings.Output.BufferMilliseconds),
-            (int)Math.Ceiling(DspPipeline.RequiredFifoSeconds(plan) * 1000.0));
+            (int)Math.Ceiling(Math.Max(_settings.Processing.NetworkDsp ? 0.032 : 0,
+                2.5 * pipeline.FilterBlockSeconds) * 1000.0));
 
         if (_stream is not null && _stream.Format == format && _streamFailure is null && _fifoMilliseconds >= fifoMilliseconds)
         {
@@ -1372,9 +1473,38 @@ public sealed class PlaybackEngine : IDisposable
         _streamFailure = null;
     }
 
-    /// <summary>Starts a newly opened device (once the FIFO is primed, or as soon as the writer would have to wait).</summary>
+    /// <summary>Processes future file samples before playback and aligns the audible timeline to the source.</summary>
+    private void PrepareFileLookahead(IAudioDecoder decoder, DspPipeline pipeline)
+    {
+        bool file = _settings.Processing.PreprocessFiles && decoder.CanSeek
+            && decoder is not (ILiveSource or TestToneDecoder or NetworkStreamDecoder)
+            && _captureProcessId == 0 && !pipeline.Plan.PassThrough;
+        long frames = file ? (long)Math.Round(pipeline.LatencySeconds * pipeline.Plan.Output.CanonicalFrameRate) : 0;
+        _writer!.DiscardLeadingFrames(frames);
+        _fileLookahead = file;
+        _fileTimelineOrigin = _ring!.WriteTotal;
+        _fileTimelineDiscard = checked(frames * pipeline.Plan.Output.CanonicalBytesPerFrame);
+        _fileTimelineInput = 0;
+    }
+
+    private long FileMarkerPosition(DspPipeline pipeline)
+    {
+        if (!_fileLookahead) return _ring!.WriteTotal;
+        // Lookahead can cross several short tracks before emitting any audio. Use consumed source time,
+        // including input still inside an FFT block, rather than placing every early marker at the FIFO head.
+        double unitsPerSecond = pipeline.Plan.Source.SampleRate / (pipeline.Plan.Source.IsDsd ? 8.0 : 1.0);
+        double frames = _fileTimelineInput / unitsPerSecond * pipeline.Plan.Output.CanonicalFrameRate;
+        return _fileTimelineOrigin + (long)Math.Round(frames) * pipeline.Plan.Output.CanonicalBytesPerFrame - _fileTimelineDiscard;
+    }
+
+    /// <summary>Starts a newly opened device once the FIFO is primed, or when the writer would have to wait.</summary>
     private void StartStream()
     {
+        if (_prefillPausedStream && _render is { } render)
+        {
+            _prefillPausedStream = false;
+            render.Paused = false;
+        }
         if (!_streamStarted && _stream is { } stream)
         {
             stream.Start();
@@ -1621,4 +1751,6 @@ public sealed class PlaybackEngine : IDisposable
     private sealed record NetworkStreamCommand(NetworkStreamRequest Request) : Command;
 
     private sealed record ShutdownCommand : Command;
+    private sealed record NetworkPauseCommand : Command;
+    private sealed record NetworkResumeCommand : Command;
 }

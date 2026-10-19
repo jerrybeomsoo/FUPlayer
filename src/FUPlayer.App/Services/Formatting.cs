@@ -32,18 +32,19 @@ public static class Formatting
     public static string Count(long value) => value.ToString("N0", CultureInfo.CurrentCulture);
 
     /// <summary>
-    /// Multiply-adds per second, to three significant figures: "1.48 T ops/s" rather than the "1479.8 G ops/s" a
-    /// scale that stopped at giga gave a filter of tens of millions of taps run tap by tap.
+    /// Estimated floating-point operations per second, counting a multiply-add as two operations.
+    /// The processing model supplies multiply-add equivalents per channel.
     /// </summary>
     public static string Operations(double perSecond)
     {
+        perSecond *= 2.0;
         (double scale, string unit) = perSecond switch
         {
-            >= 1e12 => (1e12, " T ops/s"),
-            >= 1e9 => (1e9, " G ops/s"),
-            >= 1e6 => (1e6, " M ops/s"),
-            >= 1e3 => (1e3, " k ops/s"),
-            _ => (1.0, " ops/s"),
+            >= 1e12 => (1e12, " TFLOP/s"),
+            >= 1e9 => (1e9, " GFLOP/s"),
+            >= 1e6 => (1e6, " MFLOP/s"),
+            >= 1e3 => (1e3, " kFLOP/s"),
+            _ => (1.0, " FLOP/s"),
         };
 
         double value = perSecond / scale;

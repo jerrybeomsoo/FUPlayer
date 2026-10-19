@@ -11,441 +11,76 @@ so your DAC's own oversampling filter and modulator never run.
 Now with Neural Restorer and Upscaler.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg?style=flat-square)](LICENSE)
-[![.NET 9](https://img.shields.io/badge/.NET-9.0-512BD4.svg?style=flat-square&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
-[![Avalonia](https://img.shields.io/badge/UI-Avalonia%2012-8B44AC.svg?style=flat-square)](https://avaloniaui.net/)
-[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6.svg?style=flat-square&logo=windows&logoColor=white)](#requirements)
-[![Version](https://img.shields.io/badge/version-0.5.1-blue.svg?style=flat-square)](#status)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg?style=flat-square)](https://github.com/jerrybeomsoo/FUPlayer/releases/tag/v0.6.0)
 
-<img src="docs/images/dsp-studio.png" alt="The DSP studio, showing a 2,097,153-tap filter and its magnitude response" width="820">
+<img src="docs/images/dsp-studio.png" alt="FUPlayer DSP studio" width="820">
 
 </div>
 
----
+FUPlayer plays your music through a configurable resampler, optional neural processing and PCM or DSD output.
+Choose a filter in DSP studio, inspect its response, and see the active processing chain in Now playing.
+Whether a DAC bypasses its internal processing depends on the device and its selected mode.
 
-## Contents
+## Download and first run
 
-<details open>
-<summary>Table of contents</summary>
+1. Download **FUPlayer-0.6.0-win-x64.zip** from the [latest release](https://github.com/jerrybeomsoo/FUPlayer/releases/latest).
+2. Extract the whole ZIP to a writable folder. Start **FUPlayer.exe** inside it.
+3. On **Output**, choose your audio back-end and device. Start with a PCM rate your DAC supports.
+4. Add music folders in **Library**, or open files and add them to the queue.
+5. In **DSP studio**, start with an automatic filter length. Enable additional processing one stage at a time.
 
-- [What it does](#what-it-does)
-- [Status](#status)
-- [Features](#features)
-- [Screenshots](#screenshots)
-- [Getting started](#getting-started)
-  - [Requirements](#requirements)
-  - [Download](#download)
-  - [Build from source](#build-from-source)
-  - [First run](#first-run)
-- [How it works](#how-it-works)
-  - [The signal path](#the-signal-path)
-  - [Filters](#filters)
-  - [Two ways to convolve](#two-ways-to-convolve)
-  - [Partition layout](#partition-layout)
-  - [Graphics acceleration](#graphics-acceleration)
-  - [DSD output](#dsd-output)
-- [Performance](#performance)
-- [Command line](#command-line)
-- [Repository layout](#repository-layout)
-- [Documentation](#documentation)
-- [Contributing](#contributing)
-- [License](#license)
-- [Acknowledgements](#acknowledgements)
+The player requires **64-bit Windows 10 or 11**. The ZIP includes the .NET runtime and both neural models;
+no separate .NET installation is needed. ASIO needs your device's driver. GPU processing needs a working GPU driver.
+Keep the files and the `models` folder beside the executables when moving the installation.
+Settings and the library cache are stored separately in `%APPDATA%\FUPlayer` and survive an upgrade.
+Close the old player before replacing it; extracting a new release into a new folder also works.
 
-</details>
+FLAC, WAV, AIFF, DSF and DFF have built-in readers. MP3, AAC/ALAC, Ogg, Opus and other formats need the
+optional FFmpeg libraries. Install them using **Settings → FFmpeg**; see the [FFmpeg guide](docs/building-ffmpeg.md).
+Those libraries are built separately and are not included in the ZIP.
 
----
+## What you can use
 
-## What it does
+- **PCM and DSD output:** WASAPI exclusive/shared or ASIO, including native DSD where the driver supports it.
+- **DSP studio:** long FIR filters, the Transient-Aligned Filter, phase choices, response plots and delay information.
+- **GPU resampling:** automatic CUDA preference on NVIDIA, Vulkan on other GPUs, with OpenCL available for manual selection.
+- **Neural restorer and upscaler:** optional processing for supported source formats, with separate Windows GPU choices.
+- **Network DSP:** send resampling, the restorer, the upscaler, or any combination to another computer on your LAN.
+- **Library and Tracks:** album grouping from tags, track search, embedded/named cover art and file ratings.
+- **Monitoring:** spectrum/spectrogram, output delta, DSP load, underruns and network round trip time.
+- **Other inputs:** application audio capture on Windows and a UPnP renderer controlled by another application.
 
-Every DAC contains a digital filter. It has to: a 44.1 kHz stream has images above 22.05 kHz that must be
-removed before conversion to analogue. That filter runs on a small fixed-function block inside the chip, with a
-budget of a few hundred taps and no choice of response.
+## Network processing
 
-FUPlayer does the same job on the host, where the budget is a few million taps and every property of the
-filter is yours to choose. It reads your files, resamples them to the highest rate the DAC accepts, and sends
-the result bit-perfect over WASAPI exclusive mode or ASIO. Because the signal arrives at the DAC already at its
-maximum rate, the DAC's own filter has nothing left to do.
+The processing computer needs only the matching **FUPlayer-DspServer** executable, available separately for
+Windows x64 and Linux x64. It does not need the player, CLI, an audio device or a .NET installation.
+Linux users can install it as a boot service using the downloadable **install-dsp-server.sh**.
+The server releases its active workers when playback stops or pauses.
 
-In DSD mode it goes further and delta-sigma modulates the signal to a 1-bit stream at up to 45 MHz, which
-bypasses the DAC's modulator as well.
+Start with the [network setup guide](docs/network-dsp.md), then enable **Settings → Network DSP** and choose
+the stages to process remotely. Client and server should both be v0.6.0. The UDP connection is intended for
+a trusted private LAN; audio is unencrypted and the protocol has no authentication.
 
-## Status
+## Guides
 
-Version 0.5.1, early but working. The playback engine, the DSP chain, the decoders, both Windows audio back-ends
-and the desktop interface are all functional, and PCM-to-DSD playback has been confirmed on real hardware over
-ASIO. Expect rough edges, and expect settings to move between versions.
-
-## Features
-
-**Resampling**
-
-- Integer-ratio polyphase resampling to any rate the device supports, up to 1.536 MHz PCM.
-- Filter lengths from a few hundred taps up to **33,554,432 taps**, counted at the output rate.
-- 37 filters: Kaiser-, Gaussian- and Nuttall-windowed sinc in several steepnesses, apodizing, early roll-off, half-band,
-  short low-ringing FIR, linear and cubic interpolation, elliptic IIR, and the Transient-Aligned Filter.
-- The **Transient-Aligned Filter** keeps the ideal sinc exactly as it is over most of its length and tapers only its
-  ends; cut off at the source's Nyquist frequency, it passes the original samples through bit for bit, in stages of
-  its own up to 256 times the source rate. FUPlayer's own design of the idea behind Rob Watts' WTA filter
-  ([its page](docs/transient-aligned-filter.md)).
-- Linear, minimum and intermediate phase variants where the design allows them.
-- Single-stage conversion, or a cascade with half-band stages for a fraction of the cost.
-- Direct convolution or partitioned overlap-save FFT, with the crossover, the FFT window and the partition
-  layout all exposed as settings.
-
-**Output**
-
-- WASAPI exclusive, WASAPI shared, ASIO, and a file back-end for offline rendering.
-- Native DSD over ASIO, or DoP for any bit-perfect PCM link.
-- DSD64 through DSD1024, in both the 44.1 kHz and 48 kHz families.
-- 16 to 32 bit PCM with eleven dither and noise-shaping options.
-- Six delta-sigma modulators from 5th to 9th order, and five low-pass filters for DSD to PCM conversion.
-
-**Live input, UPnP input and lossy repair**
-
-- Take audio from any running application, Firefox or a music client, and send it through the whole chain
-  to your DAC. Windows process loopback, so nothing has to be routed by hand.
-- Play from foobar2000 and other UPnP or DLNA controllers: the player is a UPnP renderer they list as an output
-  device, and FLAC, WAV or LPCM they send goes through the whole chain, with their pause, volume and mute
-  ([UPnP input](docs/upnp-input.md)). One button adds the player to foobar2000's list of renderers, so it sends
-  FLAC rather than 16-bit WAV.
-- Now playing shows what a captured application or a UPnP stream is playing, from the application's Windows
-  media session, with its icon when there is no cover.
-- Lossy repair is two neural networks, both in the release, both run through ONNX Runtime, each on the processor or
-  on a graphics adapter (DirectML):
-  - the **neural restorer** takes coded 44.1 and 48 kHz stereo (Opus, AAC, MP3, Vorbis, 96 kbit/s upwards) back
-    towards the lossless recording at the same rate, with about 90 ms of delay: the band above the codec's
-    low-pass, the collapsed stereo, the holes of the weaker encoders ([its page](docs/neural-restorer.md));
-  - the **neural upscaler** takes 44.1 and 48 kHz files and captures to 88.2 and 96 kHz, correcting coded passbands
-    and synthesising the band above the source Nyquist, with about half a second of delay
-    ([its page](docs/neural-upscaler.md)).
-
-  Chained, the restorer goes first and the upscaler reads its output as lossless. Neither recovers what a codec
-  discarded, and both pages say what they get right and where they are wrong. The scripts in `training/` train
-  either from your own files.
-- An **oversampling exciter** writes the music's own harmonics, made from the band above 7 kHz: faint under the music
-  from about 15 kHz, and above where its spectrum ends at the level hi-res masters have there, up to 44.1/48 kHz when
-  the output runs above the source rate. At any output rate, with or without the networks, off until asked for,
-  nothing to set ([its page](docs/exciter.md)).
-- Measures where a file's spectrum actually ends, which is the only way to tell a coded stream from a
-  lossless one when nothing in the container says so.
-
-**Analysis**
-
-- Filter magnitude, passband, impulse, step and noise-shaping plots, computed from the filter that will actually
-  run, before you commit to it.
-- Group delay, added block delay, tap count and arithmetic cost per channel shown for the current settings.
-- Live spectrum, spectrogram and waterfall of the source or the processed signal, on a logarithmic, linear or mel
-  frequency scale, with peak hold.
-- Per-channel level meters, limiter and clipping counters, and a band-edge ringing detector.
-
-**Performance**
-
-- Multi-threaded: channels in parallel, and each channel's polyphase phases spread over the remaining cores.
-- Optional OpenCL offload of the convolution to a GPU, in 64-bit or 32-bit arithmetic, with the split between
-  CPU and GPU measured during playback rather than assumed.
-- A device must reproduce the processor's own output before it is used for anything.
-- The neural networks can each run on a graphics adapter through DirectML, with the DirectML.dll Windows has.
-
-**Interface**
-
-- English and Korean (한국어). The player follows Windows' language when there is a translation for it, and
-  *Settings › Language* changes it. Terms without a settled Korean word keep their usual name and are explained
-  where they appear.
-- A *Glossary* page under Settings explains 58 terms, from sample rate and dither to delta-sigma modulation and
-  group delay, in plain words, in either language.
-
-**Library and playback**
-
-- Folder-scanned library with tag reading, cover art, album and artist views, and a search syntax
-  (`+artist:bach album:cello`).
-- Albums sharing a folder are separated by album title and album artist; old caches are regrouped on load.
-- A *Tracks* page under Library finds individual songs, with covers, file ratings and five sort choices.
-  Search requires every word and ignores case, Japanese kana type and character width.
-- *Stop after this track*, beside repeat, stops automatic queue advancement and is saved between runs.
-  See the [library guide](docs/library.md), including the known cache-loading and late-toggle limitations in 0.5.1.
-- Watches its folders and rescans quietly in the background.
-- Gapless playback, ReplayGain, queue with drag reordering, speaker distance and level calibration.
-- FLAC, WAV, AIFF, DSF and DFF decoded natively. Anything else through optional FFmpeg libraries, which
-  Settings can download and build for you.
-
-## Screenshots
-
-<table>
-  <tr>
-    <td width="50%"><img src="docs/images/filters.png" alt="Filter catalogue"><br><em>Filter catalogue and processing settings</em></td>
-    <td width="50%"><img src="docs/images/output.png" alt="Output devices"><br><em>Device capabilities, probed from the driver</em></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/images/now-playing.png" alt="Now playing"><br><em>Now playing, with the analyzer and engine counters</em></td>
-    <td width="50%"><img src="docs/images/settings.png" alt="Settings"><br><em>Processing resources and graphics acceleration</em></td>
-  </tr>
-</table>
-
-## Getting started
-
-### When something is not where you expect it
-
-```powershell
-FUPlayer.exe --diagnostics
-```
-
-Writes what the player can see, from the player's own process, and stops: which folders it resolved
-for settings and models, what is in each of them, whether the FFmpeg libraries loaded, and which
-formats it will open. A window program cannot answer a question on a console, so when the interface
-says a model is not installed there is otherwise no way to ask it which folder it looked in.
-
-Models are searched for in a `models` folder beside the executable, where the release puts its two,
-then the folder named by `FUPLAYER_MODELS_PATH`, then beside the settings file. The folder next to the executable is the same
-folder for every process on the machine, which the settings folder is not: a program running inside
-an application container has its `%APPDATA%` redirected into the container.
-
-## Requirements
-
-| | |
+| You want to… | Read |
 | --- | --- |
-| **OS** | Windows 10 or 11, x64 |
-| **Runtime** | None for the release zip, which bundles .NET 9. Building from source needs the [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) |
-| **CPU** | Any x64 with AVX2 for comfortable use. A 4-core laptop plays 1M taps to 705.6 kHz in real time |
-| **DAC** | Anything with a WASAPI or ASIO driver. ASIO is required for native DSD |
-| **Optional** | An OpenCL 1.2 device for GPU offload; FFmpeg LGPL builds for formats beyond FLAC, WAV, AIFF, DSF and DFF (*Settings › FFmpeg* builds them, or `pwsh build/ffmpeg/build-ffmpeg.ps1`) |
+| Choose output, buffering, GPU and language settings | [Settings](docs/settings.md) |
+| Choose filters and understand delay | [DSP studio](docs/dsp.md) and [Transient-Aligned Filter](docs/transient-aligned-filter.md) |
+| Set up another computer for processing | [Network DSP](docs/network-dsp.md) |
+| Organise albums, covers, tracks and the queue | [Library](docs/library.md) |
+| Try neural processing or the exciter | [Restorer](docs/neural-restorer.md), [upscaler](docs/neural-upscaler.md), [exciter](docs/exciter.md) |
+| Play from a UPnP controller | [UPnP input](docs/upnp-input.md) |
+| Fix dropouts or report a problem | [Troubleshooting](docs/troubleshooting.md) |
+| Render files or use the terminal | [Command line](docs/cli.md) |
+| Build the software | [Building](docs/building.md) |
 
-### Download
+These guides are also in the ZIP's `docs` folder. [Changes in v0.6.0](CHANGELOG.md) include the standalone
+network server, CUDA/Vulkan resampling, file preprocessing, corrected TAF graphs and safer cover selection.
+This is an early release; supported output rates and sustained performance depend on your hardware.
 
-Grab the latest `FUPlayer-x.y.z-win-x64.zip` from the
-[releases page](https://github.com/jerrybeomsoo/FUPlayer/releases), unpack it anywhere and run
-`FUPlayer.exe`. The archive carries its own copy of .NET, so nothing has to be installed first, and
-`fuplayer-cli.exe` sits next to it.
+## Licence and contributions
 
-### Build from source
-
-```bash
-git clone https://github.com/jerrybeomsoo/FUPlayer.git
-cd FUPlayer
-dotnet build -c Release
-```
-
-Run the player:
-
-```bash
-dotnet run -c Release --project src/FUPlayer.App
-```
-
-Or the command line tool:
-
-```bash
-dotnet run -c Release --project src/FUPlayer.Cli -- devices
-```
-
-The solution also opens in Visual Studio 2022 (17.14 or newer) and JetBrains Rider. See
-[docs/building.md](docs/building.md) for a self-contained publish, for the FFmpeg option, and for the
-`FuPlayerDebugDsp` switch that turns off optimisation in the DSP library while debugging.
-
-### First run
-
-1. **Output** page: choose the back-end and device. WASAPI exclusive is the safe default; ASIO gives you native
-   DSD if the driver supports it. The page shows the sample rates, formats and DSD modes the driver reports.
-2. **DSP studio**: choose PCM or DSD output, then a filter and a filter length. Watch the group delay and the
-   cost per channel as you change them.
-3. **Library**: add a music folder, or drag files onto the window.
-
-The interface is in English or Korean, following Windows; *Settings › Language* changes it, and the *Glossary*
-page under Settings explains the terms the other pages use.
-
-Settings live in `%APPDATA%\FUPlayer`. Deleting that folder resets everything.
-
-## How it works
-
-### The signal path
-
-```
-file
- |
- +- decode (FLAC / WAV / AIFF / DSF / DFF native, others via FFmpeg)
- |
- +- DSD to PCM, if the source is DSD and the output is not
- |
- +- ReplayGain, ultrasonic low-pass
- |
- +- RESAMPLE          polyphase, one stage or a half-band cascade
- |    |
- |    +- direct convolution, or partitioned overlap-save FFT
- |    +- optionally split across CPU and GPU, phase by phase
- |
- +- volume, speaker trim, look-ahead limiter
- |
- +- PCM: dither and quantize        DSD: delta-sigma modulate
- |
- +- FIFO -> WASAPI exclusive / ASIO / DoP / file
-```
-
-Each channel runs the whole chain on its own thread. Within a channel, a long filter's polyphase phases are
-spread over whatever cores the other channels leave free.
-
-### Filters
-
-A resampling filter here is a windowed sinc, designed at build time from a passband edge, a stopband edge and a
-stopband attenuation. Lengthening it narrows the transition band rather than adding zeros: 262,144 taps at
-705.6 kHz is a transition about 23 Hz wide, and 33,554,432 taps is under 0.2 Hz.
-
-The cost of that is delay. A linear-phase FIR of N taps has a group delay of exactly (N-1)/2 output samples,
-which is 186 ms at 262,144 taps and 24 seconds at 33.5 million. The DSP studio shows the figure before you
-select the length. Minimum-phase variants remove almost all of it, at the price of a non-flat phase response.
-
-The Transient-Aligned Filter is the one built the other way round: instead of shaping the whole sinc with a window,
-it keeps the sinc as it is and shapes only its ends, so the waveform around each transient is rebuilt as the ideal
-filter would rebuild it ([how, and why that length of taper](docs/transient-aligned-filter.md)).
-
-### Two ways to convolve
-
-Direct convolution costs one multiply-add per tap per output sample. At 16,384 taps a phase that is 16,384
-multiply-adds for every sample that leaves the player, which is why it stops being practical somewhere in the
-tens of thousands of taps.
-
-Partitioned overlap-save convolution transforms a block of input once, multiplies it against pre-transformed
-filter partitions, and transforms back. Its cost per output sample grows with log2 of the FFT size instead of
-with the tap count, so a filter of a million taps costs roughly what a filter of a hundred thousand does. The
-price is latency: the stage holds one block of input before it can answer.
-
-Both compute the same convolution of the same coefficients. Rendered with flat dither, the two paths agree to
-the last bit on short filters, and on long filters the frequency domain is measurably the more accurate of the
-two, because it accumulates fewer rounding errors per output sample.
-
-### Partition layout
-
-A short FFT window gives back the latency but costs arithmetic, because the partition count rises as the window
-shrinks: at 262,144 taps, going from a 46 ms block to a 1.5 ms block costs 13 times the multiply-accumulates.
-
-Non-uniform partitioning fixes most of that. A band of taps starting at offset O only ever contributes to output
-O samples behind the newest input, so it can be convolved in blocks of up to O samples and still never be late.
-The early taps go in short windows and later ones in windows that double and double again, which brings the same
-1.5 ms latency down from 13 times the cost to about 2 times. A small dynamic program picks the band layout
-against a cost model, and returns a single band, which is ordinary uniform partitioning, wherever the extra
-transforms would not pay.
-
-Uniform partitioning is the default because it is the only layout a GPU kernel accepts.
-
-### Graphics acceleration
-
-The convolution of a long filter is thousands of independent multiply-accumulates, which suits a GPU. FUPlayer
-will offload it to any OpenCL 1.2 device, in 64-bit or 32-bit arithmetic, but only after the device has
-reproduced the processor's own output for that exact filter.
-
-The work is divided by polyphase phase, not by channel. A stereo conversion at 16 phases has 32 independent
-pieces of work per block, and the device can be given any number of them while the CPU convolves the rest of the
-same block concurrently. How many is measured, not assumed: every split from none to all is timed during
-playback, the fastest is used, and the winner is then checked against the device being left out entirely. If no
-split makes the whole pipeline faster, the device is released and costs nothing.
-
-Phases are handed over one channel at a time rather than spread evenly, so that a channel wholly on the device
-carries on into the modulator while the device works. That ordering alone is worth 20 percent.
-
-The processor transforms every input block for its own phases whether the device gets any or not, so the device
-is handed the spectrum rather than transforming the block again. That takes the per-block cost of having a
-device attached from 30 percent of the pipeline down to 11.
-
-### DSD output
-
-In DSD mode the signal is resampled to the modulator rate and then delta-sigma modulated to 1 bit. Six
-modulators are available, from a 5th-order design with wide stability margins to a 9th-order one with very deep
-in-band noise suppression for DSD256 and above.
-
-DSD sources can be passed through unchanged when the output rate matches, converted to PCM with a choice of
-low-pass filters, or remodulated.
-
-## Performance
-
-Measured on an i7-7820HQ laptop, 4 cores and 8 threads with AVX2, and a Quadro M2200. 90 seconds of 44.1 kHz
-stereo converted to 705.6 kHz with a Gaussian windowed sinc, single stage, best of two runs:
-
-| Filter length | Convolution | Processor | With the GPU (64-bit) | With the GPU (32-bit) |
-| --- | --- | --- | --- | --- |
-| 262,144 taps | Partitioned FFT | **13.9x** real time | 13.0x, device released | 12.8x, device released |
-| 1,048,576 taps | Partitioned FFT | **10.1x** real time | 9.6x, device released | 9.6x, device released |
-| 65,536 taps | Direct | 5.6x real time | 5.7x | **7.2x** |
-| 2,097,152 taps, 10 ms blocks | Partitioned FFT | 1.5x real time | 1.9x | **2.4x** |
-
-DSD output on the same machine: DSD256 at 5.0x real time, DSD512 at 2.6x, DSD1024 at 1.5x.
-
-The GPU is worth having where the filter dominates the pipeline and the arithmetic is 32-bit. Where the CPU is
-already faster, the measurement says so and the device is released, which is why two rows above are slower with
-it than without: the difference is the few seconds of measurement at the start of the stream.
-
-## Command line
-
-`fuplayer-cli` is a headless companion for device listing, offline rendering and benchmarking.
-
-```bash
-# What can this machine play through, and at what rates
-fuplayer-cli devices
-
-# Render an album to 705.6 kHz WAV with a million-tap filter
-fuplayer-cli render *.flac --out ./rendered --rate 705600 --taps 1048576 --staging single
-
-# How many times faster than real time does this conversion run
-fuplayer-cli bench track.flac --mode dsd --dsd 256 --gpu
-
-# Be a UPnP renderer that foobar2000 plays to
-fuplayer-cli upnp --backend asio
-```
-
-Every processing setting in the interface has a command line equivalent. See [docs/cli.md](docs/cli.md).
-
-## Repository layout
-
-```
-src/
-  FUPlayer.Core/            engine, DSP, decoders, settings. No UI, no platform code
-    Dsp/Resampling/           polyphase stages, partitioned FFT, filter catalogue
-    Dsp/Acceleration/         OpenCL offload and the CPU/GPU split
-    Dsp/Modulation/           delta-sigma modulators
-    Dsp/Quantization/         dither and noise shaping
-    Engine/                   playback engine, DSP pipeline, output planner, FIFO
-  FUPlayer.Audio.Windows/   WASAPI and ASIO back-ends
-  FUPlayer.App/             Avalonia interface
-  FUPlayer.Cli/             headless tool
-docs/                         documentation and screenshots
-models/                       the two neural models the release ships
-training/neural-restorer/     Python scripts that train a restorer from your own files
-training/neural-upscaler/     Python scripts that train an upscaler from your own files
-build/ffmpeg/                 script that builds LGPL FFmpeg libraries
-```
-
-## Documentation
-
-| Document | What is in it |
-| --- | --- |
-| [CHANGELOG.md](CHANGELOG.md) | What changed in each release |
-| [docs/building.md](docs/building.md) | Building, publishing, and the optional FFmpeg libraries |
-| [docs/architecture.md](docs/architecture.md) | Projects, threading model, and the classes that matter |
-| [docs/dsp.md](docs/dsp.md) | The signal processing in detail, with the arithmetic |
-| [docs/cli.md](docs/cli.md) | Every `fuplayer-cli` command and option |
-| [docs/settings.md](docs/settings.md) | Every setting, what it changes, and what it costs |
-| [docs/library.md](docs/library.md) | Album grouping, individual track search, file ratings and stop-after-current playback |
-| [docs/neural-restorer.md](docs/neural-restorer.md) | The neural restorer: how it runs, how its model was trained, and what it measures |
-| [docs/neural-upscaler.md](docs/neural-upscaler.md) | The neural upscaler: how it runs, how its model was trained, and what it measures |
-| [docs/building-ffmpeg.md](docs/building-ffmpeg.md) | Building the LGPL FFmpeg DLLs, from the player or from source |
-| [docs/upnp-input.md](docs/upnp-input.md) | Playing from foobar2000 and other UPnP controllers |
-| [docs/trainable-windows.md](docs/trainable-windows.md) | Trainable windows: where the idea comes from, and what it would do here |
-
-## Contributing
-
-Issues and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first; it covers the code
-style, the licence constraint on dependencies, and how to check that a DSP change did not alter the output.
-
-## License
-
-FUPlayer's own code is [MIT](LICENSE).
-
-It uses Avalonia (MIT), CommunityToolkit.Mvvm (MIT) and TagLib# (LGPL-2.1), and optionally loads FFmpeg
-libraries built under the LGPL. The LGPL components stay separate, replaceable libraries. See
-[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
-
-## Acknowledgements
-
-Every filter, modulator and noise shaper here is designed from openly published theory, credited where it is
-used in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md): Kaiser's window, Orfanidis on elliptic filter
-design, Lipshitz, Vanderkooy and Wannamaker on psychoacoustic noise shaping, and Schreier and Temes on
-delta-sigma conversion.
-
-Built with [Avalonia](https://avaloniaui.net/), [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet)
-and [TagLib#](https://github.com/mono/taglib-sharp).
+FUPlayer and its bundled neural models use the [MIT licence](LICENSE). Dependencies retain their own
+licences; see [third-party notices](THIRD-PARTY-NOTICES.md) and the included `licenses` folder.
+Bug reports and contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).

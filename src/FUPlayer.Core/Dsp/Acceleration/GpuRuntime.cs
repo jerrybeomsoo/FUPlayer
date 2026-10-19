@@ -15,6 +15,16 @@ public sealed record GpuDevice
 
     public required string Platform { get; init; }
 
+    /// <summary>Native driver API. CUDA is preferred for NVIDIA and Vulkan for other vendors.</summary>
+    public GpuBackend Backend { get; init; }
+
+    /// <summary>The conventional API name for device selectors and diagnostics.</summary>
+    public string BackendName => Backend switch { GpuBackend.Cuda => "CUDA", GpuBackend.Vulkan => "Vulkan", _ => "OpenCL" };
+
+    internal int MaxGroupSize { get; init; } = 256;
+    internal long LocalMemoryBytes { get; init; } = 16 * 1024;
+    internal bool IsDiscrete { get; init; }
+
     /// <summary>Whether the device can do 64-bit maths, which is what the processor path uses.</summary>
     public required bool SupportsDouble { get; init; }
 
@@ -30,20 +40,20 @@ public sealed record GpuDevice
     internal nint Handle { get; init; }
 
     public string Summary =>
-        Loc.F("{0} compute units", ComputeUnits) + $"  ·  {GlobalMemoryBytes / (1024 * 1024)} MB  ·  " +
+        (ComputeUnits > 0 ? Loc.F("{0} compute units", ComputeUnits) + "  ·  " : string.Empty) + $"{GlobalMemoryBytes / (1024 * 1024)} MB  ·  " +
         (SupportsDouble ? Loc.T("64-bit maths") : Loc.T("32-bit maths only")) + $"  ·  {Platform}";
 }
 
 /// <summary>
-/// Finds OpenCL devices and keeps one compiled program per device, so switching tracks does not recompile the
-/// kernels. Everything here is best effort: a machine with no OpenCL simply reports no devices.
+/// Finds native compute devices and keeps one kernel program per device and precision. CUDA is preferred
+/// for NVIDIA and Vulkan for other GPUs; OpenCL remains an explicit alternative.
 /// </summary>
 public static class GpuRuntime
 {
     private static readonly Lazy<(IReadOnlyList<GpuDevice> Devices, string? Reason)> Found =
         new(Discover, LazyThreadSafetyMode.ExecutionAndPublication);
 
-    private static readonly ConcurrentDictionary<(nint Device, bool Double), GpuProgram> Programs = new();
+    private static readonly ConcurrentDictionary<(string Device, bool Double), Lazy<GpuProgram>> Programs = new();
 
     public static IReadOnlyList<GpuDevice> Devices => Found.Value.Devices;
 
@@ -70,8 +80,19 @@ public static class GpuRuntime
             }
         }
 
-        // Prefer a real GPU that can do 64-bit maths, then any GPU, then whatever is left.
-        return devices.OrderByDescending(d => d.IsGpu && d.SupportsDouble)
+        // Old settings stored a display name. Migrate that name to the preferred driver API.
+        IEnumerable<GpuDevice> candidates = devices;
+        if (Enum.TryParse(id, ignoreCase: true, out GpuBackend backend))
+        {
+            candidates = devices.Where(d => d.Backend == backend).ToArray();
+            if (!candidates.Any()) return null;
+        }
+        else if (!string.IsNullOrEmpty(id) && devices.Any(d => d.Name == id))
+            candidates = devices.Where(d => d.Name == id);
+        return candidates.OrderByDescending(d =>
+                d.Backend == GpuBackend.Cuda || (d.Backend == GpuBackend.Vulkan && !d.Vendor.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase)))
+            .ThenByDescending(d => d.IsGpu && d.SupportsDouble)
+            .ThenByDescending(d => d.IsDiscrete)
             .ThenByDescending(d => d.IsGpu)
             .ThenByDescending(d => d.ComputeUnits)
             .First();
@@ -79,9 +100,26 @@ public static class GpuRuntime
 
     /// <summary>Builds (or returns) the kernel program for a device at the requested precision.</summary>
     internal static GpuProgram GetProgram(GpuDevice device, bool useDouble) =>
-        Programs.GetOrAdd((device.Handle, useDouble), key => GpuProgram.Build(device, key.Double));
+        Programs.GetOrAdd((device.Id, useDouble), key => new Lazy<GpuProgram>(
+            () => GpuProgram.Build(device, key.Double), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
 
     private static (IReadOnlyList<GpuDevice>, string?) Discover()
+    {
+        var devices = new List<GpuDevice>();
+        var reasons = new List<string>();
+        try { devices.AddRange(CudaComputeApi.Discover()); }
+        catch (Exception ex) when (ex is OpenClException or DllNotFoundException or EntryPointNotFoundException)
+        { reasons.Add(ex.Message); }
+        try { devices.AddRange(VulkanComputeApi.Discover()); }
+        catch (Exception ex) when (ex is OpenClException or DllNotFoundException or EntryPointNotFoundException or NotSupportedException)
+        { reasons.Add(ex.Message); }
+        var openCl = DiscoverOpenCl();
+        devices.AddRange(openCl.Item1);
+        if (openCl.Item2 is not null) reasons.Add(openCl.Item2);
+        return (devices, devices.Count > 0 ? null : string.Join(" ", reasons));
+    }
+
+    private static (IReadOnlyList<GpuDevice>, string?) DiscoverOpenCl()
     {
         if (!OpenClApi.IsPresent)
         {
@@ -114,16 +152,18 @@ public static class GpuRuntime
                     string extensions = OpenClApi.GetDeviceText(handle, OpenClApi.DeviceExtensions);
                     devices.Add(new GpuDevice
                     {
-                        Id = repeat == 0 ? name : $"{name} #{repeat + 1}",
+                        Id = "opencl:" + (repeat == 0 ? name : $"{name} #{repeat + 1}"),
                         Name = name,
                         Vendor = OpenClApi.GetDeviceText(handle, OpenClApi.DeviceVendor),
-                        Platform = platformName,
+                        Platform = "OpenCL · " + platformName,
                         SupportsDouble = extensions.Contains("cl_khr_fp64", StringComparison.Ordinal),
                         ComputeUnits = (int)OpenClApi.GetDeviceValue<uint>(handle, OpenClApi.DeviceComputeUnits),
                         GlobalMemoryBytes = (long)OpenClApi.GetDeviceValue<ulong>(handle, OpenClApi.DeviceGlobalMemory),
                         MaxAllocationBytes = (long)OpenClApi.GetDeviceValue<ulong>(handle, OpenClApi.DeviceMaxAllocation),
                         IsGpu = (OpenClApi.GetDeviceValue<ulong>(handle, OpenClApi.DeviceType) & OpenClApi.DeviceTypeGpu) != 0,
                         Handle = handle,
+                        MaxGroupSize = (int)OpenClApi.GetDeviceValue<nuint>(handle, OpenClApi.DeviceMaxWorkGroupSize),
+                        LocalMemoryBytes = (long)OpenClApi.GetDeviceValue<ulong>(handle, OpenClApi.DeviceLocalMemory),
                     });
                 }
             }
@@ -158,8 +198,22 @@ internal sealed class GpuProgram
 
     public int ElementSize => UsesDouble ? sizeof(double) : sizeof(float);
 
+    public ComputeApi Api { get; private init; } = OpenClComputeApi.Instance;
+
     public static GpuProgram Build(GpuDevice device, bool useDouble)
     {
+        if (device.Backend == GpuBackend.Cuda)
+        {
+            var api = new CudaComputeApi(device, useDouble);
+            return new GpuProgram(device, useDouble, 0, api.Module) { Api = api };
+        }
+
+        if (device.Backend == GpuBackend.Vulkan)
+        {
+            var api = new VulkanComputeApi(device, useDouble);
+            return new GpuProgram(device, useDouble, 0, 0) { Api = api };
+        }
+
         nint context = OpenClApi.CreateContext(device.Handle);
         try
         {

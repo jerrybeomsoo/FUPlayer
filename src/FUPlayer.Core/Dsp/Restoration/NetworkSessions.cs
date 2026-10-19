@@ -17,14 +17,16 @@ internal sealed class NetworkSessions : IDisposable
 {
     private readonly string _path;
     private readonly int _threads;
+    private readonly bool _allowSpinning;
     private readonly Lock? _gate;
     private readonly Dictionary<int, InferenceSession> _sized = [];
 
-    public NetworkSessions(string path, GraphicsAdapter? adapter, int threads)
+    public NetworkSessions(string path, GraphicsAdapter? adapter, int threads, bool allowSpinning = true)
     {
         _path = path;
         _threads = threads;
-        Main = InferenceDevices.Open(path, adapter, threads, out GraphicsAdapter? used, out string? failure);
+        _allowSpinning = allowSpinning;
+        Main = InferenceDevices.Open(path, adapter, threads, out GraphicsAdapter? used, out string? failure, allowSpinning);
         Adapter = used;
         AdapterFailure = failure;
         _gate = used is null ? null : new Lock();
@@ -63,7 +65,7 @@ internal sealed class NetworkSessions : IDisposable
 
         try
         {
-            session = InferenceDevices.OpenOn(_path, Adapter!, _threads, frames);
+            session = InferenceDevices.OpenOn(_path, Adapter!, _threads, frames, _allowSpinning);
         }
         catch (OnnxRuntimeException)
         {

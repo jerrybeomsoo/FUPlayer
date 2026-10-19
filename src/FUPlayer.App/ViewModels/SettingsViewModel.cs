@@ -42,10 +42,24 @@ public sealed partial class SettingsViewModel : ObservableObject
     private bool _meterAdjustedSource;
 
     [ObservableProperty]
+    private bool _preprocessFiles;
+
+    [ObservableProperty]
     private bool _gpuAcceleration;
 
     [ObservableProperty]
     private bool _gpuForce;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(LocalResampling))]
+    private bool _networkDsp;
+
+    [ObservableProperty] private string _networkDspHost = string.Empty;
+    [ObservableProperty] private int _networkDspPort = 58181;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(LocalResampling))] private bool _remoteResampling;
+    [ObservableProperty] private bool _remoteRestorer;
+    [ObservableProperty] private bool _remoteUpscaler;
+    public bool LocalResampling => !NetworkDsp || !RemoteResampling;
 
     [ObservableProperty]
     private Choice? _selectedGpuDevice;
@@ -118,11 +132,12 @@ public sealed partial class SettingsViewModel : ObservableObject
         SelectedDspThreads = Choice.Find(DspThreadChoices, settings.Processing.DspThreads) ?? DspThreadChoices[0];
         SelectedFifo = Choice.Find(FifoChoices, settings.Processing.FifoMilliseconds) ?? FifoChoices[1];
         MeterAdjustedSource = settings.Processing.MeterAdjustedSource;
+        PreprocessFiles = settings.Processing.PreprocessFiles;
 
         GpuDeviceChoices =
         [
             new("Automatic", string.Empty, "The most capable device found."),
-            .. GpuRuntime.Devices.Select(d => new Choice(d.Name, d.Id, d.Summary)),
+            .. GpuRuntime.Devices.Select(d => new Choice($"{d.Name} ({d.BackendName})", d.Id, d.Summary)),
         ];
         SelectedGpuDevice = Choice.Find(GpuDeviceChoices, settings.Processing.GpuDeviceId) ?? GpuDeviceChoices[0];
         SelectedGpuPrecision = Choice.Find(GpuPrecisionChoices, settings.Processing.GpuHighPrecision) ?? GpuPrecisionChoices[0];
@@ -133,9 +148,15 @@ public sealed partial class SettingsViewModel : ObservableObject
         HasGpuDevices = GpuRuntime.IsAvailable;
         GpuAcceleration = settings.Processing.GpuAcceleration && HasGpuDevices;
         GpuForce = settings.Processing.GpuForce;
+        NetworkDsp = settings.Processing.NetworkDsp;
+        NetworkDspHost = settings.Processing.NetworkDspHost;
+        NetworkDspPort = settings.Processing.NetworkDspPort;
+        RemoteResampling = settings.Processing.RemoteResampling;
+        RemoteRestorer = settings.Processing.RemoteRestorer;
+        RemoteUpscaler = settings.Processing.RemoteUpscaler;
         GpuStatus = HasGpuDevices
             ? string.Join(Environment.NewLine, GpuRuntime.Devices.Select(d => $"{d.Name}: {d.Summary}"))
-            : GpuRuntime.Unavailable ?? Loc.T("No OpenCL device was found.");
+            : GpuRuntime.Unavailable ?? Loc.T("No usable compute device was found.");
 
         string? version = typeof(SettingsViewModel).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         Version = version is null ? "0.1" : version.Split('+')[0];
@@ -218,9 +239,9 @@ public sealed partial class SettingsViewModel : ObservableObject
     public IReadOnlyList<Choice> GpuPrecisionChoices { get; } =
     [
         new("64-bit (double)", true,
-            "Bit-identical to the CPU. Consumer GPUs run FP64 at a fraction of their FP32 rate, often 1/32."),
+            "64-bit arithmetic, as on the CPU. Rounding can still differ between implementations; Now playing reports the measured self-check error."),
         new("32-bit (single)", false,
-            "2x to 3x faster on most cards. Deviation from the CPU is measured and shown in Now playing, typically -130 dB."),
+            "Often faster, with more rounding error. Now playing reports the measured error; DSP studio compares 32-bit filter storage with the 64-bit design."),
     ];
 
     /// <summary>Time every division of the phases and keep the quickest, revisiting it as the stream plays.</summary>
@@ -339,9 +360,19 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     partial void OnMeterAdjustedSourceChanged(bool value) => Update(() => Settings.Processing.MeterAdjustedSource = value);
 
+    partial void OnPreprocessFilesChanged(bool value) => Update(() => Settings.Processing.PreprocessFiles = value);
+
     partial void OnGpuAccelerationChanged(bool value) => Update(() => Settings.Processing.GpuAcceleration = value);
 
     partial void OnGpuForceChanged(bool value) => Update(() => Settings.Processing.GpuForce = value);
+
+    partial void OnNetworkDspChanged(bool value) => Update(() => Settings.Processing.NetworkDsp = value);
+
+    partial void OnNetworkDspHostChanged(string value) => Update(() => Settings.Processing.NetworkDspHost = value.Trim());
+    partial void OnNetworkDspPortChanged(int value) => Update(() => Settings.Processing.NetworkDspPort = Math.Clamp(value, 1, 65535));
+    partial void OnRemoteResamplingChanged(bool value) => Update(() => Settings.Processing.RemoteResampling = value);
+    partial void OnRemoteRestorerChanged(bool value) => Update(() => Settings.Processing.RemoteRestorer = value);
+    partial void OnRemoteUpscalerChanged(bool value) => Update(() => Settings.Processing.RemoteUpscaler = value);
 
     partial void OnSelectedGpuDeviceChanged(Choice? value)
     {

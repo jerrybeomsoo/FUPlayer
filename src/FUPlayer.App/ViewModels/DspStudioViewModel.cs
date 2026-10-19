@@ -202,6 +202,12 @@ public sealed partial class DspStudioViewModel : ObservableObject
     [ObservableProperty]
     private Choice? _selectedUpscalerDevice;
 
+    /// <summary>The local adapter choice applies only while this stage runs on the client.</summary>
+    public bool LocalRestorer => !Settings.Processing.NetworkDsp || !Settings.Processing.RemoteRestorer;
+
+    /// <summary>The local adapter choice applies only while this stage runs on the client.</summary>
+    public bool LocalUpscaler => !Settings.Processing.NetworkDsp || !Settings.Processing.RemoteUpscaler;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SourceTypeDescription))]
     private Choice? _selectedUpscalerSource;
@@ -322,7 +328,12 @@ public sealed partial class DspStudioViewModel : ObservableObject
         SelectedAnalysisView = AnalysisViewChoices[0];
         _ready = true;
 
-        services.EngineSettingsChanged += (_, _) => ScheduleRefresh();
+        services.EngineSettingsChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(LocalRestorer));
+            OnPropertyChanged(nameof(LocalUpscaler));
+            ScheduleRefresh();
+        };
         ScheduleRefresh();
     }
 
@@ -911,7 +922,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
                 ? analysis.BlockDelayMilliseconds.ToString("0.00", CultureInfo.CurrentCulture) + " ms"
                 : Loc.T("none");
             CostText = Formatting.Operations(analysis.OperationsPerSecond);
-            CostFraction = Math.Clamp((Math.Log10(Math.Max(1, analysis.OperationsPerSecond)) - 5) / 5, 0, 1);
+            CostFraction = Math.Clamp((Math.Log10(Math.Max(1, 2.0 * analysis.OperationsPerSecond)) - 5) / 5, 0, 1);
             TapsText = analysis.Taps > 0 ? analysis.Taps.ToString("N0", CultureInfo.CurrentCulture) : "-";
             // Long filters convolve in the frequency domain; saying what the tap-by-tap route would have cost is
             // the only way the small figure above reads as a saving rather than as a filter that is not running.
@@ -1071,6 +1082,10 @@ public sealed partial class DspStudioViewModel : ObservableObject
         }
 
         AnalysisSummary = _analysisMessage ?? analysis.Summary;
+        if (analysis.PrecisionSummary.Length > 0)
+        {
+            AnalysisSummary += Environment.NewLine + analysis.PrecisionSummary;
+        }
         double sourceNyquist = analysis.InputRate / 2.0;
         switch (view)
         {
@@ -1084,6 +1099,13 @@ public sealed partial class DspStudioViewModel : ObservableObject
                     (FocusedFilter?.Preset.AttenuationDb ?? 120) + (FocusedFilter?.Preset.Family == FilterFamily.NuttallSinc ? 100 : 40), 100, 280);
                 PlotYMaximum = 10;
                 PlotSeries = [new PlotSeries(Loc.T("Magnitude"), analysis.Magnitude.Frequencies, analysis.Magnitude.MagnitudeDb, Palette.Accent)];
+                if (analysis.Magnitude32 is { } preview)
+                {
+                    PlotSeries = [
+                        new PlotSeries(Loc.T("Magnitude"), analysis.Magnitude.Frequencies, analysis.Magnitude.MagnitudeDb, Palette.Accent),
+                        new PlotSeries(Loc.T("32-bit storage preview"), preview.Frequencies, preview.MagnitudeDb, Palette.Warning),
+                    ];
+                }
                 PlotMarkers = [new PlotMarker(sourceNyquist, Loc.T("source fs/2"), Palette.Warning)];
                 break;
 
@@ -1093,10 +1115,15 @@ public sealed partial class DspStudioViewModel : ObservableObject
                 PlotYFormat = PlotAxisFormat.Plain;
                 PlotXMinimum = 0;
                 PlotXMaximum = sourceNyquist * 1.1;
-                PlotYMinimum = -3;
-                PlotYMaximum = 0.5;
+                bool transientAligned = FocusedFilter?.Preset.Family == FilterFamily.TransientAligned;
+                PlotYMinimum = transientAligned ? -7 : -3;
+                double peak = analysis.Magnitude.Frequencies.Select((hz, i) => hz <= Math.Min(analysis.InputRate, analysis.OutputRate) / 2.0
+                    ? analysis.Magnitude.MagnitudeDb[i] : 0).Max();
+                PlotYMaximum = Math.Max(0.5, Math.Ceiling((peak + 0.1) * 2) / 2);
                 PlotSeries = [new PlotSeries(Loc.T("Magnitude (dB)"), analysis.Magnitude.Frequencies, analysis.Magnitude.MagnitudeDb, Palette.Accent)];
-                PlotMarkers = [new PlotMarker(20_000, "20 kHz", Palette.TextSecondary), new PlotMarker(sourceNyquist, "fs/2", Palette.Warning)];
+                PlotMarkers = transientAligned
+                    ? [new PlotMarker(analysis.PassbandEdgeHz, Loc.T("passband end"), Palette.TextSecondary), new PlotMarker(Math.Min(analysis.InputRate, analysis.OutputRate) / 2.0, "fs/2", Palette.Warning)]
+                    : [new PlotMarker(20_000, "20 kHz", Palette.TextSecondary), new PlotMarker(sourceNyquist, "fs/2", Palette.Warning)];
                 break;
 
             case AnalysisView.Impulse:

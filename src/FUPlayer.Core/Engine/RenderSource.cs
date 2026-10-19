@@ -61,6 +61,12 @@ internal sealed class RenderSource : IAudioRenderSource
     public int Render(Span<byte> destination, int frames, bool realtime)
     {
         Span<byte> target = destination[..(frames * _frameBytes)];
+        // A paused device must acknowledge a seek/restart without waiting for resumed audio to arrive.
+        if (_ring.IsClearPending)
+        {
+            _ring.Read(Span<byte>.Empty);
+            _primed = false;
+        }
 
         if (_paused && realtime)
         {

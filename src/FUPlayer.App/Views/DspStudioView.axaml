@@ -133,7 +133,7 @@
                 <ToggleSwitch IsChecked="{Binding NeuralRestorer}" OnContent="" OffContent="" />
               </controls:SettingRow>
               <StackPanel Spacing="0" IsVisible="{Binding NeuralRestorer}">
-                <controls:SettingRow Title="Runs on" Description="{Binding SelectedRestorerDevice.Description}" IsVisible="{Binding HasGraphicsAdapters}">
+                <controls:SettingRow Title="Runs on" Description="{Binding SelectedRestorerDevice.Description}" IsVisible="{Binding HasGraphicsAdapters}" IsEnabled="{Binding LocalRestorer}">
                   <ComboBox ItemsSource="{Binding DeviceChoices}" SelectedItem="{Binding SelectedRestorerDevice}" Width="170" MinWidth="170" />
                 </controls:SettingRow>
                 <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,4" Text="{Binding RestorerStatus}" />
@@ -143,7 +143,7 @@
                 <ToggleSwitch IsChecked="{Binding NeuralUpscaler}" OnContent="" OffContent="" />
               </controls:SettingRow>
               <StackPanel Spacing="0" IsVisible="{Binding NeuralUpscaler}">
-                <controls:SettingRow Title="Runs on" Description="{Binding SelectedUpscalerDevice.Description}" IsVisible="{Binding HasGraphicsAdapters}">
+                <controls:SettingRow Title="Runs on" Description="{Binding SelectedUpscalerDevice.Description}" IsVisible="{Binding HasGraphicsAdapters}" IsEnabled="{Binding LocalUpscaler}">
                   <ComboBox ItemsSource="{Binding DeviceChoices}" SelectedItem="{Binding SelectedUpscalerDevice}" Width="170" MinWidth="170" />
                 </controls:SettingRow>
                 <controls:SettingRow Title="Upscaled band level" Description="{Binding SelectedUpscalerBand.Description}">
@@ -213,7 +213,7 @@
                   <TextBlock Text="{Binding BlockDelayText}" FontWeight="SemiBold" Classes="numeric" />
                 </StackPanel>
                 <StackPanel Grid.Column="3" Spacing="3" Margin="0,0,16,0"
-                            ToolTip.Tip="Multiply-adds per second for one channel, worked out from how the filter is convolved. In the frequency domain the cost grows with the logarithm of the length, so a very long filter can cost less than a short one convolved tap by tap.">
+                            ToolTip.Tip="Estimated floating-point operations per second for one channel. A multiply-add counts as two operations. This models the processor's convolution, excluding transfers, filter design and neural processing; it is not measured GPU throughput.">
                   <TextBlock Classes="eyebrow" Text="COST PER CHANNEL" />
                   <TextBlock Text="{Binding CostText}" FontWeight="SemiBold" Classes="numeric" />
                   <ProgressBar Minimum="0" Maximum="1" Value="{Binding CostFraction}" MinWidth="0" MinHeight="4" Height="4" />

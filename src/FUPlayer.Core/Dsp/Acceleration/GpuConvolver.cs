@@ -24,6 +24,8 @@ namespace FUPlayer.Core.Dsp.Acceleration;
 /// </remarks>
 internal sealed class GpuConvolver : IDisposable
 {
+    private ComputeApi Api => _filter.Program.Api;
+
     private static readonly byte[] Zeros = new byte[64 * 1024];
 
     /// <summary>
@@ -82,10 +84,10 @@ internal sealed class GpuConvolver : IDisposable
 
         try
         {
-            _queue = OpenClApi.CreateQueue(program.Context, program.Device.Handle);
-            _fft = OpenClApi.CreateKernel(program.Program, "fft_pass");
-            _accumulate = OpenClApi.CreateKernel(program.Program, "accumulate");
-            _scatter = OpenClApi.CreateKernel(program.Program, "scatter");
+            _queue = Api.CreateQueue(program.Context, program.Device.Handle);
+            _fft = Api.CreateKernel(program.Program, "fft_pass");
+            _accumulate = Api.CreateKernel(program.Program, "accumulate");
+            _scatter = Api.CreateKernel(program.Program, "scatter");
 
             _historyRe = Buffer(program, (long)_stage.Partitions * n);
             _historyIm = Buffer(program, (long)_stage.Partitions * n);
@@ -99,19 +101,19 @@ internal sealed class GpuConvolver : IDisposable
             _output = Buffer(program, (long)block * up);
 
             // Arguments that never change: the twiddle table, the transform size and the shared filter spectra.
-            OpenClApi.SetArg(_fft, 4, _filter.TwiddleRe);
-            OpenClApi.SetArg(_fft, 5, _filter.TwiddleIm);
-            OpenClApi.SetArg(_fft, 8, n);
-            OpenClApi.SetArg(_accumulate, 0, _filter.FilterRe);
-            OpenClApi.SetArg(_accumulate, 1, _filter.FilterIm);
-            OpenClApi.SetArg(_accumulate, 2, _historyRe);
-            OpenClApi.SetArg(_accumulate, 3, _historyIm);
-            OpenClApi.SetArg(_accumulate, 6, n);
-            OpenClApi.SetArg(_accumulate, 7, _stage.Partitions);
-            OpenClApi.SetArg(_scatter, 0, _accumulatorRe);
-            OpenClApi.SetArg(_scatter, 1, _output);
-            OpenClApi.SetArg(_scatter, 2, n);
-            OpenClApi.SetArg(_scatter, 3, block);
+            Api.SetArg(_fft, 4, _filter.TwiddleRe);
+            Api.SetArg(_fft, 5, _filter.TwiddleIm);
+            Api.SetArg(_fft, 8, n);
+            Api.SetArg(_accumulate, 0, _filter.FilterRe);
+            Api.SetArg(_accumulate, 1, _filter.FilterIm);
+            Api.SetArg(_accumulate, 2, _historyRe);
+            Api.SetArg(_accumulate, 3, _historyIm);
+            Api.SetArg(_accumulate, 6, n);
+            Api.SetArg(_accumulate, 7, _stage.Partitions);
+            Api.SetArg(_scatter, 0, _accumulatorRe);
+            Api.SetArg(_scatter, 1, _output);
+            Api.SetArg(_scatter, 2, n);
+            Api.SetArg(_scatter, 3, block);
             SetReal(_scatter, 5, 1.0 / n);
 
             Reset();
@@ -135,20 +137,20 @@ internal sealed class GpuConvolver : IDisposable
         _lanes = 0;
         for (int i = 0; i < StagingSlots; i++)
         {
-            OpenClApi.Wait(_staged[i]);
+            Api.Wait(_staged[i]);
             _staged[i] = 0;
         }
 
         Clear(_historyRe, (long)_stage.Partitions * _stage.FftSize * _element);
         Clear(_historyIm, (long)_stage.Partitions * _stage.FftSize * _element);
-        OpenClApi.Finish(_queue);
+        Api.Finish(_queue);
     }
 
     public void Dispose()
     {
         for (int i = 0; i < StagingSlots; i++)
         {
-            OpenClApi.Wait(_staged[i]);
+            Api.Wait(_staged[i]);
             _staged[i] = 0;
         }
 
@@ -158,18 +160,18 @@ internal sealed class GpuConvolver : IDisposable
                      _accumulatorRe, _accumulatorIm, _accumulatorScratchRe, _accumulatorScratchIm, _output,
                  })
         {
-            OpenClApi.ReleaseMemory(buffer);
+            Api.ReleaseMemory(buffer);
         }
 
         _historyRe = _historyIm = 0;
         _accumulatorRe = _accumulatorIm = _accumulatorScratchRe = _accumulatorScratchIm = _output = 0;
 
-        OpenClApi.ReleaseKernel(_fft);
-        OpenClApi.ReleaseKernel(_accumulate);
-        OpenClApi.ReleaseKernel(_scatter);
+        Api.ReleaseKernel(_fft);
+        Api.ReleaseKernel(_accumulate);
+        Api.ReleaseKernel(_scatter);
         _fft = _accumulate = _scatter = 0;
 
-        OpenClApi.ReleaseQueue(_queue);
+        Api.ReleaseQueue(_queue);
         _queue = 0;
     }
 
@@ -197,7 +199,7 @@ internal sealed class GpuConvolver : IDisposable
         // The slot coming round again is the oldest of the three; waiting for its write is the only thing that
         // ever makes the processor wait for the device outside Collect, and only if the device is that far behind.
         _slot = (_slot + 1) % StagingSlots;
-        OpenClApi.Wait(_staged[_slot]);
+        Api.Wait(_staged[_slot]);
         _staged[_slot] = 0;
 
         byte[] staging = _staging[_slot];
@@ -205,8 +207,8 @@ internal sealed class GpuConvolver : IDisposable
         Stage(staging.AsSpan(half, half), im, mirror: -1.0, bins, n);
         // The queue runs in order, so the second write finishing means the first has: only its event is kept. The
         // first one's is released at once, where it used to be dropped, one driver event leaked every block.
-        OpenClApi.ReleaseEvent(OpenClApi.WriteAsync(_queue, _historyRe, offset, staging.AsSpan(0, half)));
-        _staged[_slot] = OpenClApi.WriteAsync(_queue, _historyIm, offset, staging.AsSpan(half, half));
+        Api.ReleaseEvent(Api.WriteAsync(_queue, _historyRe, offset, staging.AsSpan(0, half)));
+        _staged[_slot] = Api.WriteAsync(_queue, _historyIm, offset, staging.AsSpan(half, half));
     }
 
     /// <summary>
@@ -261,11 +263,11 @@ internal sealed class GpuConvolver : IDisposable
         int passes = _filter.Passes;
 
         bool inAccumulator = (passes & 1) == 0;
-        OpenClApi.SetArg(_accumulate, 4, inAccumulator ? _accumulatorRe : _accumulatorScratchRe);
-        OpenClApi.SetArg(_accumulate, 5, inAccumulator ? _accumulatorIm : _accumulatorScratchIm);
-        OpenClApi.SetArg(_accumulate, 8, _head);
-        OpenClApi.SetArg(_accumulate, 9, phaseBase);
-        OpenClApi.Run(_queue, _accumulate, (nuint)n, (nuint)lanes);
+        Api.SetArg(_accumulate, 4, inAccumulator ? _accumulatorRe : _accumulatorScratchRe);
+        Api.SetArg(_accumulate, 5, inAccumulator ? _accumulatorIm : _accumulatorScratchIm);
+        Api.SetArg(_accumulate, 8, _head);
+        Api.SetArg(_accumulate, 9, phaseBase);
+        Api.Run(_queue, _accumulate, (nuint)n, (nuint)lanes);
 
         for (int pass = 0; pass < passes; pass++)
         {
@@ -276,11 +278,11 @@ internal sealed class GpuConvolver : IDisposable
             inAccumulator = !inAccumulator;
         }
 
-        OpenClApi.SetArg(_scatter, 4, lanes);
-        OpenClApi.Run(_queue, _scatter, (nuint)_stage.BlockSamples, (nuint)lanes);
+        Api.SetArg(_scatter, 4, lanes);
+        Api.Run(_queue, _scatter, (nuint)_stage.BlockSamples, (nuint)lanes);
 
         // Hand it to the device now rather than when something waits for it, or the two never overlap.
-        OpenClApi.Flush(_queue);
+        Api.Flush(_queue);
     }
 
     /// <summary>
@@ -319,23 +321,23 @@ internal sealed class GpuConvolver : IDisposable
 
     private void Transform(nint sourceRe, nint sourceIm, int sourceOffset, nint targetRe, nint targetIm, int targetOffset, int pass, bool forward, int batch)
     {
-        OpenClApi.SetArg(_fft, 0, sourceRe);
-        OpenClApi.SetArg(_fft, 1, sourceIm);
-        OpenClApi.SetArg(_fft, 2, targetRe);
-        OpenClApi.SetArg(_fft, 3, targetIm);
-        OpenClApi.SetArg(_fft, 6, sourceOffset);
-        OpenClApi.SetArg(_fft, 7, targetOffset);
-        OpenClApi.SetArg(_fft, 9, 1 << pass);
-        OpenClApi.SetArg(_fft, 10, pass);
+        Api.SetArg(_fft, 0, sourceRe);
+        Api.SetArg(_fft, 1, sourceIm);
+        Api.SetArg(_fft, 2, targetRe);
+        Api.SetArg(_fft, 3, targetIm);
+        Api.SetArg(_fft, 6, sourceOffset);
+        Api.SetArg(_fft, 7, targetOffset);
+        Api.SetArg(_fft, 9, 1 << pass);
+        Api.SetArg(_fft, 10, pass);
         SetReal(_fft, 11, forward ? 1.0 : -1.0);
-        OpenClApi.Run(_queue, _fft, (nuint)(_stage.FftSize / 2), (nuint)batch);
+        Api.Run(_queue, _fft, (nuint)(_stage.FftSize / 2), (nuint)batch);
     }
 
     private void Upload(nint buffer, ReadOnlySpan<double> values)
     {
         if (_element == sizeof(double))
         {
-            OpenClApi.Write(_queue, buffer, 0, MemoryMarshal.AsBytes(values));
+            Api.Write(_queue, buffer, 0, MemoryMarshal.AsBytes(values));
             return;
         }
 
@@ -345,19 +347,19 @@ internal sealed class GpuConvolver : IDisposable
             target[i] = (float)values[i];
         }
 
-        OpenClApi.Write(_queue, buffer, 0, _transfer.AsSpan(0, values.Length * sizeof(float)));
+        Api.Write(_queue, buffer, 0, _transfer.AsSpan(0, values.Length * sizeof(float)));
     }
 
     private void Download(nint buffer, Span<double> values)
     {
         if (_element == sizeof(double))
         {
-            OpenClApi.Read(_queue, buffer, 0, MemoryMarshal.AsBytes(values));
+            Api.Read(_queue, buffer, 0, MemoryMarshal.AsBytes(values));
             return;
         }
 
         Span<byte> bytes = _transfer.AsSpan(0, values.Length * sizeof(float));
-        OpenClApi.Read(_queue, buffer, 0, bytes);
+        Api.Read(_queue, buffer, 0, bytes);
         ReadOnlySpan<float> source = MemoryMarshal.Cast<byte, float>(bytes);
         for (int i = 0; i < values.Length; i++)
         {
@@ -369,23 +371,23 @@ internal sealed class GpuConvolver : IDisposable
     {
         if (_element == sizeof(double))
         {
-            OpenClApi.SetArg(kernel, index, value);
+            Api.SetArg(kernel, index, value);
         }
         else
         {
-            OpenClApi.SetArg(kernel, index, (float)value);
+            Api.SetArg(kernel, index, (float)value);
         }
     }
 
     private nint Buffer(GpuProgram program, long elements) =>
-        OpenClApi.CreateBuffer(program.Context, OpenClApi.MemReadWrite, (nuint)(elements * program.ElementSize));
+        Api.CreateBuffer(program.Context, OpenClApi.MemReadWrite, (nuint)(elements * program.ElementSize));
 
     private void Clear(nint buffer, long bytes)
     {
         for (long offset = 0; offset < bytes; offset += Zeros.Length)
         {
             int chunk = (int)Math.Min(Zeros.Length, bytes - offset);
-            OpenClApi.Write(_queue, buffer, (nuint)offset, Zeros.AsSpan(0, chunk));
+            Api.Write(_queue, buffer, (nuint)offset, Zeros.AsSpan(0, chunk));
         }
     }
 }

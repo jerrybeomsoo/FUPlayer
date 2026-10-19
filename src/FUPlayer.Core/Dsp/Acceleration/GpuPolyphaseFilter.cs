@@ -11,6 +11,8 @@ namespace FUPlayer.Core.Dsp.Acceleration;
 /// </summary>
 internal sealed class GpuPolyphaseFilter : IGpuFilter
 {
+    private ComputeApi Api => Program.Api;
+
     private nint _filterRe;
     private nint _filterIm;
     private nint _twiddleRe;
@@ -32,13 +34,13 @@ internal sealed class GpuPolyphaseFilter : IGpuFilter
                     stage.Taps, spectrumBytes / (1024 * 1024), program.Device.MaxAllocationBytes / (1024 * 1024)));
         }
 
-        nint queue = OpenClApi.CreateQueue(program.Context, program.Device.Handle);
+        nint queue = Api.CreateQueue(program.Context, program.Device.Handle);
         try
         {
-            _filterRe = OpenClApi.CreateBuffer(program.Context, OpenClApi.MemReadOnly, (nuint)spectrumBytes);
-            _filterIm = OpenClApi.CreateBuffer(program.Context, OpenClApi.MemReadOnly, (nuint)spectrumBytes);
-            _twiddleRe = OpenClApi.CreateBuffer(program.Context, OpenClApi.MemReadOnly, (nuint)(n / 2 * program.ElementSize));
-            _twiddleIm = OpenClApi.CreateBuffer(program.Context, OpenClApi.MemReadOnly, (nuint)(n / 2 * program.ElementSize));
+            _filterRe = Api.CreateBuffer(program.Context, OpenClApi.MemReadOnly, (nuint)spectrumBytes);
+            _filterIm = Api.CreateBuffer(program.Context, OpenClApi.MemReadOnly, (nuint)spectrumBytes);
+            _twiddleRe = Api.CreateBuffer(program.Context, OpenClApi.MemReadOnly, (nuint)(n / 2 * program.ElementSize));
+            _twiddleIm = Api.CreateBuffer(program.Context, OpenClApi.MemReadOnly, (nuint)(n / 2 * program.ElementSize));
 
             var scratch = new byte[n * program.ElementSize];
             for (int phase = 0; phase < stage.Up; phase++)
@@ -47,8 +49,8 @@ internal sealed class GpuPolyphaseFilter : IGpuFilter
                 {
                     (double[] re, double[] im) = stage.PartitionSpectrum(phase, part);
                     nuint offset = (nuint)(((long)phase * stage.Partitions + part) * n * program.ElementSize);
-                    OpenClApi.Write(queue, _filterRe, offset, Pack(re, scratch, program.UsesDouble));
-                    OpenClApi.Write(queue, _filterIm, offset, Pack(im, scratch, program.UsesDouble));
+                    Api.Write(queue, _filterRe, offset, Pack(re, scratch, program.UsesDouble));
+                    Api.Write(queue, _filterIm, offset, Pack(im, scratch, program.UsesDouble));
                 }
             }
 
@@ -63,18 +65,18 @@ internal sealed class GpuPolyphaseFilter : IGpuFilter
             }
 
             var twiddleScratch = new byte[n / 2 * program.ElementSize];
-            OpenClApi.Write(queue, _twiddleRe, 0, Pack(twiddleRe, twiddleScratch, program.UsesDouble));
-            OpenClApi.Write(queue, _twiddleIm, 0, Pack(twiddleIm, twiddleScratch, program.UsesDouble));
-            OpenClApi.Finish(queue);
+            Api.Write(queue, _twiddleRe, 0, Pack(twiddleRe, twiddleScratch, program.UsesDouble));
+            Api.Write(queue, _twiddleIm, 0, Pack(twiddleIm, twiddleScratch, program.UsesDouble));
+            Api.Finish(queue);
         }
         catch
         {
             Release();
-            OpenClApi.ReleaseQueue(queue);
+            Api.ReleaseQueue(queue);
             throw;
         }
 
-        OpenClApi.ReleaseQueue(queue);
+        Api.ReleaseQueue(queue);
     }
 
     public FftPolyphaseStage Stage { get; }
@@ -218,10 +220,10 @@ internal sealed class GpuPolyphaseFilter : IGpuFilter
 
     private void Release()
     {
-        OpenClApi.ReleaseMemory(_filterRe);
-        OpenClApi.ReleaseMemory(_filterIm);
-        OpenClApi.ReleaseMemory(_twiddleRe);
-        OpenClApi.ReleaseMemory(_twiddleIm);
+        Api.ReleaseMemory(_filterRe);
+        Api.ReleaseMemory(_filterIm);
+        Api.ReleaseMemory(_twiddleRe);
+        Api.ReleaseMemory(_twiddleIm);
         _filterRe = _filterIm = _twiddleRe = _twiddleIm = 0;
     }
 }

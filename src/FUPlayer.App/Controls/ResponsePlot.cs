@@ -142,7 +142,8 @@ public sealed class ResponsePlot : Control
             yMax = yMin + 1;
         }
 
-        var plot = new Rect(52, string.IsNullOrEmpty(Title) ? 8 : 24, bounds.Width - 64, bounds.Height - (string.IsNullOrEmpty(Title) ? 8 : 24) - 22);
+        double top = string.IsNullOrEmpty(Title) ? 24 : 40;
+        var plot = new Rect(52, top, bounds.Width - 64, bounds.Height - top - 22);
         bool log = XScale == PlotAxisScale.Logarithmic && xMin > 0;
         double X(double x) => log
             ? plot.Left + plot.Width * (Math.Log10(Math.Max(x, xMin)) - Math.Log10(xMin)) / (Math.Log10(xMax) - Math.Log10(xMin))
@@ -181,6 +182,7 @@ public sealed class ResponsePlot : Control
 
         using (context.PushClip(plot))
         {
+            var markerLabels = new List<Rect>();
             foreach (PlotMarker marker in Markers ?? [])
             {
                 if (marker.X < xMin || marker.X > xMax)
@@ -190,7 +192,12 @@ public sealed class ResponsePlot : Control
 
                 double px = X(marker.X);
                 context.DrawLine(new Pen(new SolidColorBrush(Palette.WithAlpha(marker.Color, 0xC0)), 1) { DashStyle = new DashStyle([4, 3], 0) }, new Point(px, plot.Top), new Point(px, plot.Bottom));
-                _text.Draw(context, marker.Label, new Point(px + 4, plot.Top + 2), 10, marker.Color);
+                FormattedText label = _text.Get(marker.Label, 10, marker.Color);
+                double left = Math.Clamp(px + 4, plot.Left + 2, Math.Max(plot.Left + 2, plot.Right - label.Width - 2));
+                var placement = new Rect(left, plot.Top + 2, label.Width + 4, label.Height + 2);
+                while (markerLabels.Any(r => r.Intersects(placement))) placement = placement.Translate(new Vector(0, label.Height + 3));
+                markerLabels.Add(placement);
+                context.DrawText(label, placement.Position);
             }
 
             foreach (PlotSeries curve in series)
@@ -209,7 +216,7 @@ public sealed class ResponsePlot : Control
         {
             FormattedText label = _text.Get(curve.Label, 10, curve.Color);
             legendX -= label.Width + 12;
-            context.DrawText(label, new Point(legendX, string.IsNullOrEmpty(Title) ? plot.Top + 2 : 6));
+            context.DrawText(label, new Point(legendX, string.IsNullOrEmpty(Title) ? 6 : 22));
         }
     }
 

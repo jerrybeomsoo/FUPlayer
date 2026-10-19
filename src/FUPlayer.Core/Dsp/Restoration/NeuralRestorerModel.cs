@@ -81,9 +81,9 @@ public sealed class NeuralRestorerModel : IDisposable
     /// Opens a restorer on the processor, on as many threads as asked for, or on a graphics adapter
     /// (<see cref="InferenceDevices"/>), falling back to the processor when the adapter cannot open it.
     /// </summary>
-    public static NeuralRestorerModel Load(string path, int threads = 1, GraphicsAdapter? adapter = null)
+    public static NeuralRestorerModel Load(string path, int threads = 1, GraphicsAdapter? adapter = null, bool allowSpinning = true)
     {
-        var sessions = new NetworkSessions(path, adapter, Math.Max(1, threads));
+        var sessions = new NetworkSessions(path, adapter, Math.Max(1, threads), allowSpinning);
         InferenceSession session = sessions.Main;
         try
         {

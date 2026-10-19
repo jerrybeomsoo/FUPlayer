@@ -12,6 +12,8 @@ namespace FUPlayer.Core.Dsp.Acceleration;
 internal sealed class GpuDirectFilter : IGpuFilter
 {
     /// <summary>Output samples a work group computes together, sharing one pass over the coefficients.</summary>
+    private ComputeApi Api => Program.Api;
+
     private const int PreferredGroup = 256;
 
     private nint _coefficients;
@@ -30,34 +32,32 @@ internal sealed class GpuDirectFilter : IGpuFilter
                     stage.Taps, bytes / (1024 * 1024), program.Device.MaxAllocationBytes / (1024 * 1024)));
         }
 
-        int maxGroup = (int)OpenClApi.GetDeviceValue<nuint>(program.Device.Handle, OpenClApi.DeviceMaxWorkGroupSize);
-        long localBytes = OpenClApi.GetDeviceValue<ulong>(program.Device.Handle, OpenClApi.DeviceLocalMemory) is var l and > 0
-            ? (long)l
-            : 16 * 1024;
+        int maxGroup = program.Device.MaxGroupSize;
+        long localBytes = program.Device.LocalMemoryBytes;
         int byMemory = (int)(localBytes / program.ElementSize);
         GroupSize = Math.Max(4, RoundDownToPowerOfTwo(Math.Min(Math.Min(PreferredGroup, maxGroup <= 0 ? PreferredGroup : maxGroup), byMemory)));
 
-        nint queue = OpenClApi.CreateQueue(program.Context, program.Device.Handle);
+        nint queue = Api.CreateQueue(program.Context, program.Device.Handle);
         try
         {
-            _coefficients = OpenClApi.CreateBuffer(program.Context, OpenClApi.MemReadOnly, (nuint)bytes);
+            _coefficients = Api.CreateBuffer(program.Context, OpenClApi.MemReadOnly, (nuint)bytes);
             var scratch = new byte[stage.TapsPerPhase * program.ElementSize];
             for (int phase = 0; phase < stage.Up; phase++)
             {
                 nuint offset = (nuint)((long)phase * stage.TapsPerPhase * program.ElementSize);
-                OpenClApi.Write(queue, _coefficients, offset, Pack(stage.Phase(phase), scratch, program.UsesDouble));
+                Api.Write(queue, _coefficients, offset, Pack(stage.Phase(phase), scratch, program.UsesDouble));
             }
 
-            OpenClApi.Finish(queue);
+            Api.Finish(queue);
         }
         catch
         {
             Release();
-            OpenClApi.ReleaseQueue(queue);
+            Api.ReleaseQueue(queue);
             throw;
         }
 
-        OpenClApi.ReleaseQueue(queue);
+        Api.ReleaseQueue(queue);
     }
 
     public PolyphaseStage Stage { get; }
@@ -205,7 +205,7 @@ internal sealed class GpuDirectFilter : IGpuFilter
 
     private void Release()
     {
-        OpenClApi.ReleaseMemory(_coefficients);
+        Api.ReleaseMemory(_coefficients);
         _coefficients = 0;
     }
 }

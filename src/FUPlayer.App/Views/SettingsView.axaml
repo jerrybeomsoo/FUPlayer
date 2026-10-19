@@ -55,6 +55,9 @@
             <ComboBox ItemsSource="{Binding FifoChoices}" SelectedItem="{Binding SelectedFifo}" Width="190" MinWidth="190" />
           </controls:SettingRow>
           <TextBlock Text="{Binding FifoSize}" Classes="secondary small" TextWrapping="Wrap" Margin="0,0,0,4" />
+          <controls:SettingRow Title="Preprocess files ahead" Description="Reads future samples from seekable files and compensates the filter's leading delay before output. Startup and seeking wait for that processing; filter phase and ringing stay the same. Live input keeps its full delay.">
+            <ToggleSwitch IsChecked="{Binding PreprocessFiles}" OnContent="" OffContent="" />
+          </controls:SettingRow>
           <controls:SettingRow Title="Meter the adjusted source" Description="Source meters and analyzer show the signal after ReplayGain and ultrasonic filtering.">
             <ToggleSwitch IsChecked="{Binding MeterAdjustedSource}" OnContent="" OffContent="" />
           </controls:SettingRow>
@@ -62,11 +65,11 @@
       </Border>
 
       <Border Classes="card">
-        <StackPanel>
+        <StackPanel IsEnabled="{Binding LocalResampling}">
           <TextBlock Classes="h3" Text="Graphics acceleration" Margin="0,0,0,4" />
           <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,8"
-                     Text="Long filters can be convolved on an OpenCL device, freeing cores for delta-sigma modulation. A device must reproduce the processor's output and beat it in a timed run before it is used; otherwise filtering stays on the processor and Now playing reports why." />
-          <controls:SettingRow Title="Convolve on the graphics device" Description="Runs FFT or direct convolution on an OpenCL device alongside the CPU, both working on the same blocks. Delta-sigma modulation stays on the CPU." IsEnabled="{Binding HasGpuDevices}">
+                     Text="CUDA is selected for NVIDIA GPUs and Vulkan for other GPUs. OpenCL remains available manually. Each filter is checked against the processor before use, and timing decides how much work to give the device." />
+          <controls:SettingRow Title="Convolve on the graphics device" Description="Runs FFT or direct convolution on a CUDA, Vulkan or OpenCL device alongside the CPU. Delta-sigma modulation stays on the CPU." IsEnabled="{Binding HasGpuDevices}">
             <ToggleSwitch IsChecked="{Binding GpuAcceleration}" OnContent="" OffContent="" />
           </controls:SettingRow>
           <controls:SettingRow Title="Device" Description="{Binding SelectedGpuDevice.Description}" IsVisible="{Binding HasGpuDevices}">
@@ -82,6 +85,28 @@
             <ToggleSwitch IsChecked="{Binding GpuForce}" OnContent="" OffContent="" />
           </controls:SettingRow>
           <TextBlock Text="{Binding GpuStatus}" Classes="secondary small" TextWrapping="Wrap" Margin="0,6,0,0" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel>
+          <TextBlock Classes="h3" Text="Network DSP" Margin="0,0,0,4" />
+          <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,8"
+                     Text="Select stages to run on a standalone DSP server. Unchecked stages stay here. Uses unencrypted UDP on a trusted local network; the server releases its worker when playback stops or pauses." />
+          <controls:SettingRow Title="Process on a server" Description="Only selected stages that are enabled in DSP studio run remotely. Volume, limiting and audio output stay here.">
+            <ToggleSwitch IsChecked="{Binding NetworkDsp}" OnContent="" OffContent="" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Server address" Description="Private IP address or host name of the processing server.">
+            <TextBox Text="{Binding NetworkDspHost, UpdateSourceTrigger=LostFocus}" Width="230" MinWidth="230" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="UDP port" Description="The server listener port. Default: 58181.">
+            <NumericUpDown Value="{Binding NetworkDspPort}" Minimum="1" Maximum="65535" Increment="1" FormatString="0" Width="150" />
+          </controls:SettingRow>
+          <StackPanel IsEnabled="{Binding NetworkDsp}" Spacing="10" Margin="0,8,0,0">
+            <CheckBox IsChecked="{Binding RemoteResampling}" Content="Resampling on server" />
+            <CheckBox IsChecked="{Binding RemoteRestorer}" Content="Neural restorer on server" />
+            <CheckBox IsChecked="{Binding RemoteUpscaler}" Content="Neural upscaler on server" />
+          </StackPanel>
         </StackPanel>
       </Border>
 

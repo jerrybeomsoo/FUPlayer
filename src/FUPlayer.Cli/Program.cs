@@ -17,6 +17,7 @@ using FUPlayer.Core.Engine;
 using FUPlayer.Core.Output;
 using FUPlayer.Core.Playlists;
 using FUPlayer.Core.Settings;
+using FUPlayer.Core.NetworkDsp;
 using FUPlayer.Core.Upnp;
 
 namespace FUPlayer.Cli;
@@ -26,6 +27,10 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
+        if (OperatingSystem.IsWindows())
+        {
+            ProcessScheduling.RequestRealtime();
+        }
         if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
         {
             PrintHelp();
@@ -52,6 +57,7 @@ internal static class Program
                 "dithers" => ListDithers(),
                 "modulators" => ListModulators(),
                 "gpus" => ListGpus(),
+                "priority" => ShowPriority(),
                 "apps" => ListApps(),
                 "capture" => Capture(options),
                 "models" => ListModels(),
@@ -79,7 +85,14 @@ internal static class Program
             Commands
               devices                      List output back-ends, devices and their capabilities
               filters | dithers | modulators  List processing presets
-              gpus                         List the OpenCL devices that can convolve long filters
+              gpus                         List CUDA, Vulkan and OpenCL convolution devices
+              priority                     Show the process priority Windows granted at launch
+              --dsp-server <host>          LAN UDP processing server address
+              --dsp-port <n>               Server UDP port (default 58181)
+              --remote-resampling          Offload the resampler
+              --remote-restorer            Offload the neural restorer
+              --remote-upscaler            Offload the neural upscaler
+                                           If no stage flags are given, all three are selected.
               apps                         List applications whose audio can be captured
               capture --app <name|pid>     Record one application's output to a WAV file
                       --seconds <n> --out <file>
@@ -139,7 +152,8 @@ internal static class Program
               --pass-through               Send DSD files unchanged when the output rate matches
               --remove-ultrasonics         Low-pass files above 48 kHz at 20 kHz
               --no-limiter                 Leave peaks above full scale alone instead of limiting them
-              --gpu                        Convolve long filters on an OpenCL device
+              --preprocess-files           Process future file samples and compensate leading filter delay
+              --gpu                        Convolve long filters on a graphics device
               --gpu-device <id>            Which device, from 'gpus' (default: the most capable one)
               --gpu-fast                   Let the device work in 32-bit; much faster on most cards
               --gpu-force                  Use the device even where the processor measures faster
@@ -570,11 +584,17 @@ internal static class Program
         }
     }
 
+    private static int ShowPriority()
+    {
+        Console.WriteLine(OperatingSystem.IsWindows() ? ProcessScheduling.Status : "Managed by the operating system");
+        return 0;
+    }
+
     private static int ListGpus()
     {
         if (!GpuRuntime.IsAvailable)
         {
-            Console.WriteLine(GpuRuntime.Unavailable ?? "No OpenCL device was found.");
+            Console.WriteLine(GpuRuntime.Unavailable ?? "No usable compute device was found.");
             return 0;
         }
 
@@ -800,15 +820,15 @@ internal static class Program
         ICaptureProvider? capture = OperatingSystem.IsWindows() ? CreateCaptureProvider() : null;
         using var engine = new PlaybackEngine(settings, backends, capture);
         using var finished = new ManualResetEventSlim(false);
-        bool started = false;
-        engine.ErrorOccurred += (_, message) => Console.Error.WriteLine($"\nerror: {message}");
+        string? failure = null;
+        engine.ErrorOccurred += (_, message) => { failure = message; Console.Error.WriteLine($"\nerror: {message}"); };
         engine.StateChanged += (_, state) =>
         {
             if (state == EngineState.Playing)
             {
-                started = true;
+                failure = null;
             }
-            else if (state == EngineState.Stopped && started)
+            else if (state == EngineState.Stopped)
             {
                 finished.Set();
             }
@@ -883,6 +903,7 @@ internal static class Program
         {
             Console.WriteLine($"  ended: {latest}");
         }
+        if (failure is not null) throw new IOException(failure);
     }
 
     private sealed class Options
@@ -898,7 +919,7 @@ internal static class Program
         private static readonly HashSet<string> Switches = new(StringComparer.Ordinal)
         {
             "dop", "pass-through", "remove-ultrasonics", "no-limiter",
-            "gpu", "gpu-fast", "gpu-force", "gpu-hold", "probe", "convolution-layered",
+            "gpu", "gpu-fast", "gpu-force", "gpu-hold", "probe", "convolution-layered", "preprocess-files", "remote-resampling", "remote-restorer", "remote-upscaler",
             "neural-upscale", "neural-restore", "exciter", "no-exciter", "output-delta", "local-only", "private-msys2", "keep",
         };
 
@@ -1047,6 +1068,14 @@ internal static class Program
             settings.Processing.GpuForce = Has("gpu-force");
             settings.Processing.GpuPhaseShare = GetInt("gpu-share") is int share ? Math.Clamp(share, 0, 100) : -1;
             settings.Processing.GpuRetimeWhilePlaying = !Has("gpu-hold");
+            settings.Processing.NetworkDspHost = Get("dsp-server") ?? string.Empty;
+            settings.Processing.NetworkDspPort = GetInt("dsp-port") ?? 58181;
+            settings.Processing.NetworkDsp = settings.Processing.NetworkDspHost.Length > 0;
+            bool allRemote = !Has("remote-resampling") && !Has("remote-restorer") && !Has("remote-upscaler");
+            settings.Processing.RemoteResampling = allRemote || Has("remote-resampling");
+            settings.Processing.RemoteRestorer = allRemote || Has("remote-restorer");
+            settings.Processing.RemoteUpscaler = allRemote || Has("remote-upscaler");
+            settings.Processing.PreprocessFiles = Has("preprocess-files");
             settings.Volume.VolumeDb = double.TryParse(Get("volume"), NumberStyles.Float, CultureInfo.InvariantCulture, out double volume) ? volume : defaultVolume;
             return settings;
         }

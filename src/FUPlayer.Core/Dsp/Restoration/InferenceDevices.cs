@@ -38,14 +38,14 @@ public static class InferenceDevices
     /// case <paramref name="failure"/> says why. <paramref name="threads"/> are the processor's, for whatever runs there
     /// (0 lets ONNX Runtime choose); on an adapter they only serve the operators DirectML leaves to the processor.
     /// </summary>
-    internal static InferenceSession Open(string path, GraphicsAdapter? adapter, int threads, out GraphicsAdapter? used, out string? failure)
+    internal static InferenceSession Open(string path, GraphicsAdapter? adapter, int threads, out GraphicsAdapter? used, out string? failure, bool allowSpinning = true)
     {
         failure = null;
         if (adapter is not null)
         {
             try
             {
-                InferenceSession session = OpenOn(path, adapter, threads, frames: 0);
+                InferenceSession session = OpenOn(path, adapter, threads, frames: 0, allowSpinning);
                 used = adapter;
                 return session;
             }
@@ -55,7 +55,7 @@ public static class InferenceDevices
             }
         }
 
-        using SessionOptions processor = Options(threads);
+        using SessionOptions processor = Options(threads, allowSpinning);
         used = null;
         return new InferenceSession(path, processor);
     }
@@ -64,9 +64,9 @@ public static class InferenceDevices
     /// A session on an adapter, with the frame axis fixed at <paramref name="frames"/> (and a batch of one) when that is
     /// above zero. DirectML compiles a graph whose shapes are all known as one piece.
     /// </summary>
-    internal static InferenceSession OpenOn(string path, GraphicsAdapter adapter, int threads, int frames)
+    internal static InferenceSession OpenOn(string path, GraphicsAdapter adapter, int threads, int frames, bool allowSpinning = true)
     {
-        using SessionOptions options = Options(threads);
+        using SessionOptions options = Options(threads, allowSpinning);
 
         // DirectML takes neither memory patterns nor operators run side by side.
         options.EnableMemoryPattern = false;
@@ -86,7 +86,7 @@ public static class InferenceDevices
     /// <summary>What the upscaler's export calls its batch axis; the player hands it one channel a call.</summary>
     internal const string BatchAxis = "batch";
 
-    private static SessionOptions Options(int threads)
+    private static SessionOptions Options(int threads, bool allowSpinning)
     {
         var options = new SessionOptions
         {
@@ -99,6 +99,11 @@ public static class InferenceDevices
             options.IntraOpNumThreads = threads;
         }
 
+        if (!allowSpinning)
+        {
+            options.AddSessionConfigEntry("session.intra_op.allow_spinning", "0");
+            options.AddSessionConfigEntry("session.inter_op.allow_spinning", "0");
+        }
         return options;
     }
 

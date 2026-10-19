@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.6.0 — 2026-10-19
+
+### Added
+
+- **Network DSP with a separate portable server.** Send resampling, the neural restorer, the neural upscaler,
+  or any combination to a Windows/Linux x64 computer. Choose stages with checkboxes in Settings. The single
+  server executable includes its runtime and models; it releases active workers when playback stops or pauses.
+  A Linux systemd installer enables boot startup. Now playing shows network round trip time.
+  The UDP protocol is for trusted private LANs and has no encryption or authentication.
+  [Network setup](https://github.com/jerrybeomsoo/FUPlayer/blob/v0.6.0/docs/network-dsp.md).
+- **CUDA and Vulkan convolution.** Automatic selection prefers CUDA on NVIDIA and Vulkan on other GPUs;
+  OpenCL remains selectable. Numerical verification and measured CPU/GPU sharing remain active.
+  Neural GPU processing on Windows continues to use DirectML; Linux neural processing uses the CPU.
+- **Preprocess files ahead** prepares seekable files before output and compensates leading filter delay.
+  Startup and seeking wait for that work; live input retains its delay.
+- **Windows process priority request.** Player and CLI request real-time priority at launch. Windows can
+  grant a lower priority according to account privileges; `fuplayer-cli priority` reports the result.
+
+### Fixed
+
+- **TAF graphs and precision information.** Passband includes the real transition peak and -6.02 dB cutoff;
+  decimation responses, marker placement and compute op/s accounting are corrected. The sinc precision preview
+  distinguishes 32-bit coefficient storage from the design percentage and actual GPU execution verification.
+- **Remote processing dropouts.** Channel workers, bounded neural threading, Automatic FFT selection and
+  UDP acknowledgement/recovery avoid serial work and repeated audio bursts during computation. A controlled
+  120-second 768 kHz test with TAF and both networks had zero underrun frames; results depend on your LAN and hardware.
+- **Remote neural controls.** Restorer/upscaler local Runs on choices are grey while their stage is selected remotely.
+- **Album art.** Unrelated images are no longer chosen just because they share a music folder. Named covers
+  and album-title matches are recognised, mixed-album folders keep their own artwork, and cached thumbnail
+  selection is refreshed. Folder images are enumerated once when regrouping cached albums.
+
+### Packages and guides
+
+- Download **FUPlayer-0.6.0-win-x64.zip** for the desktop player and CLI, or one of the two standalone
+  **FUPlayer-DspServer** executables for a processing computer. **install-dsp-server.sh** is optional Linux
+  service setup; **SHA256SUMS.txt** covers all four downloads. The Windows ZIP includes both neural models,
+  licences and offline user guides. FFmpeg libraries and DirectML.dll are not bundled.
+- Public documentation now focuses on setup, playback and troubleshooting. Development plans and validation
+  reports remain in the development repository.
+
+### Known limitations
+
+- Late changes to Stop after this track can still miss the audible boundary in already-buffered audio.
+- Linux ARM64 and native FreeBSD are unverified. This release provides a Windows player and Windows/Linux x64 servers.
+- Client and server must both use this protocol version; update older development server builds together.
+
 ## 0.5.1 — 2026-10-18
 
 ### Added
@@ -103,7 +149,7 @@ These three changes were contributed by
   (log-spectral distance 7.75 → 7.61 dB), the mixed level above 16 kHz −0.88 → −0.67 dB, mid and side 0.93 → 0.86
   and 1.20 → 1.09 dB, frames over the masking threshold 0.61 → 0.47 % (Vorbis 1.22 → 0.22 %). A lossless file forced
   through it changes a little more, −62.0 → −54.3 dB ([docs](docs/neural-restorer.md),
-  [why this window](docs/trainable-windows.md)).
+  [restorer guide](docs/neural-restorer.md)).
 - The Korean interface's descriptions and glossary are shorter.
 
 ### Fixed
@@ -174,7 +220,7 @@ These three changes were contributed by
   142 / 160 / 178 dB four, eight and sixteen transition widths further out, where Kaiser's is at 131 / 136 / 142
   ([docs](docs/dsp.md#filter-design)).
 - A note on trainable windows: where the idea comes from, and what it would and would not do for the player
-  ([docs](docs/trainable-windows.md)).
+  ([filter guide](docs/dsp.md)).
 
 ### Changed
 

@@ -1,157 +1,59 @@
-# fuplayer-cli
+# Command line
 
-A headless companion to the player: list devices, render faster than real time, measure throughput, or play from
-a terminal. Every processing setting in the interface has an equivalent here.
+The Windows ZIP includes **fuplayer-cli.exe**. Open PowerShell in its folder and run
+`.\fuplayer-cli.exe help` for the complete current options. The CLI can play, render to files, benchmark,
+inspect devices/models and run a UPnP renderer. The processing-only server is a separate executable.
 
-```bash
-dotnet run -c Release --project src/FUPlayer.Cli -- <command> [options]
-```
+## Useful commands
 
-or, after building, `src/FUPlayer.Cli/bin/Release/net9.0/fuplayer-cli.exe`.
-
-## Commands
-
-| Command | What it does |
+| Command | Purpose |
 | --- | --- |
-| `devices` | Back-ends, devices, and the rates, formats and DSD modes each one reports |
-| `filters` / `dithers` / `modulators` | List the processing presets and their ids |
-| `gpus` | OpenCL devices that could convolve a filter |
-| `info <file>` | Format, tags and the processing plan for one file |
-| `render <files> --out <dir>` | Process to WAV or DSF faster than real time |
-| `bench <file>` | Report how many times faster than real time the chain runs |
-| `play <files>` | Play through an audio device. Ctrl+C stops |
-| `apps` | Applications whose audio can be captured |
-| `capture --app <name\|pid>` | Record one application's output to a float WAV |
-| `bandwidth <files>` | Where each file's spectrum ends, and whether that looks like a codec |
-| `models` | Installed neural restorers and upscalers, the folders searched, and the graphics adapters they can run on |
-| `upnp` | Be a UPnP renderer that foobar2000 and other controllers play to, until Ctrl+C |
-| `ffmpeg-install` | Download FFmpeg's source, build the LGPL libraries and install them where the player looks |
-
-The release carries one model of each kind in `models` beside the executables. Others are trained with the Python
-scripts in `training/neural-restorer` and `training/neural-upscaler`; see [neural-restorer.md](neural-restorer.md)
-and [neural-upscaler.md](neural-upscaler.md).
-
-## Processing options
-
-| Option | Meaning |
-| --- | --- |
-| `--mode pcm\|dsd\|follow` | Output mode. Default `pcm` |
-| `--rate <Hz>` | Fixed PCM output rate |
-| `--limit <Hz>` | Highest PCM output rate to choose automatically |
-| `--dsd 64\|128\|256\|512\|1024` | Highest DSD multiple |
-| `--filter <id>` | Resampling filter, from `filters`. `transient-aligned` is the [Transient-Aligned Filter](transient-aligned-filter.md) |
-| `--dither <id>` | Dither or noise shaping, from `dithers` |
-| `--modulator <id>` | Delta-sigma modulator, from `modulators` |
-| `--taps <n>` | Filter length at the output rate. 0 uses the filter's own specification |
-| `--staging single\|multi` | One stage for the whole ratio, or a half-band cascade |
-| `--convolution auto\|tap` | Frequency domain past the crossover, or direct convolution always |
-| `--convolution-from <taps>` | Taps per phase at which the frequency domain takes over. Default 1024 |
-| `--convolution-block <ms>` | Longest a frequency-domain stage may hold input. 0 lets it choose |
-| `--convolution-layered` | Non-uniform partitioning. Far cheaper at a short block, and no GPU offload |
-| `--threads <n>` | Extra DSP threads. 0 is single threaded, default is automatic |
-| `--bits <16..32>` | DAC word length |
-| `--volume <dB>` | Default 0 for `render` and `bench`, -3 for `play` |
-| `--dop` | Send DSD as DoP rather than native |
-| `--pass-through` | Send DSD files unchanged when the output rate matches |
-| `--remove-ultrasonics` | Low-pass sources above 48 kHz at 20 kHz |
-| `--no-limiter` | Leave peaks above full scale alone |
-| `--neural-restore` | Neural restorer: coded 44.1/48 kHz stereo back towards lossless at the same rate, about 90 ms |
-| `--restorer <file>` | Which `*restorer.onnx` model. Default is the newest installed |
-| `--neural-upscale` | Neural upscaler: 44.1/48 kHz PCM to 88.2/96 kHz; after the restorer when both are given |
-| `--upscaler <file>` | Which `.onnx` model. Default is the newest installed |
-| `--restorer-device <n\|name>` | Run the restorer on a graphics adapter, by its number in `models` or its name. Default is the processor |
-| `--upscaler-device <n\|name>` | The same for the upscaler |
-| `--exciter` | Oversampling exciter: the music's harmonics, faint under it from about 15 kHz and filling above where it ends; up to 44.1/48 kHz when the output runs above the source rate |
-| `--source-type auto\|lossy\|lossless` | How the models read the source. Default `auto` |
-| `--upscaler-level <dB>` | Gain on the synthesised band above the source Nyquist |
-| `--output-delta` | Output what the models changed only: output minus latency-aligned input |
-
-## Graphics acceleration
-
-| Option | Meaning |
-| --- | --- |
-| `--gpu` | Convolve long filters on an OpenCL device |
-| `--gpu-device <id>` | Which device, from `gpus`. Default is the most capable |
-| `--gpu-fast` | 32-bit arithmetic. Two to three times faster on most cards |
-| `--gpu-force` | Use the device even where the processor measured faster |
-| `--gpu-share <0..100>` | Fixed percentage of the phases, instead of timing every split |
-| `--gpu-hold` | Time the splits once and hold the answer, rather than re-measuring |
-
-`--gpu-share 0` is worth knowing about: it attaches the device and gives it no work, which measures what the
-round trip costs on its own.
-
-## UPnP renderer options
-
-Only used by `upnp`, which also takes the processing and device options.
-
-| Option | Meaning |
-| --- | --- |
-| `--name <text>` | The name controllers list it under |
-| `--port <n>` | TCP port for its requests. Default 58180, or any free one |
-| `--local-only` | Take orders from this computer only |
-| `--out <dir>` | With `--backend file`, where each received stream is written |
-
-## FFmpeg build options
-
-Only used by `ffmpeg-install`. See [building-ffmpeg.md](building-ffmpeg.md).
-
-| Option | Meaning |
-| --- | --- |
-| `--tools <dir>` | Where the download, the build and a private MSYS2 go. Default `%LOCALAPPDATA%\FUPlayer\ffmpeg-build` |
-| `--msys2 <dir>` | Build with this MSYS2 installation |
-| `--private-msys2` | Set up an MSYS2 of its own even when one is installed |
-| `--install <dir>` | Where the libraries go. Default is where the player looks |
-| `--keep` | Keep the unpacked source and the objects |
-| `--jobs <n>` | Compilers run at once. Default is the number of logical processors |
-
-## Device options
-
-Only used by `play`.
-
-| Option | Meaning |
-| --- | --- |
-| `--backend wasapi-exclusive\|wasapi-shared\|asio\|null` | Which back-end |
-| `--device <id>` | Device id from `devices` |
-| `--buffer <ms>` | Device buffer length |
+| `devices` | List audio back-ends, devices and formats |
+| `filters`, `dithers`, `modulators` | List preset IDs |
+| `gpus` | List CUDA, Vulkan and OpenCL convolution devices |
+| `models` | List neural models and Windows neural GPU adapters |
+| `priority` | Show requested and granted process priority |
+| `info <file>` | Show file tags, format and processing plan |
+| `bench <file>` | Measure processing speed without audio output |
+| `render <file> --out <folder>` | Process to WAV/DSF |
+| `play <file>` | Play audio; Ctrl+C stops |
+| `apps`, `capture` | Inspect/capture Windows application audio |
+| `upnp` | Run a renderer for a compatible controller |
+| `ffmpeg-install` | Build/install optional decoders |
 
 ## Examples
 
-Look at a file and what the player would do with it:
+List the device IDs and filters before choosing them:
 
-```bash
-fuplayer-cli info "album/01 track.flac" --rate 705600 --taps 1048576 --staging single
+```powershell
+.\fuplayer-cli.exe devices
+.\fuplayer-cli.exe filters
+.\fuplayer-cli.exe gpus
 ```
 
-Render an album with a million-tap filter, single stage, to 32-bit WAV:
+Render a file with TAF to 32-bit PCM, with dither off:
 
-```bash
-fuplayer-cli render album/*.flac --out ./rendered --rate 705600 --taps 1048576 --staging single --bits 32
+```powershell
+.\fuplayer-cli.exe render "C:\Music\track.flac" --out .\rendered --rate 192000 --filter transient-aligned --taps 131072 --bits 32 --dither none
 ```
 
-Measure the throughput of a DSD256 conversion, with and without the GPU:
+Benchmark both neural stages on a source explicitly classified as lossy:
 
-```bash
-fuplayer-cli bench track.flac --mode dsd --dsd 256
-fuplayer-cli bench track.flac --mode dsd --dsd 256 --gpu --gpu-fast
+```powershell
+.\fuplayer-cli.exe bench "C:\Music\track.wav" --rate 96000 --neural-restore --neural-upscale --source-type lossy
 ```
 
-Compare the two convolution paths for exactness. Rendered with dither off at 32 bits, the two files should
-differ by no more than the file format's own resolution:
+Use `--gpu` for convolution acceleration, `--gpu-device <id>` from `gpus` for a specific device, and
+`--gpu-fast` for 32-bit arithmetic. `--threads <n>` sets extra DSP threads. `--preprocess-files`
+prepares future samples from seekable files and compensates leading filter delay.
+Neural `--restorer-device` / `--upscaler-device` refer to the adapters listed by `models`, not `gpus`.
 
-```bash
-fuplayer-cli render track.flac --out cpu --rate 352800 --taps 262144 --staging single --bits 32 --dither none
-fuplayer-cli render track.flac --out gpu --rate 352800 --taps 262144 --staging single --bits 32 --dither none \
-  --gpu --gpu-share 100
+## Network DSP
+
+```powershell
+.\fuplayer-cli.exe render "C:\Music\track.flac" --out .\rendered --rate 192000 --dsp-server 192.168.1.10 --remote-resampling
 ```
 
-Be a renderer that foobar2000 on this computer plays to, through an ASIO device:
-
-```bash
-fuplayer-cli upnp --local-only --backend asio --device "ASIO MADIface USB"
-```
-
-Play through a specific ASIO device:
-
-```bash
-fuplayer-cli play album/*.flac --backend asio --device "ASIO MADIface USB" --mode dsd --dsd 256
-```
+Use `--dsp-port` for another listener port. `--remote-restorer` and `--remote-upscaler` select those stages;
+their normal `--neural-restore` / `--neural-upscale` flags must also enable them. If no remote stage flags
+are provided, all three are selected. See [Network DSP](network-dsp.md) for standalone server setup.

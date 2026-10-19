@@ -55,7 +55,7 @@ public sealed class PartitionPlan
     /// <summary>Longest block any band uses.</summary>
     public int LongestBlock { get; }
 
-    /// <summary>Modelled multiply-adds per output sample for the whole plan.</summary>
+    /// <summary>Layout-selection score for the whole plan; use LevelMultiplyAdds for displayed arithmetic cost.</summary>
     public double CostPerOutputSample { get; }
 
     /// <summary>Whether this is plain uniform partitioning: one block length for every tap.</summary>
@@ -77,7 +77,7 @@ public sealed class PartitionPlan
     /// <summary>What one more partition costs per output sample: a complex multiply-add over the block's bins.</summary>
     public static double PartitionCost(int block) => 6.0 * (block + 1) / block;
 
-    /// <summary>Multiply-adds per output sample for a band of <paramref name="count"/> partitions.</summary>
+    /// <summary>Layout-selection score for a band of <paramref name="count"/> partitions.</summary>
     public static double LevelCost(int block, int count, int up) =>
         TransformCost(block, up) + (count * PartitionCost(block));
 

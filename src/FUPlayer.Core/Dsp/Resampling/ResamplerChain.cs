@@ -76,7 +76,7 @@ public sealed class ResamplerChain
 }
 
 /// <summary>Per-channel streaming state of a <see cref="ResamplerChain"/>.</summary>
-public sealed class ResamplerChainState
+public sealed class ResamplerChainState : IRateStageState
 {
     private readonly ResamplerChain _chain;
     private readonly IRateStageState[] _states;

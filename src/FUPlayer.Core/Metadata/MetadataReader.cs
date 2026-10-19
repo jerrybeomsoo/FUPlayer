@@ -11,7 +11,7 @@ namespace FUPlayer.Core.Metadata;
 /// <summary>Reads tags and cover art (TagLib#, DSDIFF chunks, FFmpeg) with file-name fallbacks.</summary>
 public static partial class MetadataReader
 {
-    private static readonly string[] CoverFileNames = ["cover", "folder", "front", "albumart", "album", "artwork"];
+    private static readonly string[] CoverFileNames = ["cover", "front", "folder", "albumart", "album", "artwork", "coverart", "frontcover", "albumcover"];
     private static readonly string[] ImageExtensions = [".jpg", ".jpeg", ".png", ".webp", ".bmp"];
 
     /// <summary>Reads metadata. <paramref name="probeFormat"/> opens the decoder for exact technical details.</summary>
@@ -77,36 +77,46 @@ public static partial class MetadataReader
         return null;
     }
 
-    /// <summary>Finds a cover image file (cover.jpg, folder.png …) in the track's folder.</summary>
-    public static string? FindFolderCover(string directory)
+    /// <summary>Finds named cover art or an album-title match, never an arbitrary image in the folder.</summary>
+    public static string? FindFolderCover(string directory, string? albumTitle = null) =>
+        SelectFolderCover(FolderImages(directory), albumTitle, allowGeneric: true);
+
+    internal static string[] FolderImages(string directory)
     {
         if (!Directory.Exists(directory))
         {
-            return null;
+            return [];
         }
 
-        string[] images;
         try
         {
-            images = Directory.EnumerateFiles(directory)
+            return Directory.EnumerateFiles(directory)
                 .Where(f => ImageExtensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
+                .Order(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return null;
+            return [];
         }
+    }
 
-        foreach (string name in CoverFileNames)
+    internal static string? SelectFolderCover(IReadOnlyList<string> images, string? albumTitle, bool allowGeneric)
+    {
+        static string Words(string text) => string.Join(" ", Regex.Matches(text.ToLowerInvariant(), @"[\p{L}\p{Nd}]+").Select(m => m.Value));
+        string album = Words(albumTitle ?? string.Empty);
+        int Score(string file)
         {
-            string? match = images.FirstOrDefault(f => Path.GetFileNameWithoutExtension(f).StartsWith(name, StringComparison.OrdinalIgnoreCase));
-            if (match is not null)
-            {
-                return match;
-            }
+            string stem = Words(Path.GetFileNameWithoutExtension(file));
+            string[] words = stem.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            int generic = Array.FindIndex(CoverFileNames, name => words.Any(w => w == name || w.StartsWith(name, StringComparison.Ordinal)
+                && w[name.Length..].All(char.IsDigit)));
+            bool named = album.Length > 0 && (stem == album || (" " + stem + " ").Contains(" " + album + " ", StringComparison.Ordinal));
+            if (named) return 1000 + (generic >= 0 ? 100 : 0) - stem.Length;
+            return allowGeneric && generic >= 0 ? 500 - generic * 10 - stem.Length : int.MinValue;
         }
-
-        return images.Length == 1 ? images[0] : null;
+        return images.Select(file => (File: file, Score: Score(file))).Where(x => x.Score > int.MinValue)
+            .OrderByDescending(x => x.Score).ThenBy(x => x.File, StringComparer.OrdinalIgnoreCase).Select(x => x.File).FirstOrDefault();
     }
 
     private static TrackMetadata? ReadTags(string path)

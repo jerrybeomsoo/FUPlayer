@@ -49,6 +49,13 @@ public sealed record PlaybackStatus
     /// <summary>Where the filtering runs: the processor, or the OpenCL device that took it over.</summary>
     public string? Acceleration { get; init; }
 
+    /// <summary>UDP echo round trip measured independently of server DSP execution.</summary>
+    public double? NetworkRoundTripMilliseconds { get; init; }
+    /// <summary>LAN processing server while one or more selected stages run remotely.</summary>
+    public string? NetworkServer { get; init; }
+    /// <summary>Datagrams retransmitted to recover an incomplete exchange.</summary>
+    public long NetworkRetransmits { get; init; }
+
     /// <summary>What the neural upscaler is doing, or null when it was not asked for.</summary>
     public string? Upscaler { get; init; }
 

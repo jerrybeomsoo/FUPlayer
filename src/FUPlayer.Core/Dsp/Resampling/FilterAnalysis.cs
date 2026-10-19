@@ -1,5 +1,6 @@
 using FUPlayer.Core.Dsp.Design;
 using FUPlayer.Core.Localization;
+using FUPlayer.Core.Audio;
 
 namespace FUPlayer.Core.Dsp.Resampling;
 
@@ -14,6 +15,15 @@ public sealed record FilterAnalysisResult
 
     /// <summary>Overall magnitude response of the chain (up to twice the source Nyquist frequency).</summary>
     public required ResponseCurve Magnitude { get; init; }
+
+    /// <summary>Response after rounding GPU filter storage to 32 bits, excluding device arithmetic.</summary>
+    public ResponseCurve? Magnitude32 { get; init; }
+
+    /// <summary>Measured storage-rounding error relative to the 64-bit design, distinct from taper geometry.</summary>
+    public string PrecisionSummary { get; init; } = string.Empty;
+
+    /// <summary>End of the flat passband, accounting for the actual transient-aligned taper length.</summary>
+    public double PassbandEdgeHz { get; init; }
 
     /// <summary>Time axis in milliseconds relative to the impulse peak.</summary>
     public required double[] TimeMilliseconds { get; init; }
@@ -87,7 +97,56 @@ public static class FilterAnalysis
 
         cancellation.ThrowIfCancellationRequested();
         double maxFrequency = outputRate > inputRate ? Math.Min(outputRate / 2.0, inputRate) : outputRate / 2.0;
-        ResponseCurve magnitude = FilterResponse.Fir(impulse, outputRate, maxFrequency, points);
+        // Decimating an impulse aliases the two sides of the anti-alias filter together. In particular, the
+        // transient-aligned filter's two -6 dB edges add to 0 dB at output Nyquist. Plot its prototype instead.
+        ResponseCurve magnitude = chain.Stages.Count == 1 && chain.Stages[0] is PolyphaseStage { Down: > 1 } decimator
+            ? FilterResponse.Fir(decimator.PrototypeResponse(), (double)inputRate * decimator.Up,
+                Math.Max(inputRate, outputRate) / 2.0, points)
+            : FilterResponse.Fir(impulse, outputRate, maxFrequency, points);
+        double cutoff = Math.Min(inputRate, outputRate) / 2.0;
+        double passbandEdge = cutoff * preset.PassbandFraction;
+        if (preset.Family == FilterFamily.TransientAligned)
+        {
+            IRateStage firstStage = chain.Stages[0];
+            var (up, down) = AudioRates.Ratio(firstStage.InputRate, firstStage.OutputRate);
+            int period = Math.Max(up, down);
+            var shape = TransientAlignedDesign.Describe(firstStage.Taps,
+                TransientAlignedDesign.TransitionFraction / (2 * period));
+            passbandEdge = cutoff - shape.HalfWidth * firstStage.InputRate * up;
+            // The FFT grid usually misses the exact cutoff. On a very steep edge its nearest bin can differ
+            // by several dB, so keep the exact DTFT value as a landmark alongside the sampled extrema.
+            magnitude = chain.Stages.Count == 1 && firstStage is PolyphaseStage { Down: > 1 } downsampler
+                ? AtCutoff(magnitude, downsampler.PrototypeResponse(), inputRate * (double)up, cutoff)
+                : AtCutoff(magnitude, impulse, outputRate, cutoff);
+        }
+        ResponseCurve? magnitude32 = null;
+        string precisionSummary = string.Empty;
+        if (preset.Family == FilterFamily.TransientAligned && chain.Stages[0] is FftPolyphaseStage or PolyphaseStage { Down: 1 })
+        {
+            double[] stored = ChainImpulse(chain, cancellation, singlePrecisionStorage: true);
+            double error = 0.0;
+            double energy = 0.0;
+            for (int i = 0; i < produced; i++)
+            {
+                double value = i < stored.Length ? stored[i] / ratio : 0.0;
+                double delta = value - impulse[i];
+                error += delta * delta;
+                energy += impulse[i] * impulse[i];
+            }
+
+            double relative = energy > 0 ? Math.Sqrt(error / energy) : 0;
+            precisionSummary = Loc.F(
+                "32-bit filter storage: {0:E2}% RMS deviation from the 64-bit design. Exact sinc describes the untapered span; playback reports arithmetic error separately.",
+                relative * 100.0);
+            for (int i = 0; i < stored.Length; i++)
+            {
+                stored[i] /= ratio;
+            }
+
+            magnitude32 = FilterResponse.Fir(stored, outputRate, maxFrequency, points);
+            magnitude32 = AtCutoff(magnitude32, stored, outputRate, cutoff);
+        }
+
         cancellation.ThrowIfCancellationRequested();
 
         int peak = FirDesign.PeakIndex(impulse);
@@ -129,6 +188,9 @@ public static class FilterAnalysis
             InputRate = inputRate,
             OutputRate = outputRate,
             Magnitude = magnitude,
+            Magnitude32 = magnitude32,
+            PrecisionSummary = precisionSummary,
+            PassbandEdgeHz = passbandEdge,
             TimeMilliseconds = time,
             Impulse = window,
             Step = step,
@@ -141,6 +203,17 @@ public static class FilterAnalysis
         };
     }
 
+    private static ResponseCurve AtCutoff(ResponseCurve curve, double[] impulse, double rate, double cutoff)
+    {
+        var value = FilterResponse.EvaluateFir(impulse, cutoff / rate);
+        int nearest = Enumerable.Range(0, curve.Frequencies.Length).MinBy(i => Math.Abs(curve.Frequencies[i] - cutoff));
+        double phase = value.Phase + 2 * Math.PI * Math.Round((curve.PhaseRadians[nearest] - value.Phase) / (2 * Math.PI));
+        var samples = curve.Frequencies.Select((hz, i) => (Hz: hz, Db: curve.MagnitudeDb[i], Phase: curve.PhaseRadians[i]))
+            .Where(x => x.Hz != cutoff)
+            .Append((Hz: cutoff, Db: FilterResponse.ToDb(value.Magnitude), Phase: phase)).OrderBy(x => x.Hz).ToArray();
+        return new ResponseCurve(samples.Select(x => x.Hz).ToArray(), samples.Select(x => x.Db).ToArray(), samples.Select(x => x.Phase).ToArray());
+    }
+
     /// <summary>
     /// What the chain puts out for a unit impulse. The first stage is the chosen filter and the only long one, and it
     /// answers from its coefficients; what follows it (half-band stages, a bridge between the rate families) is short
@@ -149,10 +222,19 @@ public static class FilterAnalysis
     /// the prototype's taps rather than in output samples: 33,554,432 taps at 44.1 → 48 kHz asked for 42 million
     /// output samples, fifteen minutes of audio, each 210,000 taps long.
     /// </summary>
-    private static double[] ChainImpulse(ResamplerChain chain, CancellationToken cancellation)
+    private static double[] ChainImpulse(ResamplerChain chain, CancellationToken cancellation, bool singlePrecisionStorage = false)
     {
         IRateStage first = chain.Stages[0];
-        double[]? head = first.ImpulseResponse();
+        double[]? head = first is FftPolyphaseStage fft
+            ? fft.ImpulseResponse(singlePrecisionStorage)
+            : first.ImpulseResponse();
+        if (singlePrecisionStorage && first is PolyphaseStage { Down: 1 } && head is not null)
+        {
+            for (int i = 0; i < head.Length; i++)
+            {
+                head[i] = (float)head[i];
+            }
+        }
         if (head is null)
         {
             // A recursive first stage has no coefficients to read: run the whole chain for long enough to cover its

@@ -95,7 +95,8 @@ public static class TransientAlignedDesign
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(period);
         int n = length | 1;
         int center = n / 2;
-        int taper = Math.Clamp(TaperFor(halfWidth), 1, Math.Max(1, (n - 1) / 4));
+        shape = Describe(n, halfWidth);
+        int taper = shape.Taper;
         double[] edge = Edge(taper);
         double scale = gain / period;
         var h = new double[n];
@@ -114,8 +115,16 @@ public static class TransientAlignedDesign
             h[n - 1 - i] = h[i];
         }
 
-        shape = new TransientAlignedShape(n, taper, LobeTimesLength / taper);
         return h;
+    }
+
+    /// <summary>The actual taper and transition width, including the wider transition of a short custom length.</summary>
+    public static TransientAlignedShape Describe(int length, double halfWidth)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(length, 3);
+        int n = length | 1;
+        int taper = Math.Clamp(TaperFor(halfWidth), 1, Math.Max(1, (n - 1) / 4));
+        return new TransientAlignedShape(n, taper, LobeTimesLength / taper);
     }
 
     /// <summary>

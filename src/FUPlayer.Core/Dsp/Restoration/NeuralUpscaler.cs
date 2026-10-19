@@ -22,7 +22,7 @@ namespace FUPlayer.Core.Dsp.Restoration;
 /// Each sample comes out <see cref="Latency"/> samples after it went in, a fixed delay whatever the
 /// network is doing, which is what lets a dry copy be lined up against it.
 /// </summary>
-public sealed class NeuralUpscaler
+public sealed class NeuralUpscaler : INeuralUpscaler
 {
     private const int N = NeuralUpscalerModel.FftSize;
     private const int H = NeuralUpscalerModel.Hop;

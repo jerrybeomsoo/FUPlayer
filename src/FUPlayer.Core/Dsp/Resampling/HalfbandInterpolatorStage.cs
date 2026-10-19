@@ -59,7 +59,8 @@ public sealed class HalfbandInterpolatorStage : IRateStage
 
     public double DelayOutputSamples { get; }
 
-    public double CostPerOutputSample => HalfLength + 0.5;
+    // Every other output is copied. The remaining outputs use 2K multiply-adds, averaging K per output.
+    public double CostPerOutputSample => HalfLength;
 
     public int Taps { get; }
 

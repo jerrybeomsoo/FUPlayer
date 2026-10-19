@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <PackageReference Include="TagLibSharp" />
+    <PackageReference Include="Silk.NET.Vulkan" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(FuPlayerDirectML)' == 'true'">
@@ -32,6 +33,7 @@
   <!-- The interface's translations, one JSON object of English text to translated text per language. -->
   <ItemGroup>
     <EmbeddedResource Include="Localization\*.json" LogicalName="FUPlayer.Core.Localization.%(Filename).json" />
+    <EmbeddedResource Include="Dsp\Acceleration\Kernels\*.fatbin;Dsp\Acceleration\Kernels\*.spv" LogicalName="FUPlayer.Core.Gpu.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <!-- The FFmpeg build script, which "Download and build FFmpeg" runs from a copy of its own. -->

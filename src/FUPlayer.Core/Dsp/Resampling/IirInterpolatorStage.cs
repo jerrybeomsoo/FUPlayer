@@ -32,7 +32,8 @@ public sealed class IirInterpolatorStage : IRateStage
 
     public double DelayOutputSamples { get; }
 
-    public double CostPerOutputSample => 5.0 * _sections.Length;
+    // Each section performs five multiplies and four additions; input gain adds one multiply per source sample.
+    public double CostPerOutputSample => (9.0 * _sections.Length + (1.0 / Factor)) / 2.0;
 
     public string Description { get; }
 

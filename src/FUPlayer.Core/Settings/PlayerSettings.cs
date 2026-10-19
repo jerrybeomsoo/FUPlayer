@@ -126,7 +126,7 @@ public enum AnalyzerPeakHold
 public sealed class PlayerSettings
 {
     /// <summary>Settings layout version; older files are upgraded when loaded.</summary>
-    public const int CurrentVersion = 4;
+    public const int CurrentVersion = 5;
 
     public int Version { get; set; } = CurrentVersion;
 
@@ -368,6 +368,9 @@ public sealed class ProcessingSettings
     /// <summary>Low-pass high-rate PCM files at 20 kHz before conversion.</summary>
     public bool RemoveUltrasonics { get; set; }
 
+    /// <summary>Process future samples of seekable files before output, compensating leading filter latency.</summary>
+    public bool PreprocessFiles { get; set; }
+
     /// <summary>How filter arithmetic is carried out; both settings convolve the same coefficients.</summary>
     public ConvolutionMode Convolution { get; set; } = ConvolutionMode.Automatic;
 
@@ -409,12 +412,26 @@ public sealed class ProcessingSettings
     public bool ApodizationDetection { get; set; } = true;
 
     /// <summary>
-    /// Convolve long filters on an OpenCL device instead of the processor. Off by default: it only pays for
+    /// Convolve long filters on a CUDA, Vulkan or OpenCL device. Off by default: it only pays for
     /// filters of tens of thousands of taps, and the device has to reproduce the processor's own output first.
     /// </summary>
     public bool GpuAcceleration { get; set; }
 
-    /// <summary>Chosen OpenCL device, or empty to pick the most capable one automatically.</summary>
+    /// <summary>Process selected stages on the trusted LAN DSP server at NetworkDspHost.</summary>
+    public bool NetworkDsp { get; set; }
+
+    /// <summary>Private LAN address or name of the standalone processing server.</summary>
+    public string NetworkDspHost { get; set; } = string.Empty;
+    /// <summary>UDP discovery port; workers are allocated automatically.</summary>
+    public int NetworkDspPort { get; set; } = 58181;
+    /// <summary>Run the selected resampling filter remotely.</summary>
+    public bool RemoteResampling { get; set; } = true;
+    /// <summary>Run the neural restorer remotely when enabled for this source.</summary>
+    public bool RemoteRestorer { get; set; } = true;
+    /// <summary>Run the neural upscaler remotely when enabled for this source.</summary>
+    public bool RemoteUpscaler { get; set; } = true;
+
+    /// <summary>Chosen compute device, or empty to prefer CUDA for NVIDIA and Vulkan for other GPUs.</summary>
     public string GpuDeviceId { get; set; } = string.Empty;
 
     /// <summary>

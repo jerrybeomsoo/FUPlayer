@@ -54,6 +54,8 @@ internal static class SettingsMigration
         {
             Rename(processing, "UltrasonicFilter", "RemoveUltrasonics");
             Rename(processing, "PreProcessBeforeMeter", "MeterAdjustedSource");
+            // Profiles used TLS and cannot be reused as unencrypted LAN endpoints without a new address choice.
+            if (version < 5 && processing.Remove("NetworkDspProfile")) processing["NetworkDsp"] = false;
         }
 
         if (version < 3)

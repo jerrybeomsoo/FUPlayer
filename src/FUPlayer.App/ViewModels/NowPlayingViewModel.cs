@@ -117,6 +117,10 @@ public sealed partial class NowPlayingViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasAcceleration))]
     private string _acceleration = string.Empty;
 
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasNetworkDelay))]
+    private string _networkDelay = string.Empty;
+    public bool HasNetworkDelay => NetworkDelay.Length > 0;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasUpscaler))]
     private string _upscaler = string.Empty;
@@ -300,6 +304,8 @@ public sealed partial class NowPlayingViewModel : ObservableObject
 
         Resampler = IsActive ? status.ResamplerSummary ?? string.Empty : string.Empty;
         Acceleration = IsActive ? status.Acceleration ?? string.Empty : string.Empty;
+        NetworkDelay = IsActive && status.NetworkRoundTripMilliseconds is double roundTrip
+            ? Formatting.Milliseconds(roundTrip / 1000.0) : string.Empty;
         Upscaler = IsActive ? status.Upscaler ?? string.Empty : string.Empty;
         Restorer = IsActive ? status.Restorer ?? string.Empty : string.Empty;
         Exciter = IsActive ? status.Exciter ?? string.Empty : string.Empty;

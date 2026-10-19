@@ -56,9 +56,9 @@ public sealed class NeuralUpscalerModel : IDisposable
     /// Opens a model on the processor, on <paramref name="threads"/> threads (0 lets ONNX Runtime choose), or on a
     /// graphics adapter (<see cref="InferenceDevices"/>), falling back to the processor when the adapter cannot open it.
     /// </summary>
-    public static NeuralUpscalerModel Load(string path, int threads = 0, GraphicsAdapter? adapter = null)
+    public static NeuralUpscalerModel Load(string path, int threads = 0, GraphicsAdapter? adapter = null, bool allowSpinning = true)
     {
-        var sessions = new NetworkSessions(path, adapter, threads);
+        var sessions = new NetworkSessions(path, adapter, threads, allowSpinning);
         InferenceSession session = sessions.Main;
         foreach (string name in new[] { "re", "im" })
         {

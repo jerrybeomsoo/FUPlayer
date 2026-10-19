@@ -56,12 +56,13 @@ public static class FilterResponse
         }
 
         // Many bins to a point, as for any filter of more than about a hundred thousand taps: each point shows the
-        // quietest and the loudest bin around it, one after the other at the same frequency, and the plot draws the span
-        // between them. One bin read at each point showed whichever stopband sidelobe it landed on, often tens of
+        // quietest, loudest and central bin around it, in frequency order at their actual frequencies. Moving both
+        // extrema to the bucket centre falsely widened steep transitions. One bin read at each point showed whichever stopband sidelobe it landed on, often tens of
         // decibels under the worst one, and a narrow dip or peak in the passband could fall between two points unseen.
-        var spanFrequencies = new double[2 * points];
-        var spanMagnitude = new double[2 * points];
-        var spanPhase = new double[2 * points];
+        var spanFrequencies = new double[3 * points];
+        var spanMagnitude = new double[3 * points];
+        var spanPhase = new double[3 * points];
+        Span<int> bins = stackalloc int[3];
         for (int i = 0; i < points; i++)
         {
             int from = Math.Clamp((int)Math.Ceiling((frequencies[i] - (resolution / 2)) / binWidth), 0, size / 2);
@@ -86,11 +87,18 @@ public static class FilterResponse
                 }
             }
 
-            spanFrequencies[2 * i] = spanFrequencies[(2 * i) + 1] = frequencies[i];
-            spanMagnitude[2 * i] = ToDb(Math.Sqrt(low));
-            spanMagnitude[(2 * i) + 1] = ToDb(Math.Sqrt(high));
-            spanPhase[2 * i] = Math.Atan2(im[quietest], re[quietest]);
-            spanPhase[(2 * i) + 1] = Math.Atan2(im[loudest], re[loudest]);
+            bins[0] = quietest;
+            bins[1] = loudest;
+            bins[2] = Math.Clamp((int)Math.Round(frequencies[i] / binWidth), from, to);
+            bins.Sort();
+            for (int j = 0; j < bins.Length; j++)
+            {
+                int bin = bins[j];
+                int at = (3 * i) + j;
+                spanFrequencies[at] = bin * binWidth;
+                spanMagnitude[at] = ToDb(new Complex(re[bin], im[bin]).Magnitude);
+                spanPhase[at] = Math.Atan2(im[bin], re[bin]);
+            }
         }
 
         Unwrap(spanPhase);

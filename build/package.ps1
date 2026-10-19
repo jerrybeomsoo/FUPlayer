@@ -22,11 +22,11 @@
     to keep.
 
 .EXAMPLE
-    pwsh build/package.ps1 -Version 0.5.1
+    pwsh build/package.ps1 -Version 0.6.0
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = "0.5.1",
+    [string]$Version = "0.6.0",
     [string]$Runtime = "win-x64",
     [switch]$FrameworkDependent,
     [switch]$IncludeFFmpeg
@@ -35,9 +35,14 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$stage = Join-Path $root "publish\FUPlayer"
+$stage = [System.IO.Path]::GetFullPath((Join-Path $root "publish\FUPlayer"))
 $artifacts = Join-Path $root "artifacts"
-$zip = Join-Path $artifacts "FUPlayer-$Version-$Runtime.zip"
+$zip = [System.IO.Path]::GetFullPath((Join-Path $artifacts "FUPlayer-$Version-$Runtime.zip"))
+
+if (-not $stage.StartsWith([System.IO.Path]::GetFullPath($root) + [System.IO.Path]::DirectorySeparatorChar) -or
+    -not $zip.StartsWith([System.IO.Path]::GetFullPath($artifacts) + [System.IO.Path]::DirectorySeparatorChar)) {
+    throw 'Package output must stay within the repository output directories.'
+}
 
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 if (Test-Path $zip) { Remove-Item $zip -Force }
@@ -53,6 +58,7 @@ foreach ($project in @("src\FUPlayer.App\FUPlayer.App.csproj", "src\FUPlayer.Cli
         --configuration Release `
         --runtime $Runtime `
         --self-contained $selfContained `
+        -p:Version=$Version `
         -p:DebugType=none `
         -p:FuPlayerSkipFFmpegCopy=$skipFFmpeg `
         --output $stage `
@@ -76,10 +82,18 @@ New-Item -ItemType Directory -Path (Join-Path $stage "models") -Force | Out-Null
 $models | Copy-Item -Destination (Join-Path $stage "models")
 Write-Host ("including models: {0}" -f ($models.Name -join ", "))
 
-foreach ($file in @("LICENSE", "THIRD-PARTY-NOTICES.md", "README.md")) {
+foreach ($file in @("LICENSE", "THIRD-PARTY-NOTICES.md", "README.md", "CHANGELOG.md", "CONTRIBUTING.md")) {
     Copy-Item (Join-Path $root $file) $stage
 }
 Copy-Item (Join-Path $root "licenses") (Join-Path $stage "licenses") -Recurse
+# Only public user guides belong in the offline package, never development reports.
+$guideDirectory = Join-Path $stage 'docs'
+New-Item -ItemType Directory -Path $guideDirectory -Force | Out-Null
+foreach ($guide in @('settings.md', 'dsp.md', 'library.md', 'network-dsp.md', 'neural-restorer.md', 'neural-upscaler.md', 'exciter.md', 'transient-aligned-filter.md', 'cli.md', 'building.md', 'building-ffmpeg.md', 'upnp-input.md', 'troubleshooting.md')) {
+    $guidePath = Join-Path $root "docs\$guide"
+    if (Test-Path -LiteralPath $guidePath) { Copy-Item -LiteralPath $guidePath -Destination $guideDirectory }
+}
+Copy-Item -LiteralPath (Join-Path $root 'docs\images') -Destination (Join-Path $guideDirectory 'images') -Recurse
 
 if ($IncludeFFmpeg) {
     $libraries = Get-ChildItem (Join-Path $stage "ffmpeg") -Filter *.dll -ErrorAction SilentlyContinue

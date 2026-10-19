@@ -89,6 +89,21 @@ public sealed class PolyphaseStage : IRateStage
         return response;
     }
 
+    /// <summary>
+    /// The anti-alias filter before decimation. A streamed output impulse has already folded the rejected
+    /// frequencies into the output band, so its transform cannot show the anti-alias response.
+    /// </summary>
+    internal double[] PrototypeResponse()
+    {
+        var response = new double[PrototypeLength];
+        for (int n = 0; n < response.Length; n++)
+        {
+            response[n] = _phases[n % Up][TapsPerPhase - 1 - (n / Up)] / Up;
+        }
+
+        return response;
+    }
+
     /// <summary>One phase's coefficients, oldest tap first, so an accelerator can upload the same filter.</summary>
     internal double[] Phase(int index) => _phases[index];
 

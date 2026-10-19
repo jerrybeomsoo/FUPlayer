@@ -162,7 +162,10 @@ public sealed class FftPolyphaseStage : IRateStage
     /// The prototype, which is the stage's response to an impulse at its first input, transformed back out of the
     /// partition spectra: the stage keeps no other copy of it, and a long one would be a quarter of a gigabyte more.
     /// </summary>
-    public double[] ImpulseResponse()
+    public double[] ImpulseResponse() => ImpulseResponse(singlePrecisionStorage: false);
+
+    /// <summary>Reconstructs the uploaded filter after rounding its partition spectra to the chosen storage precision.</summary>
+    internal double[] ImpulseResponse(bool singlePrecisionStorage)
     {
         var response = new double[PrototypeLength];
         Parallel.For(0, Up, phase =>
@@ -174,6 +177,15 @@ public sealed class FftPolyphaseStage : IRateStage
             {
                 _partitionRe[(phase * Partitions) + part].CopyTo(re, 0);
                 _partitionIm[(phase * Partitions) + part].CopyTo(im, 0);
+                if (singlePrecisionStorage)
+                {
+                    for (int k = 0; k < Bins; k++)
+                    {
+                        re[k] = (float)re[k];
+                        im[k] = (float)im[k];
+                    }
+                }
+
                 _plan.Inverse(re, im, taps);
                 for (int k = 0; k < BlockSamples; k++)
                 {
@@ -217,7 +229,7 @@ public sealed class FftPolyphaseStage : IRateStage
     }
 
     /// <summary>
-    /// Multiply-adds per output sample a uniform block of <paramref name="block"/> input samples would cost:
+    /// Layout-selection score for a uniform block of <paramref name="block"/> input samples:
     /// one forward transform and one per phase, plus the partition multiplies.
     /// </summary>
     /// <remarks>

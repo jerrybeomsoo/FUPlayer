@@ -1,0 +1,47 @@
+// Project kernels, derived from GpuKernels.cs by build/gpu/prepare-kernels.py.
+#version 450
+#ifdef REAL_IS_DOUBLE
+#extension GL_ARB_gpu_shader_fp64 : require
+#define real_t double
+#define REAL_ARG(i) packDouble2x32(p.args[i])
+#else
+#define real_t float
+#define REAL_ARG(i) uintBitsToFloat(p.args[i].x)
+#endif
+layout(local_size_x_id=0, local_size_y=1, local_size_z=1) in;
+layout(push_constant, std430) uniform Arguments { uvec2 args[12]; uvec2 extent; } p;
+layout(set=0, binding=0, std430) buffer Buffer0 { real_t filterRe[]; };
+layout(set=0, binding=1, std430) buffer Buffer1 { real_t filterIm[]; };
+layout(set=0, binding=2, std430) buffer Buffer2 { real_t historyRe[]; };
+layout(set=0, binding=3, std430) buffer Buffer3 { real_t historyIm[]; };
+layout(set=0, binding=4, std430) buffer Buffer4 { real_t accRe[]; };
+layout(set=0, binding=5, std430) buffer Buffer5 { real_t accIm[]; };
+void main() {
+if (gl_GlobalInvocationID.x >= p.extent.x || gl_GlobalInvocationID.y >= p.extent.y) return;
+int n = int(p.args[6].x);
+int partitions = int(p.args[7].x);
+int head = int(p.args[8].x);
+int phaseBase = int(p.args[9].x);
+    int k = int(gl_GlobalInvocationID.x);
+    int lane = int(gl_GlobalInvocationID.y);
+    int phase = phaseBase + lane;
+    real_t sr = real_t(0);
+    real_t si = real_t(0);
+    int filterBase = (phase * partitions) * n + k;
+
+    for (int part = 0; part < partitions; part++)
+    {
+        int slot = head - part;
+        slot += slot < 0 ? partitions : 0;
+        real_t xr = historyRe[slot * n + k];
+        real_t xi = historyIm[slot * n + k];
+        real_t hr = filterRe[filterBase + part * n];
+        real_t hi = filterIm[filterBase + part * n];
+        sr += xr * hr - xi * hi;
+        si += xr * hi + xi * hr;
+    }
+
+    accRe[lane * n + k] = sr;
+    accIm[lane * n + k] = si;
+
+}

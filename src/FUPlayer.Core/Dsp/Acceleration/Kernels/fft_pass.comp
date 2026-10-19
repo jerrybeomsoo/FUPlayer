@@ -1,0 +1,51 @@
+// Project kernels, derived from GpuKernels.cs by build/gpu/prepare-kernels.py.
+#version 450
+#ifdef REAL_IS_DOUBLE
+#extension GL_ARB_gpu_shader_fp64 : require
+#define real_t double
+#define REAL_ARG(i) packDouble2x32(p.args[i])
+#else
+#define real_t float
+#define REAL_ARG(i) uintBitsToFloat(p.args[i].x)
+#endif
+layout(local_size_x_id=0, local_size_y=1, local_size_z=1) in;
+layout(push_constant, std430) uniform Arguments { uvec2 args[12]; uvec2 extent; } p;
+layout(set=0, binding=0, std430) buffer Buffer0 { real_t srcRe[]; };
+layout(set=0, binding=1, std430) buffer Buffer1 { real_t srcIm[]; };
+layout(set=0, binding=2, std430) buffer Buffer2 { real_t dstRe[]; };
+layout(set=0, binding=3, std430) buffer Buffer3 { real_t dstIm[]; };
+layout(set=0, binding=4, std430) buffer Buffer4 { real_t twiddleRe[]; };
+layout(set=0, binding=5, std430) buffer Buffer5 { real_t twiddleIm[]; };
+void main() {
+if (gl_GlobalInvocationID.x >= p.extent.x || gl_GlobalInvocationID.y >= p.extent.y) return;
+int srcOffset = int(p.args[6].x);
+int dstOffset = int(p.args[7].x);
+int n = int(p.args[8].x);
+int s = int(p.args[9].x);
+int logS = int(p.args[10].x);
+real_t sign = REAL_ARG(11);
+    int g = int(gl_GlobalInvocationID.x);           // 0 .. n/2 - 1
+    int batch = int(gl_GlobalInvocationID.y);
+    int m = (n >> 1) >> logS;           // points handled per group at this pass
+    int q = g & (s - 1);
+    int p = g >> logS;
+
+    int src = srcOffset + batch * n;
+    int dst = dstOffset + batch * n;
+    int a = src + q + s * p;
+    int b = src + q + s * (p + m);
+
+    real_t ar = srcRe[a], ai = srcIm[a];
+    real_t br = srcRe[b], bi = srcIm[b];
+    real_t dr = ar - br, di = ai - bi;
+
+    int t = p * s;
+    real_t wr = twiddleRe[t];
+    real_t wi = sign * twiddleIm[t];
+
+    dstRe[dst + q + s * 2 * p] = ar + br;
+    dstIm[dst + q + s * 2 * p] = ai + bi;
+    dstRe[dst + q + s * (2 * p + 1)] = dr * wr - di * wi;
+    dstIm[dst + q + s * (2 * p + 1)] = dr * wi + di * wr;
+
+}

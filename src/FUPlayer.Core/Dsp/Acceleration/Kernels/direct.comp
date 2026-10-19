@@ -1,0 +1,66 @@
+// Project kernels, derived from GpuKernels.cs by build/gpu/prepare-kernels.py.
+#version 450
+#ifdef REAL_IS_DOUBLE
+#extension GL_ARB_gpu_shader_fp64 : require
+#define real_t double
+#define REAL_ARG(i) packDouble2x32(p.args[i])
+#else
+#define real_t float
+#define REAL_ARG(i) uintBitsToFloat(p.args[i].x)
+#endif
+layout(local_size_x_id=0, local_size_y=1, local_size_z=1) in;
+layout(push_constant, std430) uniform Arguments { uvec2 args[12]; uvec2 extent; } p;
+shared real_t tile[256];
+layout(set=0, binding=0, std430) buffer Buffer0 { real_t coefficients[]; };
+layout(set=0, binding=1, std430) buffer Buffer1 { real_t signal[]; };
+layout(set=0, binding=2, std430) buffer Buffer2 { real_t resultBuffer[]; };
+void main() {
+if (gl_GlobalInvocationID.x >= p.extent.x || gl_GlobalInvocationID.y >= p.extent.y) return;
+int taps = int(p.args[4].x);
+int lanes = int(p.args[5].x);
+int count = int(p.args[6].x);
+int phaseBase = int(p.args[7].x);
+    int lane = int(gl_LocalInvocationID.x);
+    int width = int(gl_WorkGroupSize.x);
+    int j = int(gl_GlobalInvocationID.x);
+    int slot = int(gl_GlobalInvocationID.y);
+    int phase = phaseBase + slot;
+
+    // Items past the end still have to reach every barrier, so they do the work and drop the answer.
+    int coefficientBase = phase * taps;
+    int signalBase = j < count ? j : count - 1;
+
+    real_t s0 = real_t(0), s1 = real_t(0), s2 = real_t(0), s3 = real_t(0);
+    real_t s4 = real_t(0), s5 = real_t(0), s6 = real_t(0), s7 = real_t(0);
+    for (int base = 0; base < taps; base += width)
+    {
+        barrier();
+        tile[lane] = base + lane < taps ? coefficients[coefficientBase + base + lane] : real_t(0);
+        barrier();
+
+        int n = min(width, taps - base);
+        int k = 0;
+        for (; k + 8 <= n; k += 8)
+        {
+            s0 += tile[k] * signal[signalBase + base + k];
+            s1 += tile[k + 1] * signal[signalBase + base + k + 1];
+            s2 += tile[k + 2] * signal[signalBase + base + k + 2];
+            s3 += tile[k + 3] * signal[signalBase + base + k + 3];
+            s4 += tile[k + 4] * signal[signalBase + base + k + 4];
+            s5 += tile[k + 5] * signal[signalBase + base + k + 5];
+            s6 += tile[k + 6] * signal[signalBase + base + k + 6];
+            s7 += tile[k + 7] * signal[signalBase + base + k + 7];
+        }
+
+        for (; k < n; k++)
+        {
+            s0 += tile[k] * signal[signalBase + base + k];
+        }
+    }
+
+    if (j < count)
+    {
+        resultBuffer[j * lanes + slot] = ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7));
+    }
+
+}

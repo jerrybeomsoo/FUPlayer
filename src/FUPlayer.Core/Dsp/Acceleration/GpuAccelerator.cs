@@ -117,12 +117,15 @@ public sealed class GpuAccelerator : IDisposable
                 string? reason = _failure ?? _verdict;
                 return reason is null
                     ? Loc.T("Filtering on the processor: no stage in this conversion can be offloaded.")
-                    : Loc.F("Filtering on the processor: {0} was not used because {1}.", Device.Name, reason);
+                    : Loc.F("Filtering on the processor: {0} was not used because {1}.", $"{Device.Name} / {Device.BackendName}", reason);
             }
 
-            string precision = UsesDouble
-                ? Loc.T("64-bit")
-                : Loc.F("32-bit, {0:0} dB from the processor result", 20.0 * Math.Log10(Math.Max(_deviation, 1e-12)));
+            int bits = UsesDouble ? 64 : 32;
+            string precision = _unchecked is not null
+                ? Loc.F("{0}-bit", bits)
+                : _deviation == 0
+                    ? Loc.F("{0}-bit, no difference in the self-check", bits)
+                    : Loc.F("{0}-bit, {1:0} dB peak error relative to CPU", bits, 20.0 * Math.Log10(_deviation));
             string extra = _failure is null ? string.Empty : " " + Loc.F("One stage stayed on the processor: {0}.", _failure);
 
             // A filter the check could not reach is used only because the device was forced, and saying which
@@ -148,7 +151,7 @@ public sealed class GpuAccelerator : IDisposable
                         : _retime
                             ? Loc.F("{0:0.#} of {1} phases on the device, re-measured during playback; the processor convolves the rest of the same blocks concurrently.", taken, phases)
                             : Loc.F("{0:0.#} of {1} phases on the device, measured once at the start; the processor convolves the rest of the same blocks concurrently.", taken, phases));
-            return Loc.F("Filtering on {0} ({1}).", Device.Name, precision) + split + unchecked_ + extra + overruled;
+            return Loc.F("Filtering on {0} ({1}).", $"{Device.Name} / {Device.BackendName}", precision) + split + unchecked_ + extra + overruled;
         }
     }
 
@@ -175,7 +178,7 @@ public sealed class GpuAccelerator : IDisposable
         GpuDevice? device = GpuRuntime.Resolve(deviceId);
         if (device is null)
         {
-            status = Loc.F("Filtering on the processor: {0}.", GpuRuntime.Unavailable ?? Loc.T("no OpenCL device was found"));
+            status = Loc.F("Filtering on the processor: {0}.", GpuRuntime.Unavailable ?? Loc.T("no usable compute device was found"));
             return null;
         }
 
@@ -449,7 +452,7 @@ public sealed class GpuAccelerator : IDisposable
             // worth giving it; a device that lost outright ends up with none of the channels anyway.
             _advantage = _advantage > 0.0 ? Math.Min(_advantage, advantage) : advantage;
             _verdict ??= advantage > 0.0
-                ? Loc.F("the processor convolves this filter {0:0.0} times faster than it does", 1.0 / advantage)
+                ? Loc.F("the processor convolves this filter {0:0.0} times faster than the device", 1.0 / advantage)
                 : Loc.T("the device produced nothing to time");
             return filter;
         }
@@ -459,7 +462,7 @@ public sealed class GpuAccelerator : IDisposable
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or AccessViolationException)
         {
-            _failure ??= Loc.T("the OpenCL driver failed while the filter was being prepared");
+            _failure ??= Loc.T("the compute driver failed while the filter was being prepared");
         }
 
         filter?.Dispose();

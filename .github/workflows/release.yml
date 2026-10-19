@@ -1,9 +1,7 @@
 name: Release
 
-# Pushing a tag such as v0.2.1 builds the Windows package and publishes it as a
-# GitHub release, with that version's section of CHANGELOG.md as the notes.
-# Running the workflow by hand builds the same package and leaves it as a build
-# artifact without publishing anything.
+# Tags publish the player, two portable DSP servers, installer and checksums.
+# Manual runs keep the same files as build artifacts without publishing.
 on:
   push:
     tags:
@@ -15,7 +13,7 @@ permissions:
 
 jobs:
   windows:
-    name: Windows x64 package
+    name: Player and portable DSP servers
     runs-on: windows-latest
 
     steps:
@@ -35,13 +33,13 @@ jobs:
 
       - name: Build the package
         shell: pwsh
-        run: ./build/package.ps1 -Version $env:VERSION
+        run: ./build/release.ps1 -Version $env:VERSION
 
       - name: Keep the package as a build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FUPlayer-${{ env.VERSION }}-win-x64
-          path: artifacts/*.zip
+          name: FUPlayer-${{ env.VERSION }}
+          path: artifacts/release-${{ env.VERSION }}/*
           if-no-files-found: error
 
       - name: Publish the release
@@ -62,10 +60,12 @@ jobs:
             if ($inside) { $notes.Add($line) }
           }
           $text = ($notes -join "`n").Trim()
-          $package = "artifacts/FUPlayer-$env:VERSION-win-x64.zip"
+          $packages = @(Get-ChildItem "artifacts/release-$env:VERSION" -File | ForEach-Object FullName)
+          if ($packages.Count -ne 5) { throw 'Expected player, two servers, installer and checksums.' }
           if ($text) {
             Set-Content -Path release-notes.md -Value $text -Encoding utf8
-            gh release create $env:GITHUB_REF_NAME $package --title "FUPlayer $env:GITHUB_REF_NAME" --notes-file release-notes.md
+            gh release create $env:GITHUB_REF_NAME @packages --title "FUPlayer $env:GITHUB_REF_NAME" --notes-file release-notes.md --verify-tag --latest
           } else {
-            gh release create $env:GITHUB_REF_NAME $package --title "FUPlayer $env:GITHUB_REF_NAME" --generate-notes
+            gh release create $env:GITHUB_REF_NAME @packages --title "FUPlayer $env:GITHUB_REF_NAME" --generate-notes --verify-tag --latest
           }
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release publication failed.' }

@@ -25,7 +25,7 @@ namespace FUPlayer.Core.Dsp.Restoration;
 /// per call cost more processor for the same audio: on a four-core laptop, one thread, the network ran 8.7 times faster
 /// than real time four frames at a time and 4.7 times two at a time.
 /// </summary>
-public sealed class NeuralRestorer
+public sealed class NeuralRestorer : INeuralRestorer
 {
     private const int N = NeuralRestorerModel.FftSize;
     private const int H = NeuralRestorerModel.Hop;

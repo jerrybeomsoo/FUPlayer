@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using Avalonia;
+using FUPlayer.Audio.Windows;
 using FUPlayer.App.Services;
 using FUPlayer.Core.Decoding;
 using FUPlayer.Core.Decoding.FFmpeg;
@@ -14,6 +15,7 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        ProcessScheduling.RequestRealtime();
         AppDomain.CurrentDomain.UnhandledException += (_, e) => WriteCrashLog(e.ExceptionObject as Exception);
 
         if (args.Contains("--diagnostics", StringComparer.OrdinalIgnoreCase))
@@ -62,6 +64,7 @@ internal static class Program
         report.AppendLine($"  working dir    {Environment.CurrentDirectory}");
         report.AppendLine($"  user           {Environment.UserDomainName} / {Environment.UserName}");
         report.AppendLine($"  runtime        {RuntimeInformation.FrameworkDescription} on {RuntimeInformation.RuntimeIdentifier}");
+        report.AppendLine($"  priority       {ProcessScheduling.Status}");
         report.AppendLine($"  APPDATA        {Environment.GetEnvironmentVariable("APPDATA")}");
         report.AppendLine($"  ApplicationData {Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)}");
         report.AppendLine($"  settings       {SettingsStore.DefaultDirectory}");

@@ -25,6 +25,8 @@
     <PackageVersion Include="Microsoft.AI.DirectML" Version="1.15.4" />
     <!-- Tag reading (LGPL-2.1, dynamically linked assembly) -->
     <PackageVersion Include="TagLibSharp" Version="2.3.0" />
+    <!-- Vulkan compute bindings (MIT). The system's loader and GPU driver remain external. -->
+    <PackageVersion Include="Silk.NET.Vulkan" Version="2.23.0" />
     <!-- Tests (Apache-2.0 / MIT) -->
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />

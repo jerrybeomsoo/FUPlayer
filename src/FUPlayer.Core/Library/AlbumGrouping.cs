@@ -1,3 +1,5 @@
+using FUPlayer.Core.Metadata;
+
 namespace FUPlayer.Core.Library;
 
 /// <summary>
@@ -15,13 +17,14 @@ public static class AlbumGrouping
     public static IEnumerable<LibraryAlbum> Build(string folder, List<LibraryTrack> tracks, Func<string, List<LibraryTrack>, LibraryAlbum> build)
     {
         List<List<LibraryTrack>> parts = Split(tracks);
+        string[] images = MetadataReader.FolderImages(folder);
         foreach (List<LibraryTrack> part in parts)
         {
             LibraryAlbum album = build(folder, part);
 
-            // A cover file in the folder belongs to the folder; when the folder holds several albums it is no
-            // album's own, and each falls back to its embedded picture.
-            yield return parts.Count > 1 ? album with { CoverFile = null } : album;
+            // In a mixed folder only an album-title match belongs to a particular album.
+            string? title = part.FirstOrDefault(t => !string.IsNullOrWhiteSpace(t.Album))?.Album;
+            yield return album with { CoverFile = MetadataReader.SelectFolderCover(images, title, allowGeneric: parts.Count == 1) };
         }
     }
 

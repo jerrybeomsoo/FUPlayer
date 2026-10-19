@@ -18,7 +18,24 @@ What the Windows package contains:
 | HarfBuzzSharp and [HarfBuzz](https://github.com/harfbuzz/harfbuzz) (`libHarfBuzzSharp.dll`) | Text shaping | MIT (HarfBuzzSharp), Old MIT (HarfBuzz) | the same two files |
 | [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) 8 | MVVM helpers | MIT | `CommunityToolkit-License.md`, `CommunityToolkit-ThirdPartyNotices.txt` |
 | [TagLib#](https://github.com/mono/taglib-sharp) 2.3 | Tag and cover-art reading | LGPL-2.1-only | `LGPL-2.1.txt` |
+| [Silk.NET.Vulkan and Silk.NET.Core](https://github.com/dotnet/Silk.NET) 2.23.0 | Vulkan compute bindings | MIT | `Silk.NET-LICENSE.txt` |
 | [ONNX Runtime](https://github.com/microsoft/onnxruntime) 1.24 (`Microsoft.ML.OnnxRuntime.DirectML`, the DirectML build) | Running the neural restorer and upscaler, on the processor or a graphics adapter | MIT, and the licenses of the code it builds in, Eigen's MPL-2.0 among them | `onnxruntime-LICENSE.txt`, `onnxruntime-ThirdPartyNotices.txt` |
+
+The Vulkan compute bindings, [Silk.NET.Vulkan and Silk.NET.Core](https://github.com/dotnet/Silk.NET) 2.23.0,
+are distributed under MIT (`licenses/Silk.NET-LICENSE.txt`). Their Microsoft runtime support dependencies are
+covered by `licenses/dotnet-runtime-LICENSE.txt` and `licenses/dotnet-runtime-THIRD-PARTY-NOTICES.txt`.
+The CUDA fatbins and Vulkan SPIR-V modules are compiled from FUPlayer's own MIT convolution kernels.
+NVIDIA's CUDA driver and the Vulkan loader/ICD are supplied by the user's system; no GPU driver, CUDA runtime,
+shader compiler or SDK redistributable is shipped.
+
+Headless builds on Linux use the unmodified MIT `Microsoft.ML.OnnxRuntime` 1.30.0 processor package in place of
+the Windows DirectML package. Its licence is the same `onnxruntime-LICENSE.txt`; its version-specific dependency
+notices are in `licenses/onnxruntime-cpu-1.30-ThirdPartyNotices.txt`. Include those texts when distributing that build.
+
+The standalone `FUPlayer-DspServer` embeds its runtime, models, licences and native ONNX Runtime in one executable
+per OS/architecture. It excludes the player UI, Windows audio backends, FFmpeg and TagLibSharp runtime assets.
+`--extract-licenses <directory>` writes all embedded licence and notice texts. Native runtime libraries and
+model files are extracted into a writable host cache; GPU drivers remain supplied by the host.
 
 Not in the package:
 

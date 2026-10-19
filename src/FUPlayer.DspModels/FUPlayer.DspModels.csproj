@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>FUPlayer.DspModels</AssemblyName>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+  <!-- Loaded by name only inside an active worker, keeping the service listener's resident memory small. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\models\*.onnx;..\..\models\*.json" LogicalName="FUPlayer.Server.Models.%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

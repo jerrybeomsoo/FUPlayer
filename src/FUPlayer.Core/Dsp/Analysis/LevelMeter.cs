@@ -43,7 +43,14 @@ public sealed class LevelMeter
 
         double peak = SimdMath.MaxAbs(data);
         double meanSquare = SimdMath.SumOfSquares(data) / data.Length;
-        double decay = Math.Exp(-data.Length / (RmsTimeConstantSeconds * SampleRate));
+        ProcessStatistics(channel, data.Length, peak, meanSquare);
+    }
+
+    /// <summary>Applies a remote block's level statistics with the same decay as locally processed samples.</summary>
+    internal void ProcessStatistics(int channel, int samples, double peak, double meanSquare)
+    {
+        if ((uint)channel >= (uint)Channels || samples <= 0) return;
+        double decay = Math.Exp(-samples / (RmsTimeConstantSeconds * SampleRate));
         lock (_gate)
         {
             _peak[channel] = Math.Max(_peak[channel], peak);
@@ -55,7 +62,7 @@ public sealed class LevelMeter
             }
             else
             {
-                _holdAge[channel] += data.Length;
+                _holdAge[channel] += samples;
             }
 
             if (peak >= 1.0)

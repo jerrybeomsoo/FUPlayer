@@ -1,175 +1,46 @@
-# Settings reference
+# Settings and output
 
-Every setting, what it changes, and what it costs. Settings are stored in `%APPDATA%\FUPlayer\settings.json`.
+## Audio output
 
-## DSP studio
+On **Output**, select the back-end and device before choosing the sample rate.
+WASAPI shared follows Windows' shared audio path. WASAPI exclusive and ASIO require the device to be available
+and to accept the selected format. ASIO and native DSD support depend on the manufacturer's driver.
+Use PCM initially, then try higher rates or DSD after ordinary playback works.
 
-### Output
+Larger device buffers and an adequate playback FIFO give processing more time to meet each deadline.
+Smaller buffers respond faster but can increase dropouts. A very long filter can add seconds of delay even
+when its DSP load is low. See [DSP studio](dsp.md) for the different delay sources.
 
-| Setting | Options | Notes |
-| --- | --- | --- |
-| Output mode | PCM, DSD, Follow source | DSD bypasses the DAC's modulator as well as its filter |
-| Rate selection | Highest rate, Same family only, Fixed rate | "Same family" keeps 44.1 kHz sources on 44.1 kHz multiples |
-| Highest rate | Up to 1.536 MHz | Ceiling for automatic selection |
-| Fixed rate | Any rate the device reports | Used when rate selection is Fixed |
-| DAC word length | 16, 20, 24, 32 bit | Valid bits sent to the device |
-| Highest DSD rate | DSD64 to DSD1024 | DSD1024 is 45.1 MHz and needs a fast machine |
-| DSD delivery | Native DSD, DoP | Native needs an ASIO driver in DSD mode |
-| DSD at 48 kHz multiples | on / off | For 48 kHz family sources. Not all DACs accept these |
-| Pass DSD files through | on / off | Send matching DSD files unmodulated |
+## Processing and GPU
 
-### Processing
+Choose filters and neural stages in **DSP studio**. Settings contains the local GPU selection, arithmetic
+precision and DSP thread controls. Automatic GPU selection prefers CUDA on NVIDIA and Vulkan on other GPUs.
+Select an OpenCL device explicitly if you need that path. CPU/GPU sharing is measured, so a GPU may be idle
+when the processor finishes a particular filter faster. A layered FFT partition layout uses the processor.
 
-| Setting | Options | Notes |
-| --- | --- | --- |
-| Filter length | Automatic, 16,384 to 33,554,432 taps | Counted at the output rate. Sets transition width and group delay |
-| Filter staging | Single stage, Multi-stage | Multi-stage is roughly half the cost, at the price of a cascade of responses. The [Transient-Aligned Filter](transient-aligned-filter.md) keeps its own stages |
-| Convolution | Frequency domain, Tap by tap | Tap by tap adds no block latency and hides the three settings below |
-| Crossover, in taps a phase | Built-in 1,024, 256 to 262,144, Never | Where the FFT path takes over from direct convolution |
-| Longest block (FFT window) | Cheapest, 100 ms down to 1.5 ms | Latency against arithmetic. Does not change the output samples |
-| Partition layout | One block length, Layered | Layered is far cheaper at a short block and cannot use a GPU |
-| Remove ultrasonics | on / off | 20 kHz low-pass for sources above 48 kHz |
-| Peak limiter | on / off | Catches intersample peaks above full scale |
-| Watch for band-edge ringing | on / off | Counts ringing at the source Nyquist frequency |
+32-bit GPU arithmetic usually uses less bandwidth and can run faster, while 64-bit retains more numerical
+precision. The active chain in Now playing reports the device and numerical verification. Neural **Runs on**
+choices are separate: Windows neural GPU processing uses DirectML, independently of the resampler's API.
 
-**What the filter length costs.** At 705.6 kHz, roughly:
+**Preprocess files ahead** reads future samples from seekable files and compensates leading filter delay.
+Starting or seeking waits for that preparation. Live streams retain their delay, and processing must still
+keep up with playback. This does not change filter phase or ringing.
 
-| Taps | Transition | Group delay | Coefficients |
-| --- | --- | --- | --- |
-| 65,536 | 90 Hz | 46 ms | 0.5 MB |
-| 262,144 | 23 Hz | 186 ms | 2 MB |
-| 1,048,576 | 6 Hz | 743 ms | 8 MB |
-| 4,194,304 | 1.4 Hz | 3.0 s | 60 MB with spectra |
-| 33,554,432 | 0.18 Hz | 23.8 s | about 1 GB with spectra |
+## Network DSP
 
-**What the block costs.** Relative to the cheapest block, for filters of 65,537 to 1,048,577 taps:
+In **Settings → Network DSP**, enter the server's private IPv4 address and UDP port, turn on **Process on a
+server**, then select the resampling/restorer/upscaler checkboxes. The corresponding stage must also be
+enabled in DSP studio. Its local neural **Runs on** selector becomes grey while remote processing is selected.
+See [Network DSP](network-dsp.md) for server installation and firewall ports.
 
-| Block ceiling | Samples at 44.1 kHz | FFT size | One block length | Layered |
-| --- | --- | --- | --- | --- |
-| Cheapest | 2,048 | 4,096 | 1x | 1x |
-| 25 ms | 1,024 | 2,048 | 1.1x to 1.7x | same |
-| 10 ms | 256 | 512 | 1.8x to 6x | 1.1x to 1.8x |
-| 3 ms | 128 | 256 | 3x to 12x | 1.2x to 2x |
-| 1.5 ms | 64 | 128 | 5x to 24x | 1.3x to 2.2x |
+## Language, library and optional decoders
 
-### Lossy repair
+Choose **Same as Windows**, **English** or **한국어** for the interface; restart when requested.
+Add music folders in Library. The player saves settings and caches under `%APPDATA%\FUPlayer`.
+For additional codecs, open **Settings → FFmpeg** and follow the [decoder guide](building-ffmpeg.md).
 
-| Setting | Options | Notes |
-| --- | --- | --- |
-| Neural restorer | on / off | Coded 44.1/48 kHz stereo back towards lossless at the same rate; 91 ms at 48 kHz, 99 ms at 44.1. See [neural-restorer.md](neural-restorer.md) |
-| Neural upscaler | on / off | 44.1/48 kHz to 88.2/96 kHz; about 0.55 s. With the restorer on, it runs after it and reads its output as lossless. See [neural-upscaler.md](neural-upscaler.md) |
-| Upscaled band level | Quiet −6 dB, Measured, Lifted +3 dB, Strong +6 dB | Gain on what the upscaler writes above the source Nyquist |
-| Runs on (under each network) | Processor, or a graphics adapter | Shown when Windows lists an adapter. The network runs there through DirectML; one that is missing or cannot open it leaves it on the processor, and Now playing says why. See [neural-restorer.md](neural-restorer.md#on-a-graphics-adapter) |
-| Oversampling exciter | on / off (default) | The music's own harmonics, made from the band above 7 kHz: faint under the music from about 15 kHz, and above where its spectrum ends at the level hi-res masters have there, up to 44.1/48 kHz when the output runs above the source rate. At any output rate, with or without the networks; nothing to adjust; about 25 ms. See [exciter.md](exciter.md) |
-| Source type | Automatic, Lossy, Lossless | Automatic treats lossy codecs and captures as coded and PCM, FLAC and ALAC as lossless. The restorer runs only on coded sources |
-| Output delta | on / off | Plays only what the networks and the exciter changed. For monitoring |
+## Process priority
 
-The peak limiter runs while either network does, whatever its own switch says.
-
-### Dither and modulation
-
-Eleven dither options, from none to five noise-shaping curves, and six delta-sigma modulators from 5th to 9th
-order. The automatic dither setting picks by output rate. See [dsp.md](dsp.md) for what each family does.
-
-## Output page
-
-| Setting | Notes |
-| --- | --- |
-| Output type | WASAPI exclusive, WASAPI shared, ASIO, file |
-| Device | Devices the back-end reports. Capabilities are probed when the page is shown |
-| Output channels, first channel | For interfaces with more than two outputs |
-| Device buffer | Driver default, or an explicit length. Smaller reacts faster |
-| Low-latency FIFO | Halves the engine FIFO. Faster response, higher dropout risk |
-| Instant pause | Pause switches straight to silence instead of fading |
-
-## Library and Tracks
-
-Music folders are scanned for tracks and grouped within each folder by album title and album artist.
-Library retains its field-scoped album search. The Tracks page under Library provides all-term track search,
-covers, file ratings, and sorting by title, artist, album, rating or recently changed. Ratings are read from
-the files and are not editable here. See [library.md](library.md).
-
-## Settings page
-
-### Language
-
-*Same as Windows* (the default), *English* or *한국어*. The interface is built in one language, so a change takes
-effect when the player starts again; *Restart now* does that, and the new player opens on this page with the
-same settings folder. `--language en` or `--language ko` on the command line sets it for one run.
-
-Translations are keyed by the English text, in `src/FUPlayer.Core/Localization/<code>.json`; anything without a
-translation shows in English. The command line tool is always in English.
-
-### Playback
-
-Gapless playback, ReplayGain (off, track, album), clipping prevention for positive ReplayGain, polarity
-inversion, and the time display format.
-
-The transport bar also has *Stop after this track*, beside repeat. It is saved as
-`Playback.StopAfterCurrent` (false by default), remains enabled after stopping and is restored by the desktop
-player at startup. Explicit Next still advances. Changes during the final buffered part of a track can take
-effect on the wrong side of the audible boundary; see [library.md](library.md#known-limitations).
-
-### FFmpeg
-
-Shows whether FFmpeg is loaded and from where. When it is not, *Download and build FFmpeg* downloads FFmpeg
-9.0.1's source, builds the LGPL libraries with MSYS2 (the installed one, or a private copy set up in
-`%LOCALAPPDATA%\FUPlayer\ffmpeg-build`), installs them in `%LOCALAPPDATA%\FUPlayer\ffmpeg` and loads them
-without a restart. See [building-ffmpeg.md](building-ffmpeg.md).
-
-### Processing resources
-
-| Setting | Notes |
-| --- | --- |
-| DSP threads | Automatic uses every core. Explicit values are the extra threads beyond the engine thread |
-| Engine FIFO | 100 ms to 60 s. The row shows the allocation, and the live line shows the real one |
-| Meter the adjusted source | Whether source meters show the file before or after ReplayGain and ultrasonic filtering |
-
-The FIFO ring is a power of two bytes, so the allocation rounds up and holds slightly longer than asked. At
-44.1 kHz stereo, 1 s is 512 KiB; at 705.6 kHz or DSD512, it is 8 MiB. The engine raises the setting if the device
-buffer or a block-based filter needs more, and caps the ring at 256 MiB.
-
-### Graphics acceleration
-
-| Setting | Notes |
-| --- | --- |
-| Convolve on the graphics device | Off by default |
-| Device | Any OpenCL 1.2 device. Automatic picks the most capable |
-| Arithmetic precision | 64-bit is bit-identical to the CPU. 32-bit is 2x to 3x faster, typically -130 dB from the CPU result |
-| Phase division | Measured and re-measured, measured once, or a fixed 25, 50, 75 or 100 percent |
-| Override the timed result | Use the device even where the CPU measured faster |
-
-A device is never used until it has reproduced the processor's own output for that filter. Overriding the timed
-result does not override that check.
-
-## UPnP input page
-
-Under Live input. See [upnp-input.md](upnp-input.md).
-
-| Setting | Options | Notes |
-| --- | --- | --- |
-| Offer this player as a UPnP renderer | off (default) / on | Announces the player on the network and takes AVTransport and RenderingControl commands on port 58180, or a free one |
-| Name | text | What controllers list it as. Empty means `FUPlayer (<computer name>)` |
-| Take orders from the local network | on (default) / off | Off, it announces nothing and only controllers on this computer can use it. Nothing outside the private address ranges is ever answered |
-| Follow the controller's volume | on (default) / off | The controller's volume and mute move the player's knob |
-
-*Add to foobar2000* appends the player to foobar2000's list of renderers (`foo_out_upnp-config-v2.txt`), so it
-sends FLAC and pauses rather than stopping; set **Bits** to 24 on the player's row of foobar2000's *Output ›
-Devices* page for 24-bit.
-
-## Live input page
-
-| Setting | Options | Notes |
-| --- | --- | --- |
-| Mute the application's own playback | on (default) / off | Mutes the devices the captured application plays to while it is captured, so it is heard once, through the player. The device is muted rather than the application's session, which would silence the capture too. The player's own WASAPI device is left alone, and a device unmuted by hand stays unmuted. Anything muted is unmuted when the capture ends, or on the next start after a crash |
-
-## Glossary page
-
-Under Settings. Plain explanations of 58 terms the other pages use, in groups (the basics, filters and rate
-conversion, word length and dither, DSD, output, neural processing, connections and tools), with a search box. In
-Korean each term also shows its usual English name. The DSP studio and Output pages link to it.
-
-## Calibration page
-
-Per-channel level trim and distance compensation, with a pink noise generator at -20 dBFS RMS that runs through
-the complete processing chain.
+The Windows player and CLI request real-time process priority when launched. Windows may grant a lower
+priority, such as High, according to the account's privileges. `fuplayer-cli.exe priority` reports the request
+and result. Priority cannot compensate for a processing chain that takes longer than the available buffer.

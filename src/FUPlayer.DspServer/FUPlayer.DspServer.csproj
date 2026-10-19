@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>FUPlayer-DspServer</AssemblyName>
+    <RootNamespace>FUPlayer.DspServer</RootNamespace>
+    <FuPlayerSkipFFmpegCopy>true</FuPlayerSkipFFmpegCopy>
+    <FuPlayerSkipModelCopy>true</FuPlayerSkipModelCopy>
+    <DebugType>embedded</DebugType>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\FUPlayer.Core\FUPlayer.Core.csproj" />
+    <ProjectReference Include="..\FUPlayer.DspModels\FUPlayer.DspModels.csproj" />
+    <!-- The processing server never reads media tags; do not bundle that optional Core dependency. -->
+    <PackageReference Include="TagLibSharp" ExcludeAssets="all" PrivateAssets="all" />
+    <EmbeddedResource Include="..\..\licenses\*" LogicalName="FUPlayer.Server.Licenses.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\LICENSE;..\..\THIRD-PARTY-NOTICES.md" LogicalName="FUPlayer.Server.Licenses.%(Filename)%(Extension)" />
+  </ItemGroup>
+  <Target Name="ExcludeNativeImportLibraries" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.lib'" />
+    </ItemGroup>
+  </Target>
+</Project>

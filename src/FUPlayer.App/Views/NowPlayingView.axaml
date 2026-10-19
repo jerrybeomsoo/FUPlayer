@@ -204,6 +204,10 @@
               <TextBlock Text="Block delay" Classes="muted" />
               <TextBlock Grid.Column="1" Text="{Binding BlockDelay}" Classes="numeric" />
             </Grid>
+              <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding HasNetworkDelay}" ToolTip.Tip="UDP echo round trip, measured separately from DSP processing time.">
+                <TextBlock Text="Network round trip" Classes="muted" />
+                <TextBlock Grid.Column="1" Text="{Binding NetworkDelay}" Classes="numeric" />
+              </Grid>
             <TextBlock Text="{Binding Processing}" Classes="secondary small" TextWrapping="Wrap" />
             <Border Classes="divider" Margin="0,2" />
             <Grid ColumnDefinitions="*,Auto">

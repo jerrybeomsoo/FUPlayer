@@ -43,7 +43,7 @@ public sealed class CoverArtCache
 
     /// <summary>Embedded picture of a track, falling back to a cover image in its folder.</summary>
     public Task<Bitmap?> GetTrackCoverAsync(string trackPath, int width) =>
-        Get($"track|{width}|{trackPath}", width, trackPath, () =>
+        Get($"track-cover-v2|{width}|{trackPath}", width, trackPath, () =>
         {
             if (MetadataReader.ReadEmbeddedCover(trackPath) is { Length: > 0 } bytes)
             {
@@ -51,7 +51,8 @@ public sealed class CoverArtCache
             }
 
             string? folder = Path.GetDirectoryName(trackPath);
-            return folder is not null && MetadataReader.FindFolderCover(folder) is { } file ? File.OpenRead(file) : null;
+            string? album = MetadataReader.Read(trackPath, probeFormat: false).Album;
+            return folder is not null && MetadataReader.FindFolderCover(folder, album) is { } file ? File.OpenRead(file) : null;
         });
 
     /// <summary>Folder cover of an album, falling back to the first embedded picture.</summary>

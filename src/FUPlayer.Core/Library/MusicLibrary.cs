@@ -342,7 +342,6 @@ public sealed class MusicLibrary
             Artist = artist,
             Year = tracks.Select(t => t.Year).Where(y => y > 0).DefaultIfEmpty(0).Max(),
             Genre = MostCommon(tracks.Select(t => t.Genre)) ?? string.Empty,
-            CoverFile = MetadataReader.FindFolderCover(folder),
             FormatSummary = MostCommon(tracks.Select(t => t.Format)) ?? string.Empty,
             Tracks = tracks,
         };

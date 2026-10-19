@@ -28,6 +28,8 @@ internal sealed class GpuDirectConvolver : IDisposable
     /// </summary>
     public const int MaxBlock = 4096;
 
+    private readonly ComputeApi Api;
+
     private readonly GpuDirectFilter _filter;
     private readonly PolyphaseStage _stage;
     private readonly int _element;
@@ -52,6 +54,7 @@ internal sealed class GpuDirectConvolver : IDisposable
         _filter = filter;
         _stage = filter.Stage;
         GpuProgram program = filter.Program;
+        Api = program.Api;
         _element = program.ElementSize;
         _history = _stage.TapsPerPhase - 1;
         _silence = new double[_history];
@@ -63,21 +66,21 @@ internal sealed class GpuDirectConvolver : IDisposable
 
         try
         {
-            _queue = OpenClApi.CreateQueue(program.Context, program.Device.Handle);
-            _kernel = OpenClApi.CreateKernel(program.Program, "direct");
+            _queue = Api.CreateQueue(program.Context, program.Device.Handle);
+            _kernel = Api.CreateKernel(program.Program, "direct");
             for (int i = 0; i < _windows.Length; i++)
             {
-                _windows[i] = OpenClApi.CreateBuffer(program.Context, OpenClApi.MemReadOnly, (nuint)(window * _element));
+                _windows[i] = Api.CreateBuffer(program.Context, OpenClApi.MemReadOnly, (nuint)(window * _element));
             }
 
-            _output = OpenClApi.CreateBuffer(
+            _output = Api.CreateBuffer(
                 program.Context, OpenClApi.MemWriteOnly, (nuint)((long)outputs * _element));
 
-            OpenClApi.SetArg(_kernel, 0, filter.Coefficients);
-            OpenClApi.SetArg(_kernel, 1, _windows[0]);
-            OpenClApi.SetArg(_kernel, 2, _output);
-            OpenClApi.SetLocalArg(_kernel, 3, (nuint)(filter.GroupSize * _element));
-            OpenClApi.SetArg(_kernel, 4, _stage.TapsPerPhase);
+            Api.SetArg(_kernel, 0, filter.Coefficients);
+            Api.SetArg(_kernel, 1, _windows[0]);
+            Api.SetArg(_kernel, 2, _output);
+            Api.SetLocalArg(_kernel, 3, (nuint)(filter.GroupSize * _element));
+            Api.SetArg(_kernel, 4, _stage.TapsPerPhase);
 
             Reset();
         }
@@ -107,15 +110,15 @@ internal sealed class GpuDirectConvolver : IDisposable
     {
         for (int i = 0; i < _windows.Length; i++)
         {
-            OpenClApi.ReleaseMemory(_windows[i]);
+            Api.ReleaseMemory(_windows[i]);
             _windows[i] = 0;
         }
 
-        OpenClApi.ReleaseMemory(_output);
+        Api.ReleaseMemory(_output);
         _output = 0;
-        OpenClApi.ReleaseKernel(_kernel);
+        Api.ReleaseKernel(_kernel);
         _kernel = 0;
-        OpenClApi.ReleaseQueue(_queue);
+        Api.ReleaseQueue(_queue);
         _queue = 0;
     }
 
@@ -131,13 +134,13 @@ internal sealed class GpuDirectConvolver : IDisposable
         int next = 1 - _current;
         if (_history > 0)
         {
-            OpenClApi.Copy(
+            Api.Copy(
                 _queue, _windows[_current], (nuint)((long)_count * _element),
                 _windows[next], 0, (nuint)((long)_history * _element));
         }
 
         Upload(block, _windows[next], (nuint)((long)_history * _element));
-        OpenClApi.SetArg(_kernel, 1, _windows[next]);
+        Api.SetArg(_kernel, 1, _windows[next]);
         _current = next;
         _count = block.Length;
     }
@@ -154,14 +157,14 @@ internal sealed class GpuDirectConvolver : IDisposable
         }
 
         int group = _filter.GroupSize;
-        OpenClApi.SetArg(_kernel, 5, lanes);
-        OpenClApi.SetArg(_kernel, 6, _count);
-        OpenClApi.SetArg(_kernel, 7, phaseBase);
-        OpenClApi.Run(
+        Api.SetArg(_kernel, 5, lanes);
+        Api.SetArg(_kernel, 6, _count);
+        Api.SetArg(_kernel, 7, phaseBase);
+        Api.Run(
             _queue, _kernel, (nuint)((_count + group - 1) / group * group), (nuint)lanes, (nuint)group);
 
         // Hand it to the device now rather than when something waits for it, or the two never overlap.
-        OpenClApi.Flush(_queue);
+        Api.Flush(_queue);
     }
 
     /// <summary>Waits for what <see cref="Begin"/> started and spreads it into the phases it was given.</summary>
@@ -203,7 +206,7 @@ internal sealed class GpuDirectConvolver : IDisposable
 
         if (_element == sizeof(double))
         {
-            OpenClApi.Write(_queue, buffer, offsetBytes, MemoryMarshal.AsBytes(values));
+            Api.Write(_queue, buffer, offsetBytes, MemoryMarshal.AsBytes(values));
             return;
         }
 
@@ -213,19 +216,19 @@ internal sealed class GpuDirectConvolver : IDisposable
             target[i] = (float)values[i];
         }
 
-        OpenClApi.Write(_queue, buffer, offsetBytes, _transfer.AsSpan(0, values.Length * sizeof(float)));
+        Api.Write(_queue, buffer, offsetBytes, _transfer.AsSpan(0, values.Length * sizeof(float)));
     }
 
     private void Download(Span<double> values)
     {
         if (_element == sizeof(double))
         {
-            OpenClApi.Read(_queue, _output, 0, MemoryMarshal.AsBytes(values));
+            Api.Read(_queue, _output, 0, MemoryMarshal.AsBytes(values));
             return;
         }
 
         Span<byte> bytes = _transfer.AsSpan(0, values.Length * sizeof(float));
-        OpenClApi.Read(_queue, _output, 0, bytes);
+        Api.Read(_queue, _output, 0, bytes);
         ReadOnlySpan<float> source = MemoryMarshal.Cast<byte, float>(bytes);
         for (int i = 0; i < values.Length; i++)
         {
