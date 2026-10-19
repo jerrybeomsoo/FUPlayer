@@ -21,16 +21,19 @@ internal sealed class NetworkSessions : IDisposable
     private readonly Lock? _gate;
     private readonly Dictionary<int, InferenceSession> _sized = [];
 
-    public NetworkSessions(string path, GraphicsAdapter? adapter, int threads, bool allowSpinning = true)
+    public NetworkSessions(string path, GraphicsAdapter? adapter, int threads, bool allowSpinning = true, string? failure = null)
     {
         _path = path;
         _threads = threads;
         _allowSpinning = allowSpinning;
-        Main = InferenceDevices.Open(path, adapter, threads, out GraphicsAdapter? used, out string? failure, allowSpinning);
+        Main = InferenceDevices.Open(path, adapter, threads, out GraphicsAdapter? used, out string? openFailure, allowSpinning);
         Adapter = used;
-        AdapterFailure = failure;
+        AdapterFailure = failure ?? openFailure;
         _gate = used is null ? null : new Lock();
     }
+
+    /// <summary>The same network on the processor, saying why the adapter it was opened on is not used.</summary>
+    public NetworkSessions OnProcessor(string failure) => new(_path, null, _threads, _allowSpinning, failure);
 
     /// <summary>The session the network was opened in: where its inputs and outputs are read, and every call on the processor.</summary>
     public InferenceSession Main { get; }

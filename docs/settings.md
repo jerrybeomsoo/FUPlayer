@@ -8,8 +8,9 @@ and to accept the selected format. ASIO and native DSD support depend on the man
 Use PCM initially, then try higher rates or DSD after ordinary playback works.
 
 Larger device buffers and an adequate playback FIFO give processing more time to meet each deadline.
-For Network DSP, the FIFO value is a minimum: WAN batches may require a larger effective buffer.
-See [network latency and buffering](network-dsp.md#processing-latency-and-idle-use).
+For Network DSP, the FIFO value is a minimum: the player raises it to cover the audio it keeps in flight to
+the server, to 0.75 s on a LAN and 1.5 s over the Internet.
+See [load, latency and bandwidth](network-dsp.md#load-latency-and-bandwidth).
 Smaller buffers respond faster but can increase dropouts. A very long filter can add seconds of delay even
 when its DSP load is low. See [DSP studio](dsp.md) for the different delay sources.
 
@@ -32,7 +33,8 @@ keep up with playback. This does not change filter phase or ringing.
 
 In **Settings → Network DSP**, enter the server's IP address, domain or URL and UDP port, turn on **Process on a
 server**, then select the resampling/restorer/upscaler checkboxes. The corresponding stage must also be
-enabled in DSP studio. Its local neural **Runs on** selector becomes grey while remote processing is selected.
+enabled in DSP studio, and a stage between two selected ones runs on the server too. Its local neural
+**Runs on** selector becomes grey while it runs remotely.
 For Internet access, paste the server's key in **Server access key**. It is masked on screen and saved in
 settings; keep that file private. Leave it empty only for a LAN-only server. See [Network DSP](network-dsp.md)
 for single-port forwarding, key generation and service setup.

@@ -26,6 +26,14 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime" />
   </ItemGroup>
 
+  <!--
+    On Linux, the WebGPU provider's native library. Its managed helper looks for the library beside its own assembly,
+    which a single-file server does not have, so InferenceDevices finds and registers the library itself.
+  -->
+  <ItemGroup Condition="'$(FuPlayerDirectML)' != 'true' and ($([MSBuild]::IsOSPlatform('Linux')) or '$(RuntimeIdentifier)' == 'linux-x64' or '$(RuntimeIdentifier)' == 'linux-arm64')">
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.EP.WebGpu" ExcludeAssets="compile;runtime" />
+  </ItemGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="FUPlayer.Core.Tests" />
   </ItemGroup>

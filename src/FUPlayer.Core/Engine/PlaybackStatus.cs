@@ -51,6 +51,12 @@ public sealed record PlaybackStatus
 
     /// <summary>UDP echo round trip measured independently of server DSP execution.</summary>
     public double? NetworkRoundTripMilliseconds { get; init; }
+
+    /// <summary>
+    /// The DSP server's processing time over the audio it processed, over the last few seconds, or null without a
+    /// server. Above one it cannot keep up, whatever the network does.
+    /// </summary>
+    public double? NetworkServerLoad { get; init; }
     /// <summary>LAN processing server while one or more selected stages run remotely.</summary>
     public string? NetworkServer { get; init; }
     /// <summary>Datagrams retransmitted to recover an incomplete exchange.</summary>

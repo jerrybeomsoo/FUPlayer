@@ -147,15 +147,40 @@ public sealed class SpectrumAnalyzer
 
     public void Push(int channel, ReadOnlySpan<double> data)
     {
+        if (Filter(channel, data, out ReadOnlySpan<double> source, out AnalysisDecimator.Design design))
+        {
+            Append(channel, source, design);
+        }
+    }
+
+    /// <summary>
+    /// The first half of <see cref="Push"/>, for samples that should reach the display only when they are heard: the
+    /// band's filter, run now by the thread that feeds this channel, its output kept until <see cref="Commit"/>.
+    /// </summary>
+    /// <returns>The filtered samples and the band they were filtered for, or null while off or when nothing came out.</returns>
+    internal (double[] Samples, AnalysisDecimator.Design Design)? Prepare(int channel, ReadOnlySpan<double> data) =>
+        Filter(channel, data, out ReadOnlySpan<double> source, out AnalysisDecimator.Design design) ? (source.ToArray(), design) : null;
+
+    /// <summary>The second half: samples from <see cref="Prepare"/> into the window, unless the band has changed since.</summary>
+    internal void Commit(int channel, double[] samples, AnalysisDecimator.Design design)
+    {
+        if (_enabled && (uint)channel < (uint)Channels && samples.Length > 0)
+        {
+            Append(channel, samples, design);
+        }
+    }
+
+    private bool Filter(int channel, ReadOnlySpan<double> data, out ReadOnlySpan<double> source, out AnalysisDecimator.Design design)
+    {
+        design = _design;
+        source = data;
         if (!_enabled || (uint)channel >= (uint)Channels || data.IsEmpty)
         {
-            return;
+            return false;
         }
 
         // Filtered outside the lock, by the one thread that feeds this channel. A band chosen meanwhile makes the
-        // result worthless, and it is dropped below.
-        AnalysisDecimator.Design design = _design;
-        ReadOnlySpan<double> source = data;
+        // result worthless, and it is dropped when it is appended.
         if (design.Factor > 1)
         {
             AnalysisDecimator? decimator = _decimators[channel];
@@ -166,12 +191,13 @@ public sealed class SpectrumAnalyzer
             }
 
             source = decimator.Process(data);
-            if (source.IsEmpty)
-            {
-                return;
-            }
         }
 
+        return !source.IsEmpty;
+    }
+
+    private void Append(int channel, ReadOnlySpan<double> source, AnalysisDecimator.Design design)
+    {
         int produced = source.Length;
         if (source.Length > RingSize)
         {

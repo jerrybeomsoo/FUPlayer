@@ -56,6 +56,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly Queue<(double Load, bool Dropout)> _loadHistory = new();
     private DateTime _loadSampleStartUtc;
     private double _loadSampleMaximum;
+    private double _loadSampleServer;
     private long _loadSampleUnderruns = -1;
     private bool _overloadDismissed;
 
@@ -669,9 +670,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         DeviceText = active && status.BackendName is not null
             ? $"{status.BackendName}  ·  {status.DeviceName}"
             : Loc.T("Idle");
-        DspLoad = active ? Math.Clamp(status.DspLoad, 0, 1) : 0;
-        DspLoadText = active ? Formatting.Percent(status.DspLoad) : "-";
-        IsDspOverloaded = active && status.DspLoad > 0.9;
+        // With a DSP server, whichever of the two machines is the busier is what decides whether playback keeps up.
+        double load = EffectiveLoad(status);
+        DspLoad = active ? Math.Clamp(load, 0, 1) : 0;
+        DspLoadText = active ? Formatting.Percent(load) : "-";
+        IsDspOverloaded = active && load > 0.9;
         BufferFill = active ? status.BufferFill : 0;
         BufferText = active ? Formatting.Percent(status.BufferFill) : "-";
     }
@@ -702,7 +705,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             _loadSampleMaximum = 0;
         }
 
-        _loadSampleMaximum = Math.Max(_loadSampleMaximum, status.DspLoad);
+        _loadSampleMaximum = Math.Max(_loadSampleMaximum, EffectiveLoad(status));
+        _loadSampleServer = Math.Max(_loadSampleServer, status.NetworkServerLoad ?? 0);
         if (now - _loadSampleStartUtc < LoadSampleLength)
         {
             return;
@@ -717,6 +721,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _loadSampleUnderruns = status.UnderrunFrames;
         _loadSampleStartUtc = now;
         _loadSampleMaximum = 0;
+        double server = _loadSampleServer;
+        _loadSampleServer = 0;
 
         (double Load, bool Dropout)[] recent = _loadHistory.TakeLast(3).ToArray();
         bool saturated = recent.Length == 3 && recent.All(s => s.Load >= 0.95);
@@ -726,7 +732,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             // Tap by tap first, because it is the largest lever by far: a filter of several thousand taps a phase
             // costs a multiply-add for every one of them, where the frequency domain costs a transform.
-            OverloadMessage = _services.Settings.Processing.Convolution == ConvolutionMode.TapByTap
+            bool tapByTap = _services.Settings.Processing.Convolution == ConvolutionMode.TapByTap;
+            OverloadMessage = server >= 0.95
+                ? (tapByTap
+                    ? Loc.F("The DSP server cannot keep up: this processing takes it {0} of the music's time, so the sound drops out. In the DSP studio, shorten the filter or set Convolution to Frequency domain.", Formatting.Percent(server))
+                    : Loc.F("The DSP server cannot keep up: this processing takes it {0} of the music's time, so the sound drops out. In the DSP studio, shorten the filter or lower the output rate.", Formatting.Percent(server)))
+                : tapByTap
                 ? Loc.T("Processing cannot keep up with this output, so the sound may drop out. In the DSP studio, set Convolution to Frequency domain, which costs a transform rather than a multiply-add for every tap.")
                 : status.Plan is { Output.IsDsd: true }
                     ? Loc.T("Processing cannot keep up with this output, so the sound may drop out. In the DSP studio, lower the highest DSD rate, choose a lighter modulator or filter, or use multi-stage filter staging.")
@@ -738,6 +749,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             _overloadDismissed = false;
         }
     }
+
+    /// <summary>The load that decides whether playback keeps up: this computer's, or the DSP server's when it is the higher.</summary>
+    private static double EffectiveLoad(PlaybackStatus status) => Math.Max(status.DspLoad, status.NetworkServerLoad ?? 0);
 
     private void UpdateMeters(PlaybackEngine engine, PlaybackStatus status)
     {

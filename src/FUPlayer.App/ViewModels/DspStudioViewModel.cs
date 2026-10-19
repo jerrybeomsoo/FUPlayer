@@ -205,8 +205,12 @@ public sealed partial class DspStudioViewModel : ObservableObject
     /// <summary>The local adapter choice applies only while this stage runs on the client.</summary>
     public bool LocalRestorer => !Settings.Processing.NetworkDsp || !Settings.Processing.RemoteRestorer;
 
-    /// <summary>The local adapter choice applies only while this stage runs on the client.</summary>
-    public bool LocalUpscaler => !Settings.Processing.NetworkDsp || !Settings.Processing.RemoteUpscaler;
+    /// <summary>
+    /// The local adapter choice applies only while this stage runs on the client. Between a restorer and a filter on
+    /// the server it runs there too, as a block crosses the network once each way.
+    /// </summary>
+    public bool LocalUpscaler => !Settings.Processing.NetworkDsp
+        || !(Settings.Processing.RemoteUpscaler || (Settings.Processing.RemoteRestorer && Settings.Processing.RemoteResampling));
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SourceTypeDescription))]

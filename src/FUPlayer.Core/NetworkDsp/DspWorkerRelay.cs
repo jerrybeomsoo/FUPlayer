@@ -11,7 +11,7 @@ namespace FUPlayer.Core.NetworkDsp;
 /// </summary>
 internal sealed class DspWorkerRelay(Func<CancellationToken, Task<int>> startWorker, Action<byte[]> send, TimeSpan idle) : IDisposable
 {
-    private readonly Channel<(byte[] Bytes, bool Close)> _packets = Channel.CreateBounded<(byte[], bool)>(new BoundedChannelOptions(2048)
+    private readonly Channel<(byte[] Bytes, bool Close)> _packets = Channel.CreateBounded<(byte[], bool)>(new BoundedChannelOptions(16384)
         { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.DropOldest });
     private readonly CancellationTokenSource _stop = new();
     private readonly TaskCompletionSource _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -26,7 +26,8 @@ internal sealed class DspWorkerRelay(Func<CancellationToken, Task<int>> startWor
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, _stop.Token);
         using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
-            { ReceiveBufferSize = 4 << 20, SendBufferSize = 4 << 20 };
+            { ReceiveBufferSize = 8 << 20, SendBufferSize = 8 << 20 };
+        DspEndpoint.IgnoreConnectionReset(socket);
         Task receive = Task.CompletedTask;
         try
         {
@@ -35,7 +36,7 @@ internal sealed class DspWorkerRelay(Func<CancellationToken, Task<int>> startWor
             long responseAt = Stopwatch.GetTimestamp();
             receive = Task.Run(async () =>
             {
-                var buffer = new byte[UdpDspPeer.Header + UdpDspPeer.Payload + DspDatagramProtection.Overhead + 1];
+                var buffer = new byte[2048];
                 try
                 {
                     while (!linked.IsCancellationRequested)

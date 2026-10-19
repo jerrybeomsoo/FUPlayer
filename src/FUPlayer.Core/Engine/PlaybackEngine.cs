@@ -298,6 +298,12 @@ public sealed class PlaybackEngine : IDisposable
         SpscByteRing? ring = _ring;
         RenderSource? render = _render;
         IAudioStream? stream = _stream;
+        if (ring is not null)
+        {
+            // The meters show what has been played, which the interface reads right after this.
+            pipeline?.ReleaseMeters(ring.ReadTotal);
+        }
+
         CounterBaseline baseline;
         lock (_statusGate)
         {
@@ -338,6 +344,7 @@ public sealed class PlaybackEngine : IDisposable
             ResamplerSummary = pipeline?.ResamplerSummary,
             Acceleration = pipeline?.AccelerationSummary,
             NetworkRoundTripMilliseconds = pipeline?.NetworkRoundTripMilliseconds,
+            NetworkServerLoad = pipeline?.NetworkServerLoad,
             NetworkServer = pipeline?.NetworkServer,
             NetworkRetransmits = pipeline?.NetworkRetransmits ?? 0,
             Upscaler = pipeline?.UpscalerStatus,

@@ -121,6 +121,14 @@ public sealed partial class NowPlayingViewModel : ObservableObject
     private string _networkDelay = string.Empty;
     public bool HasNetworkDelay => NetworkDelay.Length > 0;
 
+    /// <summary>The DSP server's processing time over the music's, while a server processes.</summary>
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasServerLoad))]
+    private string _serverLoad = string.Empty;
+    public bool HasServerLoad => ServerLoad.Length > 0;
+
+    [ObservableProperty]
+    private bool _isServerOverloaded;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasUpscaler))]
     private string _upscaler = string.Empty;
@@ -306,6 +314,8 @@ public sealed partial class NowPlayingViewModel : ObservableObject
         Acceleration = IsActive ? status.Acceleration ?? string.Empty : string.Empty;
         NetworkDelay = IsActive && status.NetworkRoundTripMilliseconds is double roundTrip
             ? Formatting.Milliseconds(roundTrip / 1000.0) : string.Empty;
+        ServerLoad = IsActive && status.NetworkServerLoad is double serverLoad ? Formatting.Percent(serverLoad) : string.Empty;
+        IsServerOverloaded = IsActive && status.NetworkServerLoad > 0.95;
         Upscaler = IsActive ? status.Upscaler ?? string.Empty : string.Empty;
         Restorer = IsActive ? status.Restorer ?? string.Empty : string.Empty;
         Exciter = IsActive ? status.Exciter ?? string.Empty : string.Empty;

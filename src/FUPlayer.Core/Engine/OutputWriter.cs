@@ -11,6 +11,19 @@ internal sealed class OutputWriter
     private readonly Func<bool> _shouldAbort;
     private readonly Action? _beforeWait;
     private long _discardBytes;
+    private long _discarded;
+
+    /// <summary>This writer feeds the device's FIFO, which the meters' clock reads, rather than a file or a test.</summary>
+    internal bool HasRing => _sink is null;
+
+    /// <summary>Bytes ever written to the FIFO, by any writer.</summary>
+    internal long RingWritten => _ring.WriteTotal;
+
+    /// <summary>Bytes of leading filter padding discarded so far, which the device never plays and never counts.</summary>
+    internal long Discarded => Volatile.Read(ref _discarded);
+
+    /// <summary>An engine command is waiting, and whatever is waiting on something else should give way to it.</summary>
+    internal bool ShouldAbort => _shouldAbort();
 
     /// <summary>Leading filter padding still to be discarded before file playback reaches time zero.</summary>
     internal long RemainingDiscardBytes => Volatile.Read(ref _discardBytes);
@@ -52,6 +65,7 @@ internal sealed class OutputWriter
         int discarded = (int)Math.Min(data.Length, _discardBytes);
         discarded -= discarded % _frameBytes;
         _discardBytes -= discarded;
+        Volatile.Write(ref _discarded, _discarded + discarded);
         data = data[discarded..];
         int offset = 0;
         while (offset < data.Length)

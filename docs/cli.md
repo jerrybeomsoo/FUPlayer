@@ -47,6 +47,8 @@ Use `--gpu` for convolution acceleration, `--gpu-device <id>` from `gpus` for a 
 `--gpu-fast` for 32-bit arithmetic. `--threads <n>` sets extra DSP threads. `--preprocess-files`
 prepares future samples from seekable files and compensates leading filter delay.
 Neural `--restorer-device` / `--upscaler-device` refer to the adapters listed by `models`, not `gpus`.
+For DSD output, `--mode dsd --dsd 256` chooses the highest multiple and `--dsd-48k` the 48 kHz rate family for
+48 kHz sources, as the setting of the same name does.
 
 ## Network DSP
 

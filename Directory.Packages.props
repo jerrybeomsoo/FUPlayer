@@ -18,6 +18,12 @@
     <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />
     <PackageVersion Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
     <!--
+      ONNX Runtime's WebGPU provider as a plugin library (MIT, with Google's Dawn, BSD-3-Clause), which runs the networks
+      on a graphics card through Vulkan. Used on Linux only: its Windows files carry Microsoft's DirectX shader compiler,
+      dxil.dll among them, which is not open source, and Windows has DirectML.
+    -->
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime.EP.WebGpu" Version="0.4.0" />
+    <!--
       DirectML's redistributable, which the DirectML build depends on, is Microsoft's own licence, not open source.
       Every project names it only to leave all of its files out (Directory.Build.targets); Windows' own DirectML.dll,
       in System32 since Windows 10 version 1903, is the one loaded.

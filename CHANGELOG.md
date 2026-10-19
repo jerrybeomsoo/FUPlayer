@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.6.3 — 2026-10-19
+
+### Added
+
+- **The neural upscaler on a Linux server's graphics card.** The standalone Linux server runs it through ONNX
+  Runtime's WebGPU provider on Vulkan, on the first card of its own by default; its first call is checked
+  against the processor's. On a Radeon RX 6400 a call took 6.7 ms against 11.4 ms on three i5-8500 cores.
+  `--upscaler-device cpu` keeps it on the processor. [Network DSP guide](https://github.com/jerrybeomsoo/FUPlayer/blob/v0.6.3/docs/network-dsp.md#devices-on-the-server).
+- **Server load in Now playing.** The server's processing time relative to the music, beside the round trip;
+  the top bar shows the higher of the two machines' loads, and the overload warning names the server when it
+  is the one that cannot keep up.
+- **`--dsd-48k` in the CLI**, for the 48 kHz DSD rate family. [Command line](https://github.com/jerrybeomsoo/FUPlayer/blob/v0.6.3/docs/cli.md).
+
+### Changed
+
+- **A new network protocol (version 4).** The player keeps several hundred milliseconds of audio in flight, so
+  the server never waits for the network between blocks; packets are acknowledged in bulk, recovered selectively
+  and paced. Through a 26 ms, 0.1 %-loss link a chain takes as long as on the LAN. **Update the player and the
+  server together**; a mismatch is reported by both.
+- **The server runs the player's own processing code.** Every combination of remote stages, the output delta
+  included, gives the player's output: identical to the bit without the neural networks.
+- **Faster tap-by-tap convolution.** Fused multiply-adds and cache-sized coefficient tiles (on an i7-7820HQ,
+  35 to 51 thousand million multiply-adds a second on eight threads), and a Nyquist filter's centre phase is a
+  copy rather than a convolution, the same bits for an eighth less work at ×8.
+- **Meters and analyzer follow what is heard.** Levels and spectra reach Now playing when the device plays them,
+  not when they are computed, which was up to a FIFO ahead and, with a server, in bursts.
+
+### Fixed
+
+- **Stutter at 262,144 taps tap by tap over the Internet.** DSD256 of the 48 kHz family with both neural stages
+  and the exciter now plays without underruns through a 26 ms link (server load about 83 %), where 0.6.2 ran at
+  0.58× real time. 524,288 taps tap by tap is beyond that server (137 % load); Automatic convolution gives the same
+  samples to within rounding for a fraction of the work.
+- **A slow, coarse spectrogram and a jumping level meter** with a DSP server: both were fed in network bursts.
+- **"GetElementType is not implemented" in the server log** at every change of settings: a worker no longer exits
+  under a running network call.
+
+### Compatibility and validation
+
+- Player and server must both be **0.6.3**. Access keys, addresses, the single forwarded UDP port and the stage
+  checkboxes are unchanged; a stage between two selected ones now runs on the server too.
+- Measured on the real server (i5-8500, RX 6400) with real models and a clocked null output, 60 s per case, at
+  131,072, 262,144 and 524,288 taps, on the LAN and through a simulated 26 ms link with 0.1 % loss. Not an
+  outside-ISP, DAC or listening test.
+
 ## 0.6.2 — 2026-10-19
 
 ### Added

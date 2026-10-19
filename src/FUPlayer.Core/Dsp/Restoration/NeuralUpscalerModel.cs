@@ -71,7 +71,62 @@ public sealed class NeuralUpscalerModel : IDisposable
         }
 
         bool conditioned = session.InputMetadata.TryGetValue("lossy", out NodeMetadata? flag) && flag.Dimensions.Length == 1;
-        return new NeuralUpscalerModel(sessions, path, conditioned);
+        var model = new NeuralUpscalerModel(sessions, path, conditioned);
+        if (sessions.Adapter is null)
+        {
+            return model;
+        }
+
+        string? disagreement = model.CompareWithProcessor(threads);
+        if (disagreement is null)
+        {
+            return model;
+        }
+
+        sessions.Dispose();
+        return new NeuralUpscalerModel(sessions.OnProcessor(disagreement), path, conditioned);
+    }
+
+    /// <summary>
+    /// One call of the size the upscaler makes, on the adapter and on the processor, from the same made-up spectrum: an
+    /// adapter whose answer is more than a thousandth of the loudest output away from the processor's is not used.
+    /// Measured on an RX 6400 through WebGPU, the two were 7e-8 apart on a peak of 0.036.
+    /// </summary>
+    private string? CompareWithProcessor(int threads)
+    {
+        const int frames = (2 * Context) + 64;
+        var random = new Random(0x5EED);
+        float[] re = new float[Bins * frames], im = new float[Bins * frames];
+        for (int i = 0; i < re.Length; i++)
+        {
+            re[i] = (float)((random.NextDouble() - 0.5) * 0.02);
+            im[i] = (float)((random.NextDouble() - 0.5) * 0.02);
+        }
+
+        float[] adapterRe = new float[re.Length], adapterIm = new float[im.Length];
+        float[] processorRe = new float[re.Length], processorIm = new float[im.Length];
+        try
+        {
+            Run(re, im, frames, adapterRe, adapterIm);
+            using var processor = new NeuralUpscalerModel(new NetworkSessions(Path, null, threads), Path, IsConditioned);
+            processor.Run(re, im, frames, processorRe, processorIm);
+        }
+        catch (OnnxRuntimeException ex)
+        {
+            return ex.Message;
+        }
+
+        double peak = 0, worst = 0;
+        for (int i = 0; i < re.Length; i++)
+        {
+            peak = Math.Max(peak, Math.Max(Math.Abs(processorRe[i]), Math.Abs(processorIm[i])));
+            double difference = Math.Max(Math.Abs(adapterRe[i] - processorRe[i]), Math.Abs(adapterIm[i] - processorIm[i]));
+            worst = double.IsNaN(difference) ? double.PositiveInfinity : Math.Max(worst, difference);
+        }
+
+        return worst <= 1e-3 * Math.Max(peak, 1e-6)
+            ? null
+            : Localization.Loc.F("its answer is {0:0} dB of the output away from the processor's", 20 * Math.Log10(worst / Math.Max(peak, 1e-12)));
     }
 
     /// <summary>

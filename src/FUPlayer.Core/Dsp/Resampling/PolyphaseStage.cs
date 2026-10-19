@@ -16,6 +16,15 @@ public sealed class PolyphaseStage : IRateStage
 {
     private readonly double[][] _phases;
 
+    /// <summary>
+    /// For each phase with a single coefficient that is not zero, where it is (oldest tap first), and -1 for the others.
+    /// A Nyquist filter, the transient-aligned one among them, has such a phase: the one through its centre, which is
+    /// zero at every whole period and gives each input sample back unchanged. Convolving it tap by tap multiplies
+    /// thousands of zeros for every output sample, an eighth of all the work at ×8. Its one product is what the fused
+    /// sum comes to anyway, every other term being an exact zero, so taking it alone changes no bit of the output.
+    /// </summary>
+    private readonly int[] _single;
+
     public PolyphaseStage(int inputRate, int outputRate, double[] prototype, string description)
     {
         ArgumentNullException.ThrowIfNull(prototype);
@@ -44,6 +53,27 @@ public sealed class PolyphaseStage : IRateStage
             _phases[p] = coefficients;
         }
 
+        _single = new int[Up];
+        for (int p = 0; p < Up; p++)
+        {
+            int found = -1;
+            double[] coefficients = _phases[p];
+            for (int k = 0; k < coefficients.Length; k++)
+            {
+                if (coefficients[k] != 0.0)
+                {
+                    found = found < 0 ? k : -2;
+                    if (found == -2)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            _single[p] = found >= 0 ? found : -1;
+        }
+
+        SinglePhases = _single.Count(k => k >= 0);
         DelayOutputSamples = FirDesign.PeakIndex(prototype) / (double)Down;
     }
 
@@ -63,7 +93,10 @@ public sealed class PolyphaseStage : IRateStage
 
     public double DelayOutputSamples { get; }
 
-    public double CostPerOutputSample => TapsPerPhase;
+    /// <summary>Phases with one coefficient that is not zero, each a single multiplication per sample.</summary>
+    public int SinglePhases { get; }
+
+    public double CostPerOutputSample => ((double)(Up - SinglePhases) * TapsPerPhase + SinglePhases) / Up;
 
     public int Taps => PrototypeLength;
 
@@ -215,6 +248,12 @@ public sealed class PolyphaseStage : IRateStage
         private void Filter(int index)
         {
             int phase = _first + index;
+            if (_stage._single[phase] is int tap and >= 0)
+            {
+                Single(_stage._phases[phase][tap], _window.AsSpan(tap), 1, _produced.AsSpan(phase), _stage.Up, _count);
+                return;
+            }
+
             FirKernel.Convolve(
                 ref MemoryMarshal.GetArrayDataReference(_stage._phases[phase]),
                 (nuint)_stage.TapsPerPhase,
@@ -384,6 +423,13 @@ public sealed class PolyphaseStage : IRateStage
                 return;
             }
 
+            if (_stage._single[phase] is int tap and >= 0)
+            {
+                Single(_stage._phases[phase][tap], _buffer.AsSpan(window + (first * down) + tap), down,
+                    destination[(slot + (first * up))..], up, count);
+                return;
+            }
+
             FirKernel.Convolve(
                 ref MemoryMarshal.GetArrayDataReference(_stage._phases[phase]),
                 (nuint)taps,
@@ -400,6 +446,15 @@ public sealed class PolyphaseStage : IRateStage
             {
                 Array.Resize(ref _buffer, (int)Math.Min(int.MaxValue, BitOperations.RoundUpToPowerOf2((uint)required)));
             }
+        }
+    }
+
+    /// <summary>A phase of one coefficient: output j is that coefficient times signal[j·stride].</summary>
+    private static void Single(double coefficient, ReadOnlySpan<double> signal, int signalStride, Span<double> results, int resultStride, int count)
+    {
+        for (int j = 0; j < count; j++)
+        {
+            results[j * resultStride] = coefficient * signal[j * signalStride];
         }
     }
 }

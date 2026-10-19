@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using FUPlayer.Core.NetworkDsp;
 using FUPlayer.Core.Audio;
 using FUPlayer.Core.Dsp.Acceleration;
 using FUPlayer.Core.Dsp.Analysis;
@@ -14,15 +13,21 @@ using FUPlayer.Core.Dsp.Quantization;
 using FUPlayer.Core.Dsp.Resampling;
 using FUPlayer.Core.Dsp.Restoration;
 using FUPlayer.Core.Localization;
+using FUPlayer.Core.NetworkDsp;
 using FUPlayer.Core.Output;
 using FUPlayer.Core.Settings;
 
 namespace FUPlayer.Core.Engine;
 
 /// <summary>
-/// Executes a <see cref="PlaybackPlan"/>: per output channel (in parallel) DSD→PCM conversion, pre-processing,
-/// metering, resampling, volume, limiter, speaker trims, then dither or delta-sigma modulation; finally interleaves the
-/// canonical output stream.
+/// Executes a <see cref="PlaybackPlan"/>: DSD→PCM conversion and the source's meters and detectors; the processing
+/// core (restorer, channel map, upscaler, exciter, filter), here or partly on a DSP server; then per output channel
+/// volume, limiter, speaker trims, and dither or delta-sigma modulation; finally interleaves the canonical stream.
+///
+/// With a DSP server the core is cut in up to three: the stages in front of the remote ones run here as a block is
+/// read, the block goes to the server, and its result comes back a few round trips later to go through the stages
+/// after them and the output's own processing. Several blocks are in flight at once, so the server is never left
+/// waiting on the network; the output written to the FIFO lags what was read by that much.
 /// </summary>
 internal sealed class DspPipeline : IDisposable
 {
@@ -40,11 +45,14 @@ internal sealed class DspPipeline : IDisposable
 
     private readonly PlaybackPlan _plan;
     private readonly ParallelWorkers _workers;
-    private readonly ChannelChain[] _chains = [];
-    private readonly DspRemoteClient? _remote;
+    private readonly CoreLayout _layout;
+    private readonly ProcessingCore? _prefix;
+    private readonly ProcessingCore? _suffix;
+    private readonly DspRemoteSegment? _remote;
+    private readonly CoreBlock _entry;
+    private readonly CoreBlock _result;
+    private readonly Tail[] _tails = [];
     private readonly string _accelerationSummary = string.Empty;
-    internal delegate void MeterBlock(int channel, ReadOnlySpan<double> samples, bool output);
-    internal MeterBlock? MeterTap { get; set; }
     private readonly CodecBandwidthDetector? _detector;
 
     /// <summary>
@@ -52,27 +60,9 @@ internal sealed class DspPipeline : IDisposable
     /// the detector keeps a single fill counter, so letting every channel push into it corrupts that
     /// counter and eventually walks off the end of its buffer.
     /// </summary>
-    private int _detectorChannel = -1;
+    private readonly int _detectorChannel = -1;
     private readonly NeuralUpscalerModel? _upscalerModel;
-
-    /// <summary>The restorer, when it runs: over the source's channels together, before the per-channel chains.</summary>
     private readonly INeuralRestorer? _restorer;
-    private readonly bool _remoteUpscaler;
-    private readonly bool _remoteResampling;
-    private readonly bool _remoteCombined;
-    private readonly DspRemotePrefetch? _remotePrefetch;
-    private Task<DspRemotePrefetch.Result>? _pendingRemote;
-    private double[][] _restored = [];
-
-    /// <summary>For the output delta: the source delayed by the restorer's latency, which is what its output is compared with.</summary>
-    private readonly DelayLine[] _restorerDryDelays = [];
-    private double[][] _restorerDry = [];
-
-    /// <summary>
-    /// Output delta asked for, and nothing to take a delta of: no neural stage runs for this source, or the ones asked
-    /// for have no model. The delta is then silence, rather than the music played as if it were one.
-    /// </summary>
-    private readonly bool _silentDelta;
     private BandwidthEstimate _bandwidth;
 
     /// <summary>
@@ -82,7 +72,7 @@ internal sealed class DspPipeline : IDisposable
     private readonly CodecBandwidthDetector? _edgeTracker;
 
     private BandwidthEstimate _recentBandwidth;
-    private readonly byte[][] _dsdOutputs = [];
+    private readonly ResamplerChain? _modulatorChain;
     private readonly int _sourceChannels;
     private readonly int _outputChannels;
     private readonly bool _meterAdjustedSource;
@@ -95,13 +85,31 @@ internal sealed class DspPipeline : IDisposable
     private readonly DopEncoder _dop = new();
     private readonly GpuAccelerator? _accelerator;
     private readonly byte[] _silentDsd;
-    private byte[] _canonical = [];
+    private readonly int _restorerLatency;
+    private readonly int _upscalerLatency;
+    private byte[] _pending = [];
     private int[] _dopFrames = [];
     private double[][]? _silentPcm;
     private double _volume = 1.0;
     private double _replayGain = 1.0;
     private int _pendingOffset;
     private int _pendingLength;
+    private double _waitedSeconds;
+
+    /// <summary>
+    /// The replay gain and the exciter's edges of each block in flight, as they were when it was read: a map or an
+    /// exciter after the server's stages takes the ones its block was sent with, as it would have had it all run here.
+    /// </summary>
+    private readonly Queue<(double Gain, double Edge, double Top, double Wall)> _inFlightEdges = new();
+
+    // The meters' clock: seconds of source read and of output made since the start or the last seek, and where in the
+    // FIFO this pipeline's output began, so that what the device has played can be told in seconds.
+    private double _sourceSeconds;
+    private double _outputSeconds;
+    private double _sourceMeterTime;
+    private OutputWriter? _clockWriter;
+    private long _ringStart;
+    private long _discardStart;
 
     public DspPipeline(PlaybackPlan plan, PlayerSettings settings, ParallelWorkers workers, CancellationToken cancellation = default)
     {
@@ -128,39 +136,22 @@ internal sealed class DspPipeline : IDisposable
             InputBlock = Math.Clamp(frames, 256, 16384);
         }
 
-        bool remoteResampling = _remoteResampling = settings.Processing.NetworkDsp && settings.Processing.RemoteResampling && !plan.PassThrough;
-        bool remoteRestorer = settings.Processing.NetworkDsp && settings.Processing.RemoteRestorer && plan.Restore;
-        _remoteUpscaler = settings.Processing.NetworkDsp && settings.Processing.RemoteUpscaler && plan.UpscaleRate > 0;
-        if (remoteResampling || remoteRestorer || _remoteUpscaler)
-        {
-            int maximumBlock = DspNetworkBuffering.MaximumBlock(plan, InputBlock);
-            _remote = new DspRemoteClient(plan, settings, maximumBlock * 2 + 128, cancellation);
-            _remoteCombined = _remote.Metadata.CombinedStages && remoteResampling && remoteRestorer && _remoteUpscaler
-                && _sourceChannels == 2 && _outputChannels == 2 && !plan.Source.IsDsd
-                && !plan.RemoveUltrasonics && !settings.Restoration.OutputDelta;
-            double inputRate = plan.Source.IsDsd ? plan.Source.SampleRate / 8.0 : plan.Source.SampleRate;
-            int stages = (remoteResampling ? 1 : 0) + (remoteRestorer ? 1 : 0) + (_remoteUpscaler ? 1 : 0);
-            // Losing the first echo must not leave an Internet session permanently on ten-millisecond requests.
-            double roundTrip = _remote.RoundTripMilliseconds > 0 ? _remote.RoundTripMilliseconds : 25;
-            InputBlock = DspNetworkBuffering.SelectBlock(InputBlock, maximumBlock, inputRate, roundTrip, stages);
-            NetworkBlockSeconds = InputBlock / inputRate;
-        }
-
         _silentDsd = new byte[InputBlock + 2];
         Array.Fill(_silentDsd, DsdConstants.SilenceByte);
+        RestorationSettings restore = settings.Restoration;
+        ProcessingSettings processing = settings.Processing;
+        bool network = processing.NetworkDsp && !plan.PassThrough;
+        bool remoteRestorer = network && processing.RemoteRestorer && plan.Restore;
+        bool remoteUpscaler = network && processing.RemoteUpscaler && plan.UpscaleRate > 0;
+        bool remoteFilter = network && processing.RemoteResampling;
 
         try
         {
-            // The neural upscaler sits between the source rate and the chosen filter, so the filter starts
-            // from twice the source rate when it runs. If its model cannot be opened the interpolation still
-            // happens and the network is skipped, which keeps the chain the plan describes and changes the
-            // sound only by the interpolator.
-            if (_remoteUpscaler)
-                UpscalerStatus = Loc.F("Remote neural upscaler: {0}", _remote!.Metadata.Upscaler);
-            else if (plan.UpscaleRate > 0)
+            // The networks that run here are opened first: whether they could be is part of what the core is.
+            if (plan.UpscaleRate > 0 && !remoteUpscaler)
             {
-                string device = settings.Restoration.UpscalerDevice;
-                _upscalerModel = ModelLibrary.TryLoadUpscaler(settings.Restoration.NeuralUpscalerPath, device, out string? upscalerFailure);
+                string device = restore.UpscalerDevice;
+                _upscalerModel = ModelLibrary.TryLoadUpscaler(restore.NeuralUpscalerPath, device, out string? upscalerFailure);
                 UpscalerStatus = _upscalerModel is null
                     ? Loc.F("Neural upscaler not running: {0}", upscalerFailure)
                     : (plan.Restore
@@ -169,65 +160,96 @@ internal sealed class DspPipeline : IDisposable
                       + ". " + InferenceDevices.Describe(device, _upscalerModel.Adapter, _upscalerModel.AdapterFailure);
             }
 
-            // The restorer runs at the source rate on both channels at once, so it sits in front of the per-channel
-            // chains. Without its model the source goes on unrestored.
-            if (remoteRestorer)
+            if (plan.Restore && !remoteRestorer)
             {
-                _restorer = _remote!.CreateRestorer();
-                RestorerStatus = Loc.F("Remote neural restorer: {0}", _remote.Metadata.Restorer);
-                _restored = [new double[InputBlock], new double[InputBlock]];
-                if (settings.Restoration.OutputDelta)
-                {
-                    _restorerDryDelays = Enumerable.Range(0, _sourceChannels).Select(_ => new DelayLine(RestoreLatency)).ToArray();
-                    _restorerDry = Enumerable.Range(0, _sourceChannels).Select(_ => new double[InputBlock]).ToArray();
-                }
-            }
-            else if (plan.Restore)
-            {
-                string device = settings.Restoration.RestorerDevice;
-                NeuralRestorerModel? restorerModel = ModelLibrary.TryLoadRestorer(settings.Restoration.NeuralRestorerPath, device, out string? restorerFailure);
+                string device = restore.RestorerDevice;
+                NeuralRestorerModel? restorerModel = ModelLibrary.TryLoadRestorer(restore.NeuralRestorerPath, device, out string? restorerFailure);
                 if (restorerModel is null)
                 {
                     RestorerStatus = Loc.F("Neural restorer not running: {0}", restorerFailure);
                 }
                 else
                 {
-                    _restorer = new NeuralRestorer(restorerModel, plan.Source.SampleRate);
+                    var restorer = new NeuralRestorer(restorerModel, plan.Source.SampleRate);
+                    _restorer = restorer;
                     RestorerStatus = Loc.F(
                         "Neural restorer: {0} at {1}, {2:0} ms", Path.GetFileName(restorerModel.Path), AudioRates.Format(plan.Source.SampleRate),
-                        1000.0 * _restorer.Latency / plan.Source.SampleRate)
+                        1000.0 * restorer.Latency / plan.Source.SampleRate)
                         + ". " + InferenceDevices.Describe(device, restorerModel.Adapter, restorerModel.AdapterFailure);
-                    _restored = [new double[InputBlock], new double[InputBlock]];
-                    if (settings.Restoration.OutputDelta)
-                    {
-                        _restorerDryDelays = Enumerable.Range(0, _sourceChannels).Select(_ => new DelayLine(RestoreLatency)).ToArray();
-                        _restorerDry = Enumerable.Range(0, _sourceChannels).Select(_ => new double[InputBlock]).ToArray();
-                    }
                 }
             }
 
-            ResamplerChain? resampler = plan.PassThrough
+            bool restoring = remoteRestorer || _restorer is not null;
+            bool upscaling = remoteUpscaler || _upscalerModel is not null;
+            int exciteRate = plan.PassThrough ? 0 : plan.ExciteRate;
+            _layout = new CoreLayout
+            {
+                SourceChannels = _sourceChannels,
+                OutputChannels = _outputChannels,
+                SourceRate = plan.ConversionRate,
+                UpsampleRate = plan.PassThrough ? 0 : plan.PreUpsampleRate,
+                ProcessingRate = plan.ProcessingRate,
+                Restore = restoring,
+                Upscale = upscaling,
+                ExciteRate = exciteRate,
+                ExciterLatency = exciteRate > 0 ? new HarmonicExciter(exciteRate, plan.ConversionRate).Latency : 0,
+                Delta = restore.OutputDelta && (restoring || upscaling || exciteRate > 0),
+                SilentDelta = restore.OutputDelta && (restore.NeuralUpscaler || restore.NeuralRestorer || restore.Exciter)
+                    && !upscaling && !restoring && exciteRate == 0,
+                Clean = plan.RemoveUltrasonics,
+                DsdSource = plan.Source.IsDsd,
+                Filter = !plan.PassThrough,
+                Lossy = plan.SourceIsLossy,
+                UpscalerBandDb = restore.UpscalerBandDb,
+            };
+
+            // The stages handed to the server are the run from the first chosen one to the last: those in between go
+            // with them, as a block cannot cross the network more than once each way.
+            CoreStage[] chosen = new[]
+            {
+                (remoteRestorer && _layout.Restore, CoreStage.Restore),
+                (remoteUpscaler && _layout.Upscale, CoreStage.Upscale),
+                (remoteFilter && _layout.Filter, CoreStage.Filter),
+            }.Where(p => p.Item1).Select(p => p.Item2).ToArray();
+            CoreStage remoteFirst = chosen.Length > 0 ? chosen.Min() : CoreStage.Filter;
+            CoreStage remoteLast = chosen.Length > 0 ? chosen.Max() : CoreStage.Filter;
+            if (chosen.Length > 0)
+            {
+                _remote = new DspRemoteSegment(plan, settings, _layout, remoteFirst, remoteLast, InputBlock * 2, cancellation);
+                RemoteStages = Enumerable.Range((int)remoteFirst, remoteLast - remoteFirst + 1).Select(i => (CoreStage)i).Where(_layout.Has).ToArray();
+                // Over the Internet the FIFO also has to ride out jitter that a simulation does not show: at least
+                // 0.6 s in flight's worth, which the engine makes a FIFO of 1.5 s.
+                NetworkBlockSeconds = _remote.RoundTripMilliseconds > 5 ? Math.Max(InFlightLimit(), 0.6) : InFlightLimit();
+            }
+
+            bool local(CoreStage stage) => _remote is null || stage < remoteFirst || stage > remoteLast;
+            if (_remote is not null && _layout.Restore && !local(CoreStage.Restore))
+            {
+                RestorerStatus = Loc.F("Remote neural restorer: {0}", _remote.Metadata.Restorer);
+            }
+
+            if (_remote is not null && plan.UpscaleRate > 0 && !local(CoreStage.Upscale))
+            {
+                UpscalerStatus = _layout.Upscale ? Loc.F("Remote neural upscaler: {0}", _remote.Metadata.Upscaler) : UpscalerStatus;
+            }
+
+            ResamplerChain? resampler = plan.PassThrough || !local(CoreStage.Filter)
                 ? null
-                : remoteResampling ? _remote!.CreateResampler(plan) : ResamplerFactory.Create(
-                    plan.Filter!, ResamplerInputRate(plan), plan.ProcessingRate, plan.Staging, plan.FilterTaps, plan.Convolution, plan.ConvolutionOptions);
+                : ResamplerFactory.Create(plan.Filter!, ResamplerInputRate(plan), plan.ProcessingRate, plan.Staging, plan.FilterTaps, plan.Convolution, plan.ConvolutionOptions);
 
             // Channels run side by side, and a filter then divides its own work over whatever cores that leaves. Two
             // channels on an eight-core machine would otherwise use two cores and report a DSP load of several
             // hundred per cent while most of the processor stood still.
-            int threadBudget = settings.Processing.DspThreads >= 0
-                ? Math.Max(1, settings.Processing.DspThreads + 1)
-                : Environment.ProcessorCount;
+            int threadBudget = processing.DspThreads >= 0 ? Math.Max(1, processing.DspThreads + 1) : Environment.ProcessorCount;
             int stageParallelism = Math.Clamp(threadBudget / Math.Max(1, _outputChannels), 1, 16);
 
             // A graphics device is only worth waking for a long filter stage; everything else stays here.
-            bool force = settings.Processing.GpuForce;
             string acceleration;
-            if (settings.Processing.GpuAcceleration && resampler is not null
-                && resampler.Stages.Any(s => GpuAccelerator.CanAccelerate(s, force)))
+            if (processing.GpuAcceleration && resampler is not null && resampler.Stages.Any(s => GpuAccelerator.CanAccelerate(s, processing.GpuForce)))
             {
                 _accelerator = GpuAccelerator.TryCreate(
-                    settings.Processing.GpuDeviceId, settings.Processing.GpuHighPrecision, out acceleration, force,
-                    settings.Processing.GpuPhaseShare, settings.Processing.GpuRetimeWhilePlaying);
+                    processing.GpuDeviceId, processing.GpuHighPrecision, out acceleration, processing.GpuForce,
+                    processing.GpuPhaseShare, processing.GpuRetimeWhilePlaying);
 
                 // Upload, check and race the filter before any channel is handed its state, so the first block of
                 // music is not the one that pays for it.
@@ -254,13 +276,41 @@ internal sealed class DspPipeline : IDisposable
 
                 // Asked for a device and got none: say that the conversion is the reason, not the device, and say
                 // which conversion it is, since a filter layered to answer sooner is a choice that can be taken back.
-                if (settings.Processing.GpuAcceleration)
+                if (processing.GpuAcceleration && resampler is not null)
                 {
-                    acceleration += resampler?.Stages.Any(s => s is LayeredFftPolyphaseStage) == true
+                    acceleration += resampler.Stages.Any(s => s is LayeredFftPolyphaseStage)
                         ? " " + Loc.T("The filter uses layered partitioning, which no graphics device accepts. Select one block length to allow offload.")
                         : " " + Loc.T("No stage in this conversion can be offloaded.");
                 }
             }
+
+            var parts = new CoreParts
+            {
+                Restorer = _restorer,
+                UpscalerModel = _upscalerModel,
+                Resampler = resampler,
+                FilterParallelism = stageParallelism,
+                Accelerator = _accelerator,
+                Ultrasonic = plan.RemoveUltrasonics && local(CoreStage.Map) ? ProcessingFilters.CreateUltrasonicFilter(plan.ConversionRate) : null,
+            };
+            if (!plan.PassThrough)
+            {
+                CoreStage entry = _layout.Entry;
+                _prefix = _remote is null
+                    ? new ProcessingCore(_layout, entry, CoreStage.Filter, parts, workers)
+                    : remoteFirst > entry ? new ProcessingCore(_layout, entry, remoteFirst - 1, parts, workers) : null;
+                _suffix = _remote is not null && remoteLast < CoreStage.Filter ? new ProcessingCore(_layout, remoteLast + 1, CoreStage.Filter, parts, workers) : null;
+                ProcessingCore? mapper = _prefix is not null && _prefix.Builds(CoreStage.Map) ? _prefix : null;
+                if (mapper is not null && !_layout.Restore)
+                {
+                    mapper.MapTap = MeterMapped;
+                }
+            }
+
+            _restorerLatency = _layout.Restore ? (_restorer?.Latency ?? _remote!.Metadata.RestorerLatency) : 0;
+            _upscalerLatency = _layout.Upscale
+                ? (_prefix?.UpscalerLatency is > 0 ? _prefix.UpscalerLatency : _suffix?.UpscalerLatency is > 0 ? _suffix.UpscalerLatency : _remote?.Metadata.UpscalerLatency ?? 0)
+                : 0;
 
             DsdToPcmDesign? dsd = plan.Source.IsDsd
                 ? DsdToPcmDesign.Create(
@@ -269,15 +319,14 @@ internal sealed class DspPipeline : IDisposable
                     plan.PassThrough ? DsdFilterCatalog.Get(null) : plan.DsdFilter!,
                     plan.PassThrough ? 2.0 : plan.DsdConversionGain)
                 : null;
-            ResamplerChain? ultrasonic = plan.RemoveUltrasonics ? ProcessingFilters.CreateUltrasonicFilter(plan.ConversionRate) : null;
+            ResamplerChain? ultrasonic = parts.Ultrasonic;
             _modulatorDoublesRate = ShouldFoldLastInterpolation(plan);
             _modulatorInputAlignment = _modulatorDoublesRate ? _modulatorAlignment / 2 : _modulatorAlignment;
             ResamplerChain? interpolator = plan.IsDsdOutput && !plan.PassThrough ? CreateModulatorInterpolator(plan, _modulatorDoublesRate) : null;
+            _modulatorChain = interpolator;
             NoiseTransferFunction? ntf = plan.Modulator is not null && !plan.PassThrough ? ModulatorCatalog.DesignNtf(plan.Modulator, plan.Output.DsdRate) : null;
             (double[] gains, int[] delays) = ComputeSpeakerTrims(settings.Speakers, plan, _outputChannels);
-            bool detectApodization = settings.Processing.ApodizationDetection && !plan.Source.IsDsd && plan.ConversionRate <= ApodizationDetector.MaximumSampleRate;
-
-            RestorationSettings restore = settings.Restoration;
+            bool detectApodization = processing.ApodizationDetection && !plan.Source.IsDsd && plan.ConversionRate <= ApodizationDetector.MaximumSampleRate;
 
             // Where the source's spectrum ends, reported in Now playing while lossy repair is on and followed by the
             // exciter: measured on one channel of the source as it arrived, for the PCM rates the networks serve.
@@ -298,117 +347,47 @@ internal sealed class DspPipeline : IDisposable
                 _edgeTracker = new CodecBandwidthDetector(plan.ConversionRate, ExciterMemorySeconds);
             }
 
-            _silentDelta = restore.OutputDelta && (restore.NeuralUpscaler || restore.NeuralRestorer || restore.Exciter)
-                && _upscalerModel is null && !_remoteUpscaler && _restorer is null && plan.ExciteRate == 0;
-
-            _chains = new ChannelChain[_outputChannels];
+            _entry = new CoreBlock(Math.Max(_sourceChannels, _outputChannels));
+            _result = new CoreBlock(Math.Max(_sourceChannels, _outputChannels));
+            _tails = new Tail[_outputChannels];
             for (int c = 0; c < _outputChannels; c++)
             {
                 int source = SourceChannel(c);
                 bool meters = source >= 0 && source == c;
-                var chain = new ChannelChain
-                {
-                    TrimGain = gains[c],
-                };
-
-                int conversionCapacity = InputBlock + 16;
+                var tail = new Tail { TrimGain = gains[c] };
                 if (dsd is not null && (!plan.PassThrough || meters))
                 {
-                    chain.DsdConverter = dsd.CreateState();
-                    conversionCapacity = chain.DsdConverter.MaxOutput(InputBlock + 2) + 16;
+                    tail.DsdConverter = dsd.CreateState();
+                    tail.Conversion = new double[tail.DsdConverter.MaxOutput(InputBlock + 2) + 16];
                 }
-
-                chain.Conversion = new double[conversionCapacity];
 
                 if (plan.PassThrough)
                 {
-                    chain.DsdOutput = new byte[InputBlock + 2];
-                    chain.ByteDelay = delays[c] > 0 ? new ByteDelayLine(delays[c], DsdConstants.SilenceByte) : null;
-                    _chains[c] = chain;
+                    tail.DsdOutput = new byte[InputBlock + 2];
+                    tail.ByteDelay = delays[c] > 0 ? new ByteDelayLine(delays[c], DsdConstants.SilenceByte) : null;
+                    _tails[c] = tail;
                     continue;
-                }
-
-                if (ultrasonic is not null)
-                {
-                    chain.Ultrasonic = ultrasonic.CreateState();
-                    chain.Clean = new double[conversionCapacity];
                 }
 
                 if (detectApodization && meters)
                 {
-                    chain.Apodization = new ApodizationDetector(plan.ConversionRate);
+                    tail.Apodization = new ApodizationDetector(plan.ConversionRate);
                 }
 
-                int resamplerInput = conversionCapacity;
-                if (plan.PreUpsampleRate > 0)
-                {
-                    chain.PreUpsampler = new TrainingUpsampler();
-                    chain.Upscaled = new double[(2 * conversionCapacity) + 64];
-                    resamplerInput = chain.Upscaled.Length;
-                    if ((_upscalerModel is not null || _remoteUpscaler) && plan.UpscaleRate > 0)
-                    {
-                        chain.Upscaler = _remoteUpscaler ? _remote!.CreateUpscaler(c) : new NeuralUpscaler(
-                            _upscalerModel!, rate: plan.UpscaleRate, bandFromHz: plan.UpscaleRate / 4.0, bandGainDb: restore.UpscalerBandDb)
-                        {
-                            Lossy = plan.SourceIsLossy,
-                        };
-                    }
-
-                    if (plan.ExciteRate > 0)
-                    {
-                        chain.Exciter = new HarmonicExciter(plan.ExciteRate, plan.ConversionRate);
-                    }
-
-                    // Output delta: the interpolated input, delayed by exactly the latency of the stages after the
-                    // interpolator, is subtracted from their output, which leaves what they changed and nothing else. After
-                    // the restorer, the input is the unrestored source, interpolated the same way, so the delta holds what
-                    // all of them changed.
-                    if (restore.OutputDelta && (chain.Upscaler is not null || _restorer is not null || chain.Exciter is not null))
-                    {
-                        int stages = (chain.Upscaler?.Latency ?? 0) + (chain.Exciter?.Latency ?? 0);
-                        chain.UpscaledDry = new double[chain.Upscaled.Length];
-                        chain.UpscaledDryDelay = stages == 0 ? null : new DelayLine(stages);
-                        chain.DryUpsampler = _restorer is null ? null : new TrainingUpsampler();
-                    }
-                }
-                else if (plan.ExciteRate > 0)
-                {
-                    // At the source rate, in front of the chosen filter, on a copy of its own; for the delta, what went in
-                    // (the unrestored source after the restorer) held back by exactly the exciter's latency.
-                    chain.Exciter = new HarmonicExciter(plan.ExciteRate, plan.ConversionRate);
-                    chain.Excited = new double[conversionCapacity];
-                    if (restore.OutputDelta)
-                    {
-                        chain.ExcitedDry = new double[conversionCapacity];
-                        chain.ExcitedDryDelay = new DelayLine(chain.Exciter.Latency);
-                    }
-                }
-
-                chain.Resampler = resampler!.CreateState(stageParallelism, _accelerator);
-                int processingCapacity = resampler.MaxOutput(resamplerInput) + 16;
-                chain.Processing = new double[processingCapacity];
-                chain.Limiter = plan.Limiter ? new SoftLimiter(plan.ProcessingRate) : null;
-                chain.Delay = delays[c] > 0 ? new DelayLine(delays[c]) : null;
-
+                tail.Limiter = plan.Limiter ? new SoftLimiter(plan.ProcessingRate) : null;
+                tail.Delay = delays[c] > 0 ? new DelayLine(delays[c]) : null;
                 if (plan.IsDsdOutput)
                 {
-                    int ratio = plan.Output.DsdRate / plan.ProcessingRate;
-                    int chunkInput = Math.Max(1, MaxModulatorSamplesPerChunk / ratio);
-                    chain.ModulatorInterpolator = interpolator!.CreateState();
-                    chain.ModulatorBuffer = new double[interpolator.MaxOutput(Math.Min(chunkInput, processingCapacity)) + 32];
-                    chain.DsdOutput = new byte[(int)(((long)processingCapacity * ratio + 32) / 8) + 16];
-                    chain.Modulator = new DeltaSigmaModulator(ntf!);
+                    tail.ModulatorInterpolator = interpolator!.CreateState();
+                    tail.Modulator = new DeltaSigmaModulator(ntf!);
                 }
                 else
                 {
-                    chain.PcmOutput = new int[processingCapacity];
-                    chain.Quantizer = new PcmQuantizer(plan.Dither!, plan.Output.ValidBits, plan.ProcessingRate, (ulong)(c + 1) * 0x9E3779B97F4A7C15UL);
+                    tail.Quantizer = new PcmQuantizer(plan.Dither!, plan.Output.ValidBits, plan.ProcessingRate, (ulong)(c + 1) * 0x9E3779B97F4A7C15UL);
                 }
 
-                _chains[c] = chain;
+                _tails[c] = tail;
             }
-
-            _dsdOutputs = _chains.Select(chain => chain.DsdOutput).ToArray();
 
             double latency = 0.0;
             if (dsd is not null && !plan.PassThrough)
@@ -421,26 +400,24 @@ internal sealed class DspPipeline : IDisposable
                 latency += ultrasonic.DelayOutputSamples / ultrasonic.OutputRate;
             }
 
-            if (_restorer is not null)
+            latency += (double)_restorerLatency / plan.Source.SampleRate;
+            if (_layout.UpsampleRate > 0)
             {
-                latency += (double)RestoreLatency / plan.Source.SampleRate;
+                latency += (double)(TrainingUpsampler.Latency + _upscalerLatency) / _layout.UpsampleRate;
             }
 
-            if (plan.PreUpsampleRate > 0 && !plan.PassThrough)
+            if (_layout.ExciteRate > 0)
             {
-                latency += (double)TrainingUpsampler.Latency / plan.PreUpsampleRate;
-                latency += (double)(_chains[0].Upscaler?.Latency ?? 0) / plan.PreUpsampleRate;
+                latency += (double)_layout.ExciterLatency / _layout.ExciteRate;
             }
 
-            if (!plan.PassThrough && _chains[0].Exciter is { } exciter)
+            double filterDelay = resampler?.DelayOutputSamples ?? _remote?.Metadata.FilterDelayOutputSamples ?? 0;
+            int filterFlush = resampler?.FlushInputSamples ?? _remote?.Metadata.FilterFlushInputSamples ?? 0;
+            int filterInputRate = ResamplerInputRate(plan);
+            if (!plan.PassThrough)
             {
-                latency += (double)exciter.Latency / exciter.Rate;
-            }
-
-            if (resampler is not null)
-            {
-                latency += resampler.DelayOutputSamples / resampler.OutputRate;
-                latency += (double)(_chains[0].Limiter?.LatencySamples ?? 0) / plan.ProcessingRate;
+                latency += filterDelay / plan.ProcessingRate;
+                latency += (double)(_tails[0].Limiter?.LatencySamples ?? 0) / plan.ProcessingRate;
             }
 
             if (interpolator is not null)
@@ -450,17 +427,19 @@ internal sealed class DspPipeline : IDisposable
 
             // Block-based filter stages hold input until a block is complete; flushing has to push that much extra.
             double sourceInputRate = plan.Source.IsDsd ? plan.Source.SampleRate / 8.0 : plan.Source.SampleRate;
-            _flushInputSamples = resampler is null
-                ? 0
-                : (int)Math.Ceiling(resampler.FlushInputSamples * (sourceInputRate / resampler.InputRate));
+            _flushInputSamples = (int)Math.Ceiling(filterFlush * (sourceInputRate / Math.Max(1, filterInputRate)));
 
             LatencySeconds = latency;
-            FilterBlockSeconds = remoteResampling ? _remote!.Metadata.BlockSeconds : BlockSecondsOf(resampler);
-            ResamplerSummary = resampler?.Summary ?? Loc.T("DSD passed through unchanged");
-            OperationsPerSecond = (resampler?.OperationsPerInputSecond ?? 0) + (interpolator?.OperationsPerInputSecond ?? 0);
+            bool remoteResampling = _remote is not null && !local(CoreStage.Filter) && !plan.PassThrough;
+            FilterBlockSeconds = remoteResampling ? _remote!.Metadata.FilterBlockSeconds : BlockSecondsOf(resampler);
+            ResamplerSummary = plan.PassThrough
+                ? Loc.T("DSD passed through unchanged")
+                : resampler?.Summary ?? _remote?.Metadata.Resampler ?? string.Empty;
+            OperationsPerSecond = (resampler?.OperationsPerInputSecond ?? (remoteResampling ? _remote!.Metadata.FilterOperationsPerInputSecond : 0))
+                + (interpolator?.OperationsPerInputSecond ?? 0);
             _accelerationSummary = remoteResampling
-                ? Loc.F("Remote resampling: {0}", _remote!.Metadata.Acceleration) : _accelerator?.Status ?? acceleration;
-            if (_remoteCombined) _remotePrefetch = new DspRemotePrefetch(_remote!);
+                ? Loc.F("Remote resampling: {0}", _remote!.Metadata.Acceleration)
+                : _accelerator?.Status ?? acceleration;
         }
         catch
         {
@@ -470,10 +449,9 @@ internal sealed class DspPipeline : IDisposable
         }
     }
 
-    /// <summary>Releases the accelerator's device memory; the processing chains stay readable for the meters.</summary>
+    /// <summary>Releases the accelerator's device memory and the server's session; the meters stay readable.</summary>
     public void Dispose()
     {
-        _remotePrefetch?.Dispose();
         _remote?.Dispose();
         _accelerator?.Dispose();
     }
@@ -482,7 +460,9 @@ internal sealed class DspPipeline : IDisposable
     internal void CancelNetwork() => _remote?.Abort();
 
     /// <summary>Source units needed to emit the entire filter tail, including block buffering.</summary>
-    internal long FlushInputUnits => (_plan.PassThrough ? 0 : (long)Math.Ceiling(LatencySeconds * (_plan.Source.IsDsd ? _plan.Source.SampleRate / 8.0 : _plan.Source.SampleRate)) + InputBlock + _flushInputSamples);
+    internal long FlushInputUnits => _plan.PassThrough
+        ? 0
+        : (long)Math.Ceiling(LatencySeconds * (_plan.Source.IsDsd ? _plan.Source.SampleRate / 8.0 : _plan.Source.SampleRate)) + InputBlock + _flushInputSamples;
 
     /// <summary>
     /// FIFO a plan needs whatever the user asked for. A stage that convolves a block at a time holds that much
@@ -510,43 +490,54 @@ internal sealed class DspPipeline : IDisposable
     public string? UpscalerStatus { get; }
 
     /// <summary>True while the network itself is running, rather than only the interpolation in front of it.</summary>
-    public bool IsUpscaling => _remoteUpscaler || _upscalerModel is not null;
+    public bool IsUpscaling => _layout.Upscale;
 
     /// <summary>What the neural restorer is doing, or null when it does not run for this source.</summary>
     public string? RestorerStatus { get; }
 
     /// <summary>True while the restorer's network is running.</summary>
-    public bool IsRestoring => _restorer is not null;
+    public bool IsRestoring => _layout.Restore;
+
+    /// <summary>The core stages the DSP server runs, in order; empty without one.</summary>
+    internal IReadOnlyList<CoreStage> RemoteStages { get; } = [];
 
     /// <summary>What the exciter is doing just now, or null when it does not run.</summary>
     public string? ExciterStatus
     {
         get
         {
-            if (_remoteCombined && _plan.ExciteRate > 0) return Loc.T("Oversampling exciter: running on DSP server");
-            HarmonicExciter? exciter = _chains.FirstOrDefault(chain => chain.Exciter is not null)?.Exciter;
-            if (exciter is null)
+            ExciterReport report;
+            if ((_prefix?.Exciter ?? _suffix?.Exciter) is { } exciter)
+            {
+                report = new ExciterReport(exciter.EdgeHz, exciter.StartHz, exciter.AddedDb, exciter.DriveLowHz, exciter.Rate);
+            }
+            else if (_layout.ExciteRate > 0 && _remote is not null)
+            {
+                if (_remote.Exciter is not { } remote)
+                {
+                    return Loc.T("Oversampling exciter: running on DSP server");
+                }
+
+                report = remote;
+            }
+            else
             {
                 return null;
             }
 
-            if (exciter.EdgeHz <= 0.0)
+            if (report.EdgeHz <= 0.0)
             {
                 return Loc.T("Oversampling exciter: measuring where the music ends");
             }
 
             // What reaches the output: the filter after the exciter keeps nothing above the output's Nyquist frequency.
-            double upTo = Math.Min(exciter.Rate, _plan.ProcessingRate) / 2000.0;
-            double added = exciter.AddedDb;
-            return double.IsNegativeInfinity(added)
-                ? Loc.F("Oversampling exciter: nothing to add above {0:0.0} kHz just now", exciter.StartHz / 1000.0)
+            double upTo = Math.Min(report.Rate, _plan.ProcessingRate) / 2000.0;
+            return double.IsNegativeInfinity(report.AddedDb)
+                ? Loc.F("Oversampling exciter: nothing to add above {0:0.0} kHz just now", report.StartHz / 1000.0)
                 : Loc.F("Oversampling exciter: harmonics from {0:0.0} to {1:0.#} kHz, {2:0} dB under the band above {3:0} kHz",
-                    exciter.StartHz / 1000.0, upTo, -added, exciter.DriveLowHz / 1000.0);
+                    report.StartHz / 1000.0, upTo, -report.AddedDb, report.DriveLowHz / 1000.0);
         }
     }
-
-    /// <summary>The restorer's delay, in samples at the source rate.</summary>
-    private int RestoreLatency => _restorer?.Latency ?? 0;
 
     private static double BlockSecondsOf(ResamplerChain? chain) =>
         chain is null ? 0.0 : chain.FlushInputSamples / (double)Math.Max(1, chain.InputRate);
@@ -569,17 +560,28 @@ internal sealed class DspPipeline : IDisposable
 
     public string ResamplerSummary { get; }
 
-    /// <summary>Where the filtering runs: the processor, or the OpenCL device that took it over.</summary>
+    /// <summary>Where the filtering runs: the processor, the graphics device that took it over, or the DSP server.</summary>
     public string AccelerationSummary => _accelerationSummary;
+
     internal double? NetworkRoundTripMilliseconds => _remote?.RoundTripMilliseconds;
+
     internal string? NetworkServer => _remote?.Summary;
+
     internal long NetworkRetransmits => _remote?.RetransmittedDatagrams ?? 0;
+
+    /// <summary>The DSP server's processing time over the audio it processed; above one it cannot keep up.</summary>
+    internal double? NetworkServerLoad => _remote?.ServerLoad;
+
+    /// <summary>
+    /// Audio kept in flight to the DSP server, which the FIFO has to be able to cover: enough for a few round trips
+    /// and the server's own block, at least 0.3 s, and 0.6 s over the Internet.
+    /// </summary>
     internal double NetworkBlockSeconds { get; }
 
     /// <summary>Approximate filter multiply-adds per second per channel.</summary>
     public double OperationsPerSecond { get; }
 
-    /// <summary>Wall-clock DSP time of the most recent block, excluding FIFO waits.</summary>
+    /// <summary>Wall-clock DSP time of the most recent block, excluding FIFO waits and waits for the DSP server.</summary>
     public double LastProcessingSeconds { get; private set; }
 
     /// <summary>What the source's spectrum says about how it was coded, once enough has gone by.</summary>
@@ -599,74 +601,102 @@ internal sealed class DspPipeline : IDisposable
         }
     }
 
-    public long LimiterEvents => _chains.Sum(chain => chain.Limiter?.Events ?? 0);
+    public long LimiterEvents => _tails.Sum(tail => tail.Limiter?.Events ?? 0);
 
-    public long ApodizationEvents => _chains.Sum(chain => chain.Apodization?.Events ?? 0);
+    public long ApodizationEvents => _tails.Sum(tail => tail.Apodization?.Events ?? 0);
 
-    public long ClippedSamples => _chains.Sum(chain => chain.Quantizer?.ClippedSamples ?? 0);
+    public long ClippedSamples => _tails.Sum(tail => tail.Quantizer?.ClippedSamples ?? 0);
 
-    public long ModulatorResets => _chains.Sum(chain => chain.Modulator?.InstabilityResets ?? 0);
+    public long ModulatorResets => _tails.Sum(tail => tail.Modulator?.InstabilityResets ?? 0);
 
     /// <summary>Largest modulator input since the last call (1.0 = 100 % modulation).</summary>
-    public double TakePeakModulation() => _chains.Max(chain => chain.Modulator?.TakePeakModulation() ?? 0.0);
+    public double TakePeakModulation() => _tails.Max(tail => tail.Modulator?.TakePeakModulation() ?? 0.0);
 
     /// <summary>Lowest limiter gain since the last call.</summary>
-    public double TakeMinimumLimiterGain() => _chains.Min(chain => chain.Limiter?.TakeMinimumGain() ?? 1.0);
+    public double TakeMinimumLimiterGain() => _tails.Min(tail => tail.Limiter?.TakeMinimumGain() ?? 1.0);
 
     public void SetVolume(double linear) => Volatile.Write(ref _volume, linear);
 
     public void SetReplayGain(double linear) => Volatile.Write(ref _replayGain, linear);
 
-    /// <summary>True while output of the last block could not be written because a command interrupted the FIFO wait.</summary>
+    /// <summary>True while output could not be written because a command interrupted the FIFO wait.</summary>
     public bool HasPendingOutput => _pendingOffset < _pendingLength;
 
-    /// <summary>Writes the remainder of the last block; returns true once it is fully written.</summary>
+    /// <summary>
+    /// Writes what is waiting to go to the FIFO, and with a DSP server whatever results have come back meanwhile;
+    /// returns true once all of it is written.
+    /// </summary>
     public bool WritePending(OutputWriter writer)
     {
-        if (HasPendingOutput)
+        if (!WriteOut(writer))
         {
-            _pendingOffset += writer.Write(_canonical.AsSpan(_pendingOffset, _pendingLength - _pendingOffset));
+            return false;
         }
 
-        return !HasPendingOutput;
+        if (_remote is not null)
+        {
+            Collect(writer, wait: false);
+            return WriteOut(writer);
+        }
+
+        return true;
     }
 
     /// <summary>Processes one block of PCM; returns false if the output write was interrupted (see <see cref="HasPendingOutput"/>).</summary>
     public bool ProcessPcm(double[][] input, int frames, OutputWriter writer)
     {
         long start = Stopwatch.GetTimestamp();
+        _waitedSeconds = 0;
         double volume = Volatile.Read(ref _volume) * _levelOffset;
         double replayGain = Volatile.Read(ref _replayGain);
-        if (_remoteCombined) ProcessCombined(input, frames, volume, replayGain);
-        else
+        _sourceSeconds += frames / (double)_plan.Source.SampleRate;
+        _sourceMeterTime = _sourceSeconds + LatencySeconds;
+
+        // The source's meters and detectors read the source as it arrived. After the restorer that is the input itself;
+        // otherwise it is what the map makes of it, and the map hands it over as it runs.
+        if (_layout.Restore)
         {
-            double[][] processed = _restorer is null ? input : Restore(input, frames);
-            _workers.For(_outputChannels, c => ProcessPcmChannel(c, input, processed, frames, volume, replayGain));
-            FinishRemoteChannels(volume);
+            _workers.For(_outputChannels, c => MeterSource(c, input, frames, replayGain));
         }
-        _pendingLength = Interleave().Length;
-        _pendingOffset = 0;
-        LastProcessingSeconds = Stopwatch.GetElapsedTime(start).TotalSeconds;
+
+        _entry.Wrap(input, _sourceChannels, frames);
+        _entry.Gain = replayGain;
+        SetExciterEdges(_entry);
+        Process(_entry, writer, volume);
+        UpdateBandwidth();
+        LastProcessingSeconds = Math.Max(0, Stopwatch.GetElapsedTime(start).TotalSeconds - _waitedSeconds);
 
         // Measured before the write, which can block on a device that is not ready and has nothing to do with
         // how the filtering was divided.
         _accelerator?.ReportBlock(LastProcessingSeconds, frames);
-        UpdateBandwidth();
-        return WritePending(writer);
+        return WriteOut(writer);
     }
 
     /// <summary>Processes one block of DSD bytes; returns false if the output write was interrupted.</summary>
     public bool ProcessDsd(byte[][] input, int bytes, OutputWriter writer)
     {
         long start = Stopwatch.GetTimestamp();
+        _waitedSeconds = 0;
         double volume = Volatile.Read(ref _volume) * _levelOffset;
-        _workers.For(_outputChannels, c => ProcessDsdChannel(c, input, bytes, volume));
-        if (!_plan.PassThrough) FinishRemoteChannels(volume);
-        _pendingLength = Interleave().Length;
-        _pendingOffset = 0;
-        LastProcessingSeconds = Stopwatch.GetElapsedTime(start).TotalSeconds;
+        _sourceSeconds += bytes * 8.0 / _plan.Source.SampleRate;
+        _sourceMeterTime = _sourceSeconds + LatencySeconds;
+        if (_plan.PassThrough)
+        {
+            _workers.For(_outputChannels, c => PassDsd(c, input, bytes));
+            AppendOutput();
+        }
+        else
+        {
+            _workers.For(_outputChannels, c => ConvertDsd(c, input, bytes));
+            _entry.Channels = _outputChannels;
+            _entry.HasDry = false;
+            _entry.Gain = 1.0;
+            Process(_entry, writer, volume);
+        }
+
+        LastProcessingSeconds = Math.Max(0, Stopwatch.GetElapsedTime(start).TotalSeconds - _waitedSeconds);
         _accelerator?.ReportBlock(LastProcessingSeconds, bytes * 8);
-        return WritePending(writer);
+        return WriteOut(writer);
     }
 
     /// <summary>Pushes silence through the filters so the tail of the last track is heard. Restartable after interruption.</summary>
@@ -676,8 +706,6 @@ internal sealed class DspPipeline : IDisposable
         {
             return false;
         }
-
-        if (!DrainNetworkPrefetch(writer)) return false;
 
         if (_plan.PassThrough)
         {
@@ -720,29 +748,158 @@ internal sealed class DspPipeline : IDisposable
         return DrainNetworkPrefetch(writer);
     }
 
+    /// <summary>
+    /// Waits for every block still at the DSP server and writes it out, so that a track boundary or a flush does not
+    /// leave the end of the music behind. Returns false if a command interrupted the wait or the write.
+    /// </summary>
+    internal bool DrainNetworkPrefetch(OutputWriter writer)
+    {
+        if (!WriteOut(writer))
+        {
+            return false;
+        }
+
+        while (_remote is not null && _remote.InFlight > 0)
+        {
+            if (writer.ShouldAbort)
+            {
+                return false;
+            }
+
+            Collect(writer, wait: true);
+            if (!WriteOut(writer))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /// <summary>Clears all filter state (after a seek).</summary>
     public void Reset()
     {
-        if (_pendingRemote is { } pending) { _remotePrefetch!.Reuse(pending.GetAwaiter().GetResult().Output); _pendingRemote = null; }
         _remote?.Reset();
+        _inFlightEdges.Clear();
         _pendingOffset = 0;
         _pendingLength = 0;
         double volume = Volatile.Read(ref _volume) * _levelOffset;
-        foreach (ChannelChain chain in _chains)
+        _prefix?.Reset();
+        _suffix?.Reset();
+        foreach (Tail tail in _tails)
         {
-            chain.Reset(volume);
+            tail.Reset(volume);
         }
 
-        _restorer?.Reset();
-        foreach (DelayLine delay in _restorerDryDelays)
-        {
-            delay.Reset();
-        }
-
+        Meters.Discard();
         Meters.Source.Reset();
         Meters.Output?.Reset();
         Meters.Spectrum.Reset();
         Meters.OutputSpectrum?.Reset();
+        _sourceSeconds = 0;
+        _outputSeconds = 0;
+        Volatile.Write(ref _clockWriter, null);
+    }
+
+    /// <summary>
+    /// A block through the core: here, or through the stages in front of the server's, then to the server; then
+    /// whatever results have come back, and while too much is in flight, waits for the oldest.
+    /// </summary>
+    private void Process(CoreBlock block, OutputWriter writer, double volume)
+    {
+        if (_remote is null)
+        {
+            _prefix!.Run(block, _layout.Entry, CoreStage.Filter);
+            FinishBlock(block, volume);
+            return;
+        }
+
+        _prefix?.Run(block, _layout.Entry, _remote.First - 1);
+        _remote.Submit(block);
+        _inFlightEdges.Enqueue((block.Gain, block.EdgeHz, block.TopHz, block.WallHz));
+        Collect(writer, wait: true);
+    }
+
+    /// <summary>
+    /// Takes the results that have come back from the server through the stages after its own and the output's
+    /// processing. With <paramref name="wait"/>, waits while more audio is in flight than <see cref="InFlightLimit"/>,
+    /// unless a command needs the engine.
+    /// </summary>
+    private void Collect(OutputWriter writer, bool wait)
+    {
+        DspRemoteSegment remote = _remote!;
+        while (true)
+        {
+            bool must = wait && remote.InFlight > 0 && (remote.InFlightSeconds > InFlightLimit() || remote.InFlight >= 256);
+            long started = Stopwatch.GetTimestamp();
+            bool taken = remote.TryTake(_result, must ? TimeSpan.FromMilliseconds(20) : TimeSpan.Zero);
+            if (must)
+            {
+                _waitedSeconds += Stopwatch.GetElapsedTime(started).TotalSeconds;
+            }
+
+            if (!taken)
+            {
+                if (!must || writer.ShouldAbort)
+                {
+                    return;
+                }
+
+                continue;
+            }
+
+            if (_inFlightEdges.TryDequeue(out var edges))
+            {
+                (_result.Gain, _result.EdgeHz, _result.TopHz, _result.WallHz) = edges;
+            }
+
+            if (_suffix is not null)
+            {
+                _suffix.Run(_result, remote.Last + 1, CoreStage.Filter);
+            }
+
+            FinishBlock(_result, Volatile.Read(ref _volume) * _levelOffset);
+        }
+    }
+
+    /// <summary>Audio to keep in flight: six round trips and a tenth of a second, from 0.3 to 2 s.</summary>
+    private double InFlightLimit() => Math.Clamp(0.1 + (6 * (_remote?.RoundTripMilliseconds ?? 0) / 1000), 0.3, 2.0);
+
+    /// <summary>The output's own processing of a block that has been through the whole core, then interleaved for the FIFO.</summary>
+    private void FinishBlock(CoreBlock block, double volume)
+    {
+        _outputSeconds += block.Counts[0] / (double)_plan.ProcessingRate;
+        double heard = _outputSeconds;
+        _workers.For(_outputChannels, c => FinishOutput(c, _tails[c], block.Signal[c], block.Counts[c], volume, heard));
+        AppendOutput();
+    }
+
+    /// <summary>
+    /// Where the source ends over the last few seconds, and where the signal reaching the exciter does: the same, or just
+    /// under Nyquist after the restorer, which fills up to it and matches the masters there better than harmonics do,
+    /// so after it the harmonics above the edge go only under its band. Until the source has been measured the exciter
+    /// takes it to run to 0.45 of its rate, and glides to the edge once it is known.
+    /// </summary>
+    private void SetExciterEdges(CoreBlock block)
+    {
+        if (_layout.ExciteRate <= 0)
+        {
+            return;
+        }
+
+        (double edge, double wall) = HarmonicExciter.EdgesFor(_recentBandwidth, _plan.ConversionRate);
+        if (_layout.Restore)
+        {
+            block.EdgeHz = edge;
+            block.TopHz = HarmonicExciter.AfterRestorerTop * _plan.ConversionRate;
+            block.WallHz = 0.5 * _plan.ConversionRate;
+        }
+        else
+        {
+            block.EdgeHz = edge;
+            block.TopHz = edge;
+            block.WallHz = wall;
+        }
     }
 
     /// <summary>
@@ -805,115 +962,33 @@ internal sealed class DspPipeline : IDisposable
         return outputChannel < _sourceChannels ? outputChannel : -1;
     }
 
-    private void MeterSource(int channel, ReadOnlySpan<double> signal)
-    {
-        Meters.Source.Process(channel, signal);
-        Meters.Spectrum.Push(channel, signal);
-        MeterTap?.Invoke(channel, signal, output: false);
-    }
+    private void Meter(int channel, ReadOnlySpan<double> signal) => Meters.QueueSource(_sourceMeterTime, channel, signal);
 
     /// <summary>
-    /// Runs the restorer over the source's channels: both together, or a mono source as both. The source's own arrays
-    /// are left as they are, since the meters and detectors read them and a flush hands in the same silence each time.
+    /// The source's meters and detectors after the restorer, which read the source as it arrived, with replay gain,
+    /// rather than what the restorer made of it.
     /// </summary>
-    private double[][] Restore(double[][] input, int frames)
+    private void MeterSource(int c, double[][] input, int frames, double replayGain)
     {
-        if (_restored[0].Length < frames)
-        {
-            _restored = [new double[frames], new double[frames]];
-            _restorerDry = _restorerDry.Select(_ => new double[frames]).ToArray();
-        }
-
-        input[0].AsSpan(0, frames).CopyTo(_restored[0]);
-        input[_sourceChannels > 1 ? 1 : 0].AsSpan(0, frames).CopyTo(_restored[1]);
-        for (int c = 0; c < _restorerDryDelays.Length; c++)
-        {
-            input[c].AsSpan(0, frames).CopyTo(_restorerDry[c]);
-            _restorerDryDelays[c].Process(_restorerDry[c].AsSpan(0, frames));
-        }
-
-        _restorer!.Process(_restored[0].AsSpan(0, frames), _restored[1].AsSpan(0, frames));
-        return _sourceChannels > 1 ? _restored : [_restored[0]];
-    }
-
-    private void ProcessPcmChannel(int c, double[][] input, double[][] processed, int frames, double volume, double replayGain)
-    {
-        ChannelChain chain = _chains[c];
+        Tail tail = _tails[c];
         int source = SourceChannel(c);
         bool meter = source >= 0 && source == c;
-        bool restored = !ReferenceEquals(input, processed);
-        Span<double> signal = chain.Conversion.AsSpan(0, frames);
-        if (source < 0)
+        if (source < 0 || !(meter || c == _detectorChannel || tail.Apodization is not null))
         {
-            signal.Clear();
-        }
-        else
-        {
-            processed[source].AsSpan(0, frames).CopyTo(signal);
+            return;
         }
 
+        EnsureCapacity(ref tail.Original, frames);
+        Span<double> original = tail.Original.AsSpan(0, frames);
+        input[source].AsSpan(0, frames).CopyTo(original);
         if (replayGain != 1.0)
         {
-            SimdMath.Scale(signal, replayGain);
+            SimdMath.Scale(original, replayGain);
         }
 
-        // The meters, the codec detector and the apodization detector describe the source, so after the restorer
-        // they are handed the source as it arrived.
-        Span<double> original = signal;
-        if (restored && source >= 0 && (meter || c == _detectorChannel || chain.Apodization is not null))
+        if (meter)
         {
-            EnsureCapacity(ref chain.Original, frames);
-            original = chain.Original.AsSpan(0, frames);
-            input[source].AsSpan(0, frames).CopyTo(original);
-            if (replayGain != 1.0)
-            {
-                SimdMath.Scale(original, replayGain);
-            }
-        }
-
-        // The restorer's own delta, when no upscaler follows to take it at its rate: output less the delayed source.
-        ReadOnlySpan<double> dry = ReadOnlySpan<double>.Empty;
-        if (restored && _restorerDry.Length > 0 && source >= 0)
-        {
-            EnsureCapacity(ref chain.RestorerDry, frames);
-            Span<double> delayed = chain.RestorerDry.AsSpan(0, frames);
-            _restorerDry[source].AsSpan(0, frames).CopyTo(delayed);
-            if (replayGain != 1.0)
-            {
-                SimdMath.Scale(delayed, replayGain);
-            }
-
-            if (chain.PreUpsampler is null && chain.Exciter is null)
-            {
-                for (int i = 0; i < frames; i++)
-                {
-                    signal[i] -= delayed[i];
-                }
-            }
-            else
-            {
-                dry = delayed;
-            }
-        }
-
-        if (meter && !_meterAdjustedSource)
-        {
-            MeterSource(source, original);
-        }
-
-        if (chain.Ultrasonic is not null)
-        {
-            int cleaned = chain.Ultrasonic.Process(signal, chain.Clean);
-            signal = chain.Clean.AsSpan(0, cleaned);
-            if (!restored)
-            {
-                original = signal;
-            }
-        }
-
-        if (meter && _meterAdjustedSource)
-        {
-            MeterSource(source, original);
+            Meter(source, original);
         }
 
         if (c == _detectorChannel)
@@ -922,261 +997,114 @@ internal sealed class DspPipeline : IDisposable
             _edgeTracker?.Push(original);
         }
 
-        chain.Apodization?.Process(original);
-        ProcessConverted(c, chain, signal, volume, dry);
+        tail.Apodization?.Process(original);
     }
 
-    private void ProcessDsdChannel(int c, byte[][] input, int bytes, double volume)
+    /// <summary>
+    /// The source's meters and detectors without the restorer, handed the map's signal before and after the ultrasonic
+    /// filter: the meters read the one the settings ask for, the detectors the filtered one.
+    /// </summary>
+    private void MeterMapped(int c, ReadOnlySpan<double> before, ReadOnlySpan<double> after)
     {
-        ChannelChain chain = _chains[c];
+        int source = SourceChannel(c);
+        bool meter = source >= 0 && source == c;
+        if (meter)
+        {
+            Meter(source, _meterAdjustedSource ? after : before);
+        }
+
+        if (c == _detectorChannel)
+        {
+            _detector?.Push(after);
+            _edgeTracker?.Push(after);
+        }
+
+        _tails[c].Apodization?.Process(after);
+    }
+
+    private void PassDsd(int c, byte[][] input, int bytes)
+    {
+        Tail tail = _tails[c];
         int source = SourceChannel(c);
         bool meter = source >= 0 && source == c;
         ReadOnlySpan<byte> dsd = source < 0 ? _silentDsd.AsSpan(0, bytes) : input[source].AsSpan(0, bytes);
-
-        if (_plan.PassThrough)
+        Span<byte> output = tail.DsdOutput.AsSpan(0, bytes);
+        dsd.CopyTo(output);
+        tail.ByteDelay?.Process(output);
+        if (meter && tail.DsdConverter is not null)
         {
-            Span<byte> output = chain.DsdOutput.AsSpan(0, bytes);
-            dsd.CopyTo(output);
-            chain.ByteDelay?.Process(output);
-            if (meter && chain.DsdConverter is not null)
-            {
-                int converted = chain.DsdConverter.Process(dsd, chain.Conversion);
-                MeterSource(source, chain.Conversion.AsSpan(0, converted));
-            }
-
-            chain.OutputCount = bytes;
-            return;
+            int converted = tail.DsdConverter.Process(dsd, tail.Conversion);
+            Meter(source, tail.Conversion.AsSpan(0, converted));
         }
 
-        int produced = chain.DsdConverter!.Process(dsd, chain.Conversion);
-        Span<double> signal = chain.Conversion.AsSpan(0, produced);
-        if (meter)
-        {
-            MeterSource(source, signal);
-        }
-
-        ProcessConverted(c, chain, signal, volume, ReadOnlySpan<double>.Empty);
+        tail.OutputCount = bytes;
     }
 
-    /// <param name="dry">
-    /// For the output delta after the restorer: the source as it arrived, delayed by the restorer's latency, to be
-    /// interpolated alongside and subtracted at the upscaler's rate, or at the source rate after the exciter. Empty
-    /// otherwise.
-    /// </param>
-    private void ProcessConverted(int c, ChannelChain chain, ReadOnlySpan<double> signal, double volume, ReadOnlySpan<double> dry)
+    private void ConvertDsd(int c, byte[][] input, int bytes)
     {
-        if (_silentDelta)
+        Tail tail = _tails[c];
+        int source = SourceChannel(c);
+        ReadOnlySpan<byte> dsd = source < 0 ? _silentDsd.AsSpan(0, bytes) : input[source].AsSpan(0, bytes);
+        int produced = tail.DsdConverter!.Process(dsd, tail.Conversion);
+        if (source >= 0 && source == c)
         {
-            Span<double> silence = chain.Conversion.AsSpan(0, signal.Length);
-            silence.Clear();
-            signal = silence;
+            Meter(source, tail.Conversion.AsSpan(0, produced));
         }
 
-        if (chain.PreUpsampler is not null)
-        {
-            int doubled = chain.PreUpsampler.Process(signal, chain.Upscaled);
-            Span<double> up = chain.Upscaled.AsSpan(0, doubled);
-            bool delta = chain.UpscaledDry.Length > 0;
-            if (delta)
-            {
-                if (chain.DryUpsampler is not null)
-                {
-                    chain.DryUpsampler.Process(dry, chain.UpscaledDry);
-                }
-                else
-                {
-                    up.CopyTo(chain.UpscaledDry);
-                }
-
-                chain.UpscaledDryDelay?.Process(chain.UpscaledDry.AsSpan(0, doubled));
-            }
-
-            chain.RemoteCount = doubled;
-            if (_remoteUpscaler) return;
-            chain.Upscaler?.Process(up);
-            FinishUpscaled(c, chain, volume);
-            return;
-        }
-        else if (chain.Exciter is not null)
-        {
-            Span<double> excited = chain.Excited.AsSpan(0, signal.Length);
-            signal.CopyTo(excited);
-            bool delta = chain.ExcitedDry.Length > 0;
-            if (delta)
-            {
-                Span<double> excitedDry = chain.ExcitedDry.AsSpan(0, signal.Length);
-                (dry.IsEmpty ? signal : dry).CopyTo(excitedDry);
-                chain.ExcitedDryDelay!.Process(excitedDry);
-            }
-
-            SetExciterEdges(chain.Exciter);
-            chain.Exciter.Process(excited);
-            if (delta)
-            {
-                for (int i = 0; i < excited.Length; i++)
-                {
-                    excited[i] -= chain.ExcitedDry[i];
-                }
-            }
-
-            signal = excited;
-        }
-
-        ResampleChannel(c, chain, signal, volume);
+        _entry.Signal[c] = tail.Conversion;
+        _entry.Counts[c] = produced;
     }
 
-    private void FinishUpscaled(int c, ChannelChain chain, double volume)
+    private void FinishOutput(int c, Tail tail, double[] signal, int count, double volume, double heard)
     {
-        Span<double> up = chain.Upscaled.AsSpan(0, chain.RemoteCount);
-        if (chain.Exciter is not null)
-        {
-            SetExciterEdges(chain.Exciter);
-            chain.Exciter.Process(up);
-        }
-        if (chain.UpscaledDry.Length > 0)
-            for (int i = 0; i < up.Length; i++) up[i] -= chain.UpscaledDry[i];
-        ResampleChannel(c, chain, up, volume);
-    }
+        Span<double> x = signal.AsSpan(0, count);
 
-    private void ResampleChannel(int c, ChannelChain chain, ReadOnlySpan<double> signal, double volume)
-    {
-        if (_remoteResampling)
+        tail.Volume.Apply(x, volume, _rampSamples);
+        tail.Limiter?.Process(x);
+        if (tail.TrimGain != 1.0)
         {
-            EnsureCapacity(ref chain.RemoteInput, signal.Length);
-            signal.CopyTo(chain.RemoteInput); chain.RemoteCount = signal.Length;
-            return;
-        }
-        FinishOutput(c, chain, chain.Resampler!.Process(signal, chain.Processing), volume);
-    }
-
-    private void ProcessCombined(double[][] input, int frames, double volume, double replayGain)
-    {
-        Task<DspRemotePrefetch.Result>? previous = _pendingRemote;
-        _pendingRemote = _remotePrefetch!.Submit(input, frames, replayGain);
-        if (previous is null)
-        {
-            foreach (ChannelChain chain in _chains) chain.OutputCount = 0;
-            return;
-        }
-        FinishCombined(previous.GetAwaiter().GetResult(), volume);
-    }
-
-    /// <summary>Emits the final queued audio before a track boundary or flush without injecting silence.</summary>
-    internal bool DrainNetworkPrefetch(OutputWriter writer)
-    {
-        if (!WritePending(writer)) return false;
-        if (_pendingRemote is not { } pending) return true;
-        DspRemotePrefetch.Result result = pending.GetAwaiter().GetResult();
-        _pendingRemote = null;
-        FinishCombined(result, Volatile.Read(ref _volume) * _levelOffset);
-        _pendingLength = Interleave().Length; _pendingOffset = 0;
-        UpdateBandwidth();
-        return WritePending(writer);
-    }
-
-    private void FinishCombined(DspRemotePrefetch.Result result, double volume)
-    {
-        _workers.For(2, c =>
-        {
-            ChannelChain chain = _chains[c];
-            Span<double> original = chain.Conversion.AsSpan(0, result.Frames);
-            result.Input[c].AsSpan(0, result.Frames).CopyTo(original);
-            if (result.ReplayGain != 1) SimdMath.Scale(original, result.ReplayGain);
-            MeterSource(c, original);
-            if (c == _detectorChannel) { _detector?.Push(original); _edgeTracker?.Push(original); }
-            chain.Apodization?.Process(original);
-            result.Output[c].AsSpan(0, result.Produced[c]).CopyTo(chain.Processing);
-            FinishOutput(c, chain, result.Produced[c], volume);
-        });
-        _remotePrefetch!.Reuse(result.Output);
-    }
-
-    private void FinishRemoteChannels(double volume)
-    {
-        if (_remoteUpscaler)
-        {
-            double[][] samples = _chains.Select(c => c.Upscaled).ToArray();
-            int[] counts = _chains.Select(c => c.RemoteCount).ToArray();
-            int[] produced = _remote!.ProcessChannels(DspMessage.UpscaleChannels, samples, counts, samples);
-            if (!produced.SequenceEqual(counts)) throw new InvalidDataException("Upscaler changed block length.");
-            _workers.For(_outputChannels, c => FinishUpscaled(c, _chains[c], volume));
-        }
-        if (_remoteResampling)
-        {
-            int[] produced = _remote!.ProcessChannels(DspMessage.ResampleChannels,
-                _chains.Select(c => c.RemoteInput).ToArray(), _chains.Select(c => c.RemoteCount).ToArray(),
-                _chains.Select(c => c.Processing).ToArray());
-            _workers.For(_outputChannels, c => FinishOutput(c, _chains[c], produced[c], volume));
-        }
-    }
-
-    private void FinishOutput(int c, ChannelChain chain, int count, double volume)
-    {
-        Span<double> x = chain.Processing.AsSpan(0, count);
-
-        chain.Volume.Apply(x, volume, _rampSamples);
-        chain.Limiter?.Process(x);
-        if (chain.TrimGain != 1.0)
-        {
-            SimdMath.Scale(x, chain.TrimGain);
+            SimdMath.Scale(x, tail.TrimGain);
         }
 
-        chain.Delay?.Process(x);
-        Meters.Output?.Process(c, x);
-        Meters.OutputSpectrum?.Push(c, x);
-        MeterTap?.Invoke(c, x, output: true);
+        tail.Delay?.Process(x);
+        Meters.QueueOutput(heard, c, x);
 
-        if (chain.Quantizer is not null)
+        if (tail.Quantizer is not null)
         {
-            chain.Quantizer.Process(x, chain.PcmOutput);
-            chain.OutputCount = count;
+            EnsureCapacity(ref tail.PcmOutput, count);
+            tail.Quantizer.Process(x, tail.PcmOutput);
+            tail.OutputCount = count;
             return;
         }
 
         int ratio = _plan.Output.DsdRate / _plan.ProcessingRate;
         int chunkInput = Math.Max(1, MaxModulatorSamplesPerChunk / ratio);
+        EnsureCapacity(ref tail.DsdOutput, (int)(((long)count * ratio + 32) / 8) + 16);
         int bytesOut = 0;
         for (int offset = 0; offset < count; offset += chunkInput)
         {
             int take = Math.Min(chunkInput, count - offset);
-            int carry = chain.ModulatorCarry;
-            int interpolated = chain.ModulatorInterpolator!.Process(x.Slice(offset, take), chain.ModulatorBuffer.AsSpan(carry));
+            int carry = tail.ModulatorCarry;
+            EnsureCapacity(ref tail.ModulatorBuffer, carry + _modulatorChain!.MaxOutput(take) + 32);
+            int interpolated = tail.ModulatorInterpolator!.Process(x.Slice(offset, take), tail.ModulatorBuffer.AsSpan(carry));
             int total = carry + interpolated;
             int usable = total - total % _modulatorInputAlignment;
-            bytesOut += chain.Modulator!.Process(chain.ModulatorBuffer.AsSpan(0, usable), chain.DsdOutput.AsSpan(bytesOut), _modulatorDoublesRate);
+            bytesOut += tail.Modulator!.Process(tail.ModulatorBuffer.AsSpan(0, usable), tail.DsdOutput.AsSpan(bytesOut), _modulatorDoublesRate);
             int left = total - usable;
-            chain.ModulatorBuffer.AsSpan(usable, left).CopyTo(chain.ModulatorBuffer);
-            chain.ModulatorCarry = left;
+            tail.ModulatorBuffer.AsSpan(usable, left).CopyTo(tail.ModulatorBuffer);
+            tail.ModulatorCarry = left;
         }
 
-        chain.OutputCount = bytesOut;
+        tail.OutputCount = bytesOut;
     }
 
-    /// <summary>
-    /// Where the source ends over the last few seconds, and where the signal reaching the exciter does: the same, or just
-    /// under Nyquist after the restorer, which fills up to it and matches the masters there better than harmonics do,
-    /// so after it the harmonics above the edge go only under its band. Until the source has been measured the exciter
-    /// takes it to run to 0.45 of its rate, and glides to the edge once it is known.
-    /// </summary>
-    private void SetExciterEdges(HarmonicExciter exciter)
+    /// <summary>Interleaves the channels' last output onto what is waiting for the FIFO.</summary>
+    private void AppendOutput()
     {
-        (double edge, double wall) = HarmonicExciter.EdgesFor(_recentBandwidth, _plan.ConversionRate);
-        if (_restorer is not null)
+        int count = _tails[0].OutputCount;
+        foreach (Tail tail in _tails)
         {
-            exciter.SetEdges(edge, HarmonicExciter.AfterRestorerTop * _plan.ConversionRate, 0.5 * _plan.ConversionRate);
-        }
-        else
-        {
-            exciter.SetEdges(edge, edge, wall);
-        }
-    }
-
-    private ReadOnlySpan<byte> Interleave()
-    {
-        int count = _chains[0].OutputCount;
-        foreach (ChannelChain chain in _chains)
-        {
-            if (chain.OutputCount != count)
+            if (tail.OutputCount != count)
             {
                 throw new InvalidOperationException("Channel processing chains produced different amounts of output.");
             }
@@ -1184,84 +1112,132 @@ internal sealed class DspPipeline : IDisposable
 
         if (count == 0)
         {
-            return ReadOnlySpan<byte>.Empty;
+            return;
         }
 
         int channels = _outputChannels;
+        int bytes = _plan.Output.Kind switch
+        {
+            OutputSampleKind.Pcm => count * channels * 4,
+            OutputSampleKind.NativeDsd => count * channels,
+            _ => count / 2 * channels * 4,
+        };
+
+        // Written out from the front; what is left of earlier blocks moves down before this one goes behind it.
+        if (_pendingOffset > 0)
+        {
+            _pending.AsSpan(_pendingOffset, _pendingLength - _pendingOffset).CopyTo(_pending);
+            _pendingLength -= _pendingOffset;
+            _pendingOffset = 0;
+        }
+
+        if (_pending.Length < _pendingLength + bytes)
+        {
+            Array.Resize(ref _pending, (int)BitOperations.RoundUpToPowerOf2((uint)(_pendingLength + bytes)));
+        }
+
+        Span<byte> target = _pending.AsSpan(_pendingLength, bytes);
         switch (_plan.Output.Kind)
         {
             case OutputSampleKind.Pcm:
             {
-                int bytes = count * channels * 4;
-                EnsureCapacity(ref _canonical, bytes);
-                Span<int> frames = MemoryMarshal.Cast<byte, int>(_canonical.AsSpan(0, bytes));
+                Span<int> frames = MemoryMarshal.Cast<byte, int>(target);
                 for (int c = 0; c < channels; c++)
                 {
-                    int[] source = _chains[c].PcmOutput;
+                    int[] source = _tails[c].PcmOutput;
                     for (int f = 0; f < count; f++)
                     {
                         frames[f * channels + c] = source[f];
                     }
                 }
 
-                return _canonical.AsSpan(0, bytes);
+                break;
             }
 
             case OutputSampleKind.NativeDsd:
             {
-                int bytes = count * channels;
-                EnsureCapacity(ref _canonical, bytes);
                 for (int c = 0; c < channels; c++)
                 {
-                    byte[] source = _dsdOutputs[c];
+                    byte[] source = _tails[c].DsdOutput;
                     for (int f = 0; f < count; f++)
                     {
-                        _canonical[f * channels + c] = source[f];
+                        target[f * channels + c] = source[f];
                     }
                 }
 
-                return _canonical.AsSpan(0, bytes);
+                break;
             }
 
             default:
             {
                 int frameCount = count / 2;
                 EnsureCapacity(ref _dopFrames, frameCount * channels);
-                _dop.Encode(_dsdOutputs, channels, frameCount * 2, _dopFrames);
-                int bytes = frameCount * channels * 4;
-                EnsureCapacity(ref _canonical, bytes);
-                MemoryMarshal.AsBytes(_dopFrames.AsSpan(0, frameCount * channels)).CopyTo(_canonical);
-                return _canonical.AsSpan(0, bytes);
+                _dop.Encode(_tails.Select(t => t.DsdOutput).ToArray(), channels, frameCount * 2, _dopFrames);
+                MemoryMarshal.AsBytes(_dopFrames.AsSpan(0, frameCount * channels)).CopyTo(target);
+                break;
             }
         }
+
+        _pendingLength += bytes;
+        foreach (Tail tail in _tails)
+        {
+            tail.OutputCount = 0;
+        }
+    }
+
+    /// <summary>
+    /// Lets the meters show what the device has played: <paramref name="ringRead"/> is how many bytes the device has
+    /// taken from the FIFO in all. Called on the interface's timer.
+    /// </summary>
+    internal void ReleaseMeters(long ringRead)
+    {
+        if (Volatile.Read(ref _clockWriter) is not { } writer)
+        {
+            return;
+        }
+
+        OutputFormat format = _plan.Output;
+        long played = ringRead - Interlocked.Read(ref _ringStart) + (writer.Discarded - Interlocked.Read(ref _discardStart));
+        Meters.Release(Math.Max(0, played) / ((double)format.CanonicalBytesPerFrame * format.CanonicalFrameRate));
+    }
+
+    /// <summary>Writes what is waiting; true once all of it is in the FIFO.</summary>
+    private bool WriteOut(OutputWriter writer)
+    {
+        if (_clockWriter is null && writer.HasRing)
+        {
+            // This pipeline's output starts here in the FIFO; what the device has played of it is counted from this point.
+            Interlocked.Exchange(ref _ringStart, writer.RingWritten - _pendingOffset);
+            Interlocked.Exchange(ref _discardStart, writer.Discarded);
+            Volatile.Write(ref _clockWriter, writer);
+        }
+
+        if (HasPendingOutput)
+        {
+            _pendingOffset += writer.Write(_pending.AsSpan(_pendingOffset, _pendingLength - _pendingOffset));
+            if (!HasPendingOutput)
+            {
+                _pendingOffset = 0;
+                _pendingLength = 0;
+            }
+        }
+
+        return !HasPendingOutput;
     }
 
     private static void EnsureCapacity<T>(ref T[] array, int length)
     {
         if (array.Length < length)
         {
-            array = new T[(int)BitOperations.RoundUpToPowerOf2((uint)length)];
+            array = new T[(int)BitOperations.RoundUpToPowerOf2((uint)Math.Max(16, length))];
         }
     }
 
-    private sealed class ChannelChain
+    /// <summary>One output channel's own processing after the core, and the source's conversion for DSD.</summary>
+    private sealed class Tail
     {
         public DsdToPcmState? DsdConverter;
-        public ResamplerChainState? Ultrasonic;
-        public TrainingUpsampler? PreUpsampler;
-        public INeuralUpscaler? Upscaler;
-        public HarmonicExciter? Exciter;
-        public double[] Excited = [];
-        public double[] ExcitedDry = [];
-        public DelayLine? ExcitedDryDelay;
-        public double[] Upscaled = [];
-        public double[] UpscaledDry = [];
-        public DelayLine? UpscaledDryDelay;
-        public TrainingUpsampler? DryUpsampler;
-        public double[] Original = [];
-        public double[] RestorerDry = [];
         public ApodizationDetector? Apodization;
-        public IRateStageState? Resampler;
         public readonly SmoothedGain Volume = new(1.0);
         public SoftLimiter? Limiter;
         public double TrimGain = 1.0;
@@ -1271,28 +1247,17 @@ internal sealed class DspPipeline : IDisposable
         public ResamplerChainState? ModulatorInterpolator;
         public DeltaSigmaModulator? Modulator;
         public double[] Conversion = [];
-        public double[] Clean = [];
-        public double[] Processing = [];
+        public double[] Original = [];
         public double[] ModulatorBuffer = [];
         public int[] PcmOutput = [];
         public byte[] DsdOutput = [];
         public int ModulatorCarry;
-        public double[] RemoteInput = [];
-        public int RemoteCount;
         public int OutputCount;
 
         public void Reset(double volume)
         {
             DsdConverter?.Reset();
-            Ultrasonic?.Reset();
-            PreUpsampler?.Reset();
-            Upscaler?.Reset();
-            Exciter?.Reset();
-            ExcitedDryDelay?.Reset();
-            UpscaledDryDelay?.Reset();
-            DryUpsampler?.Reset();
             Apodization?.Reset();
-            Resampler?.Reset();
             Volume.Jump(volume);
             Limiter?.Reset();
             Delay?.Reset();

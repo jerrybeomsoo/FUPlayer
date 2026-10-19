@@ -9,7 +9,7 @@ namespace FUPlayer.Core.NetworkDsp;
 /// </summary>
 internal sealed class DspDatagramProtection : IDisposable
 {
-    internal const int Overhead = 57, ProtectedPayload = 1344;
+    internal const int Overhead = 57;
     private const uint Magic = 0x31455046;
     private const int Prefix = 29, Nonce = 12, Tag = 16;
     private readonly byte[] _key;
@@ -51,7 +51,7 @@ internal sealed class DspDatagramProtection : IDisposable
     private AesGcm CreateCipher(Guid session, byte direction)
     {
         // Distinct per-session and per-direction keys keep independent workers' nonce spaces separate.
-        byte[] trafficKey = HKDF.DeriveKey(HashAlgorithmName.SHA256, _key, 32, session.ToByteArray(), [.. "FUPlayer DSP UDP v1"u8, direction]);
+        byte[] trafficKey = HKDF.DeriveKey(HashAlgorithmName.SHA256, _key, 32, session.ToByteArray(), [.. "FUPlayer DSP UDP v4"u8, direction]);
         try { return new AesGcm(trafficKey, Tag); }
         finally { CryptographicOperations.ZeroMemory(trafficKey); }
     }
@@ -76,14 +76,14 @@ internal sealed class DspDatagramProtection : IDisposable
     internal static bool Inspect(ReadOnlySpan<byte> wire, out Guid session)
     {
         session = default;
-        if (wire.Length < Overhead + UdpDspPeer.Header || wire.Length > Overhead + UdpDspPeer.Header + ProtectedPayload
+        if (wire.Length < Overhead + DspLink.Header || wire.Length > Overhead + DspLink.Header + DspLink.ProtectedPayload
             || BinaryPrimitives.ReadUInt32LittleEndian(wire) != Magic || wire[4] > 1) return false;
         session = new Guid(wire.Slice(5, 16)); return true;
     }
 
     internal byte[] Protect(byte[] packet)
     {
-        if (!UdpDspPeer.Inspect(packet, out Guid session, out _, out _)) throw new InvalidDataException("Invalid DSP datagram.");
+        if (!DspLink.Inspect(packet, out Guid session, out _)) throw new InvalidDataException("Invalid DSP datagram.");
         var wire = new byte[packet.Length + Overhead];
         lock (_sendGate)
         {
@@ -117,7 +117,7 @@ internal sealed class DspDatagramProtection : IDisposable
             try { cipher.Decrypt(wire.Slice(Prefix, Nonce), wire[Overhead..], wire.Slice(Prefix + Nonce, Tag), decoded, wire[..Prefix]); }
             catch (AuthenticationTagMismatchException) { if (!cached) cipher.Dispose(); return false; }
             if (!cached) { LimitCiphers(_receiveCiphers); _receiveCiphers[session] = cipher; }
-            if (!UdpDspPeer.Inspect(decoded, out Guid inner, out _, out _) || inner != session) return false;
+            if (!DspLink.Inspect(decoded, out Guid inner, out _) || inner != session) return false;
             ulong prefix = BinaryPrimitives.ReadUInt64LittleEndian(wire.Slice(Prefix));
             if (!_windows.TryGetValue((session, prefix), out Window? window))
             {

@@ -39,8 +39,9 @@ static async Task<int> Run(string[] arguments)
               --gpu-device <id|api>       Auto, cuda, vulkan, opencl or a device identifier
               --gpu-fast                 32-bit convolution instead of 64-bit
               --gpu-force                Override GPU timing, retaining numerical verification
-              --restorer-device <name>    Neural restorer adapter on Windows (default CPU)
-              --upscaler-device <name>    Neural upscaler adapter on Windows (default CPU)
+              --restorer-device <name>    Neural restorer adapter, auto or cpu (default cpu)
+              --upscaler-device <name>    Neural upscaler adapter, auto or cpu (default auto: a graphics
+                                          card if there is one; DirectML on Windows, WebGPU/Vulkan on Linux)
               --cpu                      CPU convolution
               --models <directory>       Custom models instead of embedded models
               --cache <directory>        Model/runtime cache (default per-user cache)
@@ -67,7 +68,9 @@ static async Task<int> Run(string[] arguments)
     if (options.ContainsKey("devices"))
     {
         foreach (GpuDevice device in GpuRuntime.Devices) Console.WriteLine($"{device.Id}: {device.Name} / {device.BackendName}");
-        foreach (GraphicsAdapter adapter in InferenceDevices.Adapters) Console.WriteLine($"Neural adapter: {adapter.Name}");
+        GraphicsAdapter? preferred = InferenceDevices.Find(InferenceDevices.Automatic);
+        foreach (GraphicsAdapter adapter in InferenceDevices.Adapters)
+            Console.WriteLine($"Neural adapter: {adapter.Name}{(adapter == preferred ? " (auto: the upscaler's default)" : "")}");
         return 0;
     }
     if (options.TryGetValue("extract-licenses", out string? licenceDirectory)) { Extract("Licenses", licenceDirectory); return 0; }
@@ -153,12 +156,12 @@ static async Task<int> Run(string[] arguments)
     await using var server = new DspServer(new DspServerOptions
     {
         ListenAddress = IPAddress.Parse(options.GetValueOrDefault("listen") ?? "0.0.0.0"), Port = Number("port", 58181),
-        AllowInternet = options.ContainsKey("allow-internet"), AccessKey = accessKey, RelayWorkers = !worker,
+        AllowInternet = options.ContainsKey("allow-internet"), AccessKey = accessKey,
         MaximumClients = worker ? 1 : Number("clients", 2), Threads = Number("threads", Math.Clamp(Environment.ProcessorCount - 1, 0, 63)),
         GpuDevice = options.GetValueOrDefault("gpu-device") ?? "", GpuAcceleration = !options.ContainsKey("cpu"),
         GpuHighPrecision = !options.ContainsKey("gpu-fast"), GpuForce = options.ContainsKey("gpu-force"),
-        RestorerDevice = options.GetValueOrDefault("restorer-device") ?? "",
-        UpscalerDevice = options.GetValueOrDefault("upscaler-device") ?? "",
+        RestorerDevice = options.GetValueOrDefault("restorer-device") ?? "cpu",
+        UpscalerDevice = options.GetValueOrDefault("upscaler-device") ?? InferenceDevices.Automatic,
         ExitAfterSession = worker, StartWorker = worker ? null : StartWorker,
     });
     server.Message += Console.WriteLine;

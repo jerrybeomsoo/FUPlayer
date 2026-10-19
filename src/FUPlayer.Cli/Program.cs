@@ -123,6 +123,7 @@ internal static class Program
               --rate <Hz>                  Fixed PCM output rate
               --limit <Hz>                 Highest PCM output rate
               --dsd 64|128|256|512|1024    Highest DSD multiple
+              --dsd-48k                    DSD rates of the 48 kHz family for 48 kHz sources
               --filter <id> --dither <id> --modulator <id>
               --taps <n>                   Filter length in taps at the output rate (0 = from the filter)
               --staging single|multi       One filter to the final rate, or half-band stages after it
@@ -919,7 +920,7 @@ internal static class Program
         /// </summary>
         private static readonly HashSet<string> Switches = new(StringComparer.Ordinal)
         {
-            "dop", "pass-through", "remove-ultrasonics", "no-limiter",
+            "dop", "dsd-48k", "pass-through", "remove-ultrasonics", "no-limiter",
             "gpu", "gpu-fast", "gpu-force", "gpu-hold", "probe", "convolution-layered", "preprocess-files", "remote-resampling", "remote-restorer", "remote-upscaler",
             "neural-upscale", "neural-restore", "exciter", "no-exciter", "output-delta", "local-only", "private-msys2", "keep",
         };
@@ -1026,6 +1027,7 @@ internal static class Program
             settings.Dsd.ModulatorId = Get("modulator") ?? settings.Dsd.ModulatorId;
             settings.Dsd.PassThrough = Has("pass-through");
             settings.Output.DsdTransport = Has("dop") ? DsdTransport.Dop : DsdTransport.Native;
+            settings.Output.Use48kDsdRates = Has("dsd-48k");
             settings.Processing.RemoveUltrasonics = Has("remove-ultrasonics");
             settings.Processing.Limiter = !Has("no-limiter");
 

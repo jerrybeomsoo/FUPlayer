@@ -32,6 +32,12 @@ Headless builds on Linux use the unmodified MIT `Microsoft.ML.OnnxRuntime` 1.30.
 the Windows DirectML package. Its licence is the same `onnxruntime-LICENSE.txt`; its version-specific dependency
 notices are in `licenses/onnxruntime-cpu-1.30-ThirdPartyNotices.txt`. Include those texts when distributing that build.
 
+Linux builds also carry the unmodified `Microsoft.ML.OnnxRuntime.EP.WebGpu` 0.4.0 plugin library
+(`libonnxruntime_providers_webgpu.so`, MIT, the same `onnxruntime-LICENSE.txt`), which runs the networks on a graphics
+card through Vulkan. It builds in Google's Dawn (BSD-3-Clause) and the other code listed in
+`licenses/onnxruntime-webgpu-0.4-ThirdPartyNotices.txt`. Only its Linux files are used: the package's Windows files
+include Microsoft's DirectX shader compiler (`dxcompiler.dll`, `dxil.dll`), which FUPlayer never references or ships.
+
 The standalone `FUPlayer-DspServer` embeds its runtime, models, licences and native ONNX Runtime in one executable
 per OS/architecture. It excludes the player UI, Windows audio backends, FFmpeg and TagLibSharp runtime assets.
 `--extract-licenses <directory>` writes all embedded licence and notice texts. Native runtime libraries and

@@ -2,27 +2,27 @@
 
 Use another computer for resampling, neural restoration, neural upscaling, or any combination. Select
 stages in **Settings → Network DSP**; decoding, volume, limiting, DSD modulation and audio output stay
-on the player. With all three stages remote, the exciter can run with the neural stages on the server too.
-Use **v0.6.2** on both computers for the updated Internet processing and recovery path.
+on the player. **v0.6.3 changed the network protocol: update the player and the server together.** A
+0.6.2 player cannot use a 0.6.3 server, nor the other way round; the newer one says so.
 
 ## Download and start
 
 Download the standalone **Windows x64** or **Linux x64** server from the
-[release](https://github.com/jerrybeomsoo/FUPlayer/releases/tag/v0.6.2). It is one executable containing the
+[release](https://github.com/jerrybeomsoo/FUPlayer/releases/tag/v0.6.3). It is one executable containing the
 runtime, both models and licence texts. The processing computer needs no player, CLI or audio device.
 Normal host OS libraries and GPU drivers are still required; native libraries and models extract to a cache.
 
 For a LAN-only server, run it from PowerShell on Windows:
 
 ```powershell
-.\FUPlayer-DspServer-0.6.2-win-x64.exe --listen 0.0.0.0
+.\FUPlayer-DspServer-0.6.3-win-x64.exe --listen 0.0.0.0
 ```
 
 Or on Linux:
 
 ```bash
-chmod +x ./FUPlayer-DspServer-0.6.2-linux-x64
-./FUPlayer-DspServer-0.6.2-linux-x64 --listen 0.0.0.0
+chmod +x ./FUPlayer-DspServer-0.6.3-linux-x64
+./FUPlayer-DspServer-0.6.3-linux-x64 --listen 0.0.0.0
 ```
 
 Allow **UDP 58181** through the server firewall. Active workers bind loopback and their traffic is relayed
@@ -37,8 +37,8 @@ through this listener. They do not need separate firewall or router forwarding r
 3. Generate a random access key on the server and enable Internet mode. On Linux:
 
 ```bash
-./FUPlayer-DspServer-0.6.2-linux-x64 --generate-key-file ./dsp-access.key
-./FUPlayer-DspServer-0.6.2-linux-x64 --allow-internet --key-file ./dsp-access.key
+./FUPlayer-DspServer-0.6.3-linux-x64 --generate-key-file ./dsp-access.key
+./FUPlayer-DspServer-0.6.3-linux-x64 --allow-internet --key-file ./dsp-access.key
 ```
 
 On Windows, use the `.exe` name with the same options. Keep the key file private. The generate command
@@ -60,18 +60,24 @@ This shared-key protocol does not provide forward secrecy; protect and rotate th
 The player saves a pasted key in its settings, so treat settings files as private and remove keys before
 sharing diagnostics. IPv4 is supported; IPv6-only DNS records are not sufficient.
 
-## Install a Linux boot service
+## Install or update a Linux boot service
 
 Download **install-dsp-server.sh** beside the binary. For a LAN service:
 
 ```bash
-sudo bash install-dsp-server.sh ./FUPlayer-DspServer-0.6.2-linux-x64
+sudo bash install-dsp-server.sh ./FUPlayer-DspServer-0.6.3-linux-x64
 ```
 
 For Internet mode, first generate the key as above, then:
 
 ```bash
-sudo bash install-dsp-server.sh ./FUPlayer-DspServer-0.6.2-linux-x64 --allow-internet --key-file ./dsp-access.key
+sudo bash install-dsp-server.sh ./FUPlayer-DspServer-0.6.3-linux-x64 --allow-internet --key-file ./dsp-access.key
+```
+
+To update an installed Internet service to a new version and keep its key, give it the installed key:
+
+```bash
+sudo bash install-dsp-server.sh ./FUPlayer-DspServer-0.6.3-linux-x64 --allow-internet --key-file /etc/fuplayer-dsp/access.key
 ```
 
 The system service runs as a dedicated account. The binary is installed under `/opt/fuplayer-dsp`, cache
@@ -96,38 +102,46 @@ When moving from a user service to a system service, first stop/disable the old 
 share the listener port. Normal `systemctl status` and `sudo systemctl status` inspect the system scope,
 and cannot show a unit installed only in another user's service manager.
 
-## Processing, latency and idle use
+## What runs where
 
 Remote checkboxes choose where an enabled stage runs. Enable neural stages in DSP studio too; Automatic
-source type normally leaves the restorer idle on lossless files. A remote stage's local **Runs on** selector
-becomes grey and its previous local choice is retained.
+source type normally leaves the restorer idle on lossless files. A stage between two selected ones runs on
+the server as well: with the restorer and resampling selected, the upscaler and the exciter go there too,
+since the audio crosses the network once each way. A remote stage's local **Runs on** selector becomes grey
+and its previous local choice is retained.
 
-For stereo PCM with both neural stages active and all three remote checkboxes selected, restoration,
-upscaling, the optional exciter and resampling share one audio transfer. Output delta and ultrasonic
-removal retain separate stage transfers. Final DSD modulation still uses the player's CPU, so higher
-DSD rates can need a faster client even when the server has spare resources.
+The server runs the same processing code as the player, so the output is the player's own: identical to
+the bit without the neural networks, and within a few steps of a 32-bit sample with them. Output delta,
+ultrasonic removal and every stage combination work remotely. Final DSD modulation still uses the player's
+CPU, so higher DSD rates can need a faster client even when the server has spare resources.
 
-Prefer wired Ethernet on the server. Now playing shows network round trip time separately from DSP work,
-group delay and FIFO buffering. DSP load compares processing time with audio duration and includes
-network waits; it does not measure CPU or GPU utilisation.
+## Load, latency and bandwidth
 
-For Internet playback, start with **Fast FIFO off**, a **500 ms FIFO**, and **Automatic convolution**.
-Audio batches adapt to measured RTT, and processing overlaps the next server request with local output.
-The FIFO setting is a minimum: at roughly 26 ms RTT with all stages remote, effective capacity can be
-about **1.7 seconds**. This gives recovery headroom and adds startup/control buffering. It does not
-remove the filter's group delay. Short LAN requests remain available on low-RTT connections.
+The player keeps several hundred milliseconds of audio in flight to the server, so the server never waits
+for the network between blocks and a slow Internet connection costs latency, not throughput. In Now playing,
+**DSP load** is this computer's work, **Server load** is the server's processing time relative to the music,
+and **Network round trip** is the UDP echo time. The DSP figure in the top bar is the higher of the two loads.
+Above 100 % server load the server cannot keep up, whatever the network does, and the player says so.
 
-The network carries float64 audio. A stereo 768 kHz intermediate stream, used by the 48 kHz DSD rate
-family, needs about **98 Mbps of sample payload** before headers and recovery traffic. Check the server's
-upload as well as the client's download speed, and leave headroom for jitter. Higher rates/channels can
-exceed a residential Internet connection even with a fast server.
+Tap-by-tap convolution costs one multiply-add per tap for every output sample. For DSD256 of the 48 kHz
+family the filter runs at 768 kHz, so 262,144 taps is 50 thousand million multiply-adds a second for two
+channels. Measured on an i5-8500 with a Radeon RX 6400, that plays at about 92 % server load; 524,288 taps
+needs about 155 % and cannot play. **Automatic convolution** gives the same samples to within rounding at a
+small fraction of the arithmetic, and is the choice for long filters.
 
-The server uses channel workers, bounded neural threading, Automatic FFT convolution for long filters,
-and measured CPU/GPU sharing. On WAN sessions, Automatic FFT block sizes can use the existing network
-buffering budget, up to 50 ms, instead of doing unnecessary short-block work. The player receives the
-actual processing metadata. Explicit tap-by-tap remains expensive. CUDA is preferred for NVIDIA
-convolution and Vulkan for other GPUs. Linux neural inference uses the CPU; Windows neural adapter
-options use DirectML independently of the convolution device.
+For Internet playback, start with **Fast FIFO off** and a **500 ms FIFO**; the player raises the FIFO to cover
+what it keeps in flight. The network carries 64-bit audio. A stereo 768 kHz intermediate stream, used by the
+48 kHz DSD rate family, needs about **98 Mbps of sample payload** before headers and recovery traffic. Check
+the server's upload as well as the client's download speed, and leave headroom for jitter.
+
+## Devices on the server
+
+CUDA is preferred for NVIDIA convolution and Vulkan for other GPUs, with measured CPU/GPU sharing. The neural
+upscaler runs on a graphics card by default: DirectML on Windows, and on Linux ONNX Runtime's WebGPU provider
+through Vulkan (for example an AMD card with the Mesa RADV driver). Its first call is checked against the
+processor's; a card that disagrees is not used. `--upscaler-device cpu` keeps it on the processor. The
+restorer stays on the processor by default, where its small calls run faster; `--restorer-device auto` moves
+it to the card. `--devices` lists the convolution devices and the neural adapters.
 
 Stop, Pause or disconnection releases active workers and their GPU/model allocations. The small listener
 remains ready for another client. Resuming initialises processing and fills the buffer again.

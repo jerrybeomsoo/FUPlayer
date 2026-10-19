@@ -92,7 +92,7 @@
         <StackPanel>
           <TextBlock Classes="h3" Text="Network DSP" Margin="0,0,0,4" />
           <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,8"
-                     Text="Select remote stages. LAN servers can use plain UDP; Internet servers require an access key and use encrypted UDP. Stop or Pause releases the worker." />
+                     Text="Select remote stages; a stage between two selected ones runs there too. LAN servers can use plain UDP; Internet servers require an access key and use encrypted UDP. Stop or Pause releases the worker." />
           <controls:SettingRow Title="Process on a server" Description="Only selected stages that are enabled in DSP studio run remotely. Volume, limiting and audio output stay here.">
             <ToggleSwitch IsChecked="{Binding NetworkDsp}" OnContent="" OffContent="" />
           </controls:SettingRow>
