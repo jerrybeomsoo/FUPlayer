@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.6.2 — 2026-10-19
+
+### Added
+
+- **Combined remote processing.** Eligible stereo sessions can run restoration, neural upscaling,
+  the optional exciter and resampling in one server transfer. Now playing identifies remote exciter
+  execution. [Network DSP guide](https://github.com/jerrybeomsoo/FUPlayer/blob/v0.6.2/docs/network-dsp.md).
+
+### Changed
+
+- **Internet buffering adapts to RTT.** Larger bounded audio batches and a prefetch worker overlap
+  remote processing with local output. The selected FIFO is a floor; a 500 ms setting can become about
+  1.7 seconds effectively on a roughly 26 ms path. Low-RTT LAN requests remain short.
+- **Automatic server FFT processing.** WAN sessions can use their existing buffering budget for FFT
+  blocks, avoiding unnecessary short partitions. Large response copies are removed. Explicit
+  convolution choices remain, and final DSD modulation stays on the client.
+- **DSP load explanation.** The meter includes Network DSP waiting time and is distinct from CPU/GPU
+  utilisation. Now playing's tooltip explains this.
+
+### Fixed
+
+- **Internet stuttering with both neural stages and exciter.** Tiny sequential round trips no longer
+  dominate eligible sessions. Selective repair defers whole-request retries, duplicate requests do not
+  replay entire audio bursts, and large responses use bounded progress windows with loss recovery.
+- **Buffered track transitions and cancellation.** Pending remote audio is drained before track
+  boundaries and flushing; Stop/Pause releases prefetch work and senders waiting for progress.
+
+### Compatibility and validation
+
+- Update both player and server to **v0.6.2** for all improvements. Existing access keys, stage
+  checkboxes, DNS addresses and the single external UDP port continue to work. Audio remains float64;
+  Internet transport keeps authenticated encryption without TLS.
+- Controlled testing used 24-bit/48 kHz stereo, TAF 131,072 taps, both real neural models, exciter,
+  26 ms added RTT, 300 Mbps per direction and 0.1% packet loss. The 48 kHz DSD family had zero underruns
+  at DSD64 for two minutes and DSD128/256/512/1024 for one minute each. All five standard rates passed
+  shorter checks too. The installed Linux system service passed another two-minute DSD64 run and released
+  its workers afterwards. These are clocked null-output tests, not an outside-ISP or physical-DAC guarantee.
+- **587 Windows tests and 87 focused Linux tests pass.** The late Stop after this track boundary issue
+  remains; native FreeBSD/ARM64 deployment is still unverified.
+
 ## 0.6.1 — 2026-10-19
 
 ### Added

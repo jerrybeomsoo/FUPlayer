@@ -187,7 +187,7 @@
         <ScrollViewer>
           <StackPanel Spacing="9" Margin="0,0,14,0">
             <TextBlock Classes="h3" Text="Engine" />
-            <Grid ColumnDefinitions="*,Auto">
+            <Grid ColumnDefinitions="*,Auto" ToolTip.Tip="Processing time relative to audio duration, including waits for Network DSP. This is not CPU or GPU utilisation.">
               <TextBlock Text="DSP load" Classes="muted" />
               <TextBlock Grid.Column="1" Text="{Binding DspLoad}" Classes="numeric" />
             </Grid>

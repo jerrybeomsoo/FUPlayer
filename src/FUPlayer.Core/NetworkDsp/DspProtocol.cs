@@ -3,9 +3,9 @@ using System.Text.Json;
 using FUPlayer.Core.Engine;
 using FUPlayer.Core.Settings;
 namespace FUPlayer.Core.NetworkDsp;
-internal enum DspMessage : byte { Hello = 1, Resample, Restore, Upscale, Reset, Close, Redirect, UpscaleChannels, ResampleChannels, Error = 255 }
+internal enum DspMessage : byte { Hello = 1, Resample, Restore, Upscale, Reset, Close, Redirect, UpscaleChannels, ResampleChannels, CombinedChannels, Error = 255 }
 internal sealed record DspHello(int Version, PlaybackPlan Plan, RestorationSettings Restoration, bool Resampling, bool Restorer, bool Upscaler, int MaximumInput);
-internal sealed record DspMetadata(double ResamplerDelay, int FlushInput, int MaximumOutput, double Operations, string Resampler, string Acceleration, double BlockSeconds, string? Restorer, int RestoreLatency, string? Upscaler, int UpscaleLatency);
+internal sealed record DspMetadata(double ResamplerDelay, int FlushInput, int MaximumOutput, double Operations, string Resampler, string Acceleration, double BlockSeconds, string? Restorer, int RestoreLatency, string? Upscaler, int UpscaleLatency, bool CombinedStages = false);
 /// <summary>LAN metadata and binary float64 audio, without encryption or audio compression.</summary>
 internal static class DspProtocol
 {

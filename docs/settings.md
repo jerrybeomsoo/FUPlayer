@@ -8,6 +8,8 @@ and to accept the selected format. ASIO and native DSD support depend on the man
 Use PCM initially, then try higher rates or DSD after ordinary playback works.
 
 Larger device buffers and an adequate playback FIFO give processing more time to meet each deadline.
+For Network DSP, the FIFO value is a minimum: WAN batches may require a larger effective buffer.
+See [network latency and buffering](network-dsp.md#processing-latency-and-idle-use).
 Smaller buffers respond faster but can increase dropouts. A very long filter can add seconds of delay even
 when its DSP load is low. See [DSP studio](dsp.md) for the different delay sources.
 

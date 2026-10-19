@@ -59,6 +59,9 @@ internal sealed class DspPipeline : IDisposable
     private readonly INeuralRestorer? _restorer;
     private readonly bool _remoteUpscaler;
     private readonly bool _remoteResampling;
+    private readonly bool _remoteCombined;
+    private readonly DspRemotePrefetch? _remotePrefetch;
+    private Task<DspRemotePrefetch.Result>? _pendingRemote;
     private double[][] _restored = [];
 
     /// <summary>For the output delta: the source delayed by the restorer's latency, which is what its output is compared with.</summary>
@@ -125,14 +128,26 @@ internal sealed class DspPipeline : IDisposable
             InputBlock = Math.Clamp(frames, 256, 16384);
         }
 
-        _silentDsd = new byte[InputBlock + 2];
-        Array.Fill(_silentDsd, DsdConstants.SilenceByte);
-
         bool remoteResampling = _remoteResampling = settings.Processing.NetworkDsp && settings.Processing.RemoteResampling && !plan.PassThrough;
         bool remoteRestorer = settings.Processing.NetworkDsp && settings.Processing.RemoteRestorer && plan.Restore;
         _remoteUpscaler = settings.Processing.NetworkDsp && settings.Processing.RemoteUpscaler && plan.UpscaleRate > 0;
         if (remoteResampling || remoteRestorer || _remoteUpscaler)
-            _remote = new DspRemoteClient(plan, settings, InputBlock * 2 + 128, cancellation);
+        {
+            int maximumBlock = DspNetworkBuffering.MaximumBlock(plan, InputBlock);
+            _remote = new DspRemoteClient(plan, settings, maximumBlock * 2 + 128, cancellation);
+            _remoteCombined = _remote.Metadata.CombinedStages && remoteResampling && remoteRestorer && _remoteUpscaler
+                && _sourceChannels == 2 && _outputChannels == 2 && !plan.Source.IsDsd
+                && !plan.RemoveUltrasonics && !settings.Restoration.OutputDelta;
+            double inputRate = plan.Source.IsDsd ? plan.Source.SampleRate / 8.0 : plan.Source.SampleRate;
+            int stages = (remoteResampling ? 1 : 0) + (remoteRestorer ? 1 : 0) + (_remoteUpscaler ? 1 : 0);
+            // Losing the first echo must not leave an Internet session permanently on ten-millisecond requests.
+            double roundTrip = _remote.RoundTripMilliseconds > 0 ? _remote.RoundTripMilliseconds : 25;
+            InputBlock = DspNetworkBuffering.SelectBlock(InputBlock, maximumBlock, inputRate, roundTrip, stages);
+            NetworkBlockSeconds = InputBlock / inputRate;
+        }
+
+        _silentDsd = new byte[InputBlock + 2];
+        Array.Fill(_silentDsd, DsdConstants.SilenceByte);
 
         try
         {
@@ -445,6 +460,7 @@ internal sealed class DspPipeline : IDisposable
             OperationsPerSecond = (resampler?.OperationsPerInputSecond ?? 0) + (interpolator?.OperationsPerInputSecond ?? 0);
             _accelerationSummary = remoteResampling
                 ? Loc.F("Remote resampling: {0}", _remote!.Metadata.Acceleration) : _accelerator?.Status ?? acceleration;
+            if (_remoteCombined) _remotePrefetch = new DspRemotePrefetch(_remote!);
         }
         catch
         {
@@ -457,6 +473,7 @@ internal sealed class DspPipeline : IDisposable
     /// <summary>Releases the accelerator's device memory; the processing chains stay readable for the meters.</summary>
     public void Dispose()
     {
+        _remotePrefetch?.Dispose();
         _remote?.Dispose();
         _accelerator?.Dispose();
     }
@@ -506,6 +523,7 @@ internal sealed class DspPipeline : IDisposable
     {
         get
         {
+            if (_remoteCombined && _plan.ExciteRate > 0) return Loc.T("Oversampling exciter: running on DSP server");
             HarmonicExciter? exciter = _chains.FirstOrDefault(chain => chain.Exciter is not null)?.Exciter;
             if (exciter is null)
             {
@@ -556,6 +574,7 @@ internal sealed class DspPipeline : IDisposable
     internal double? NetworkRoundTripMilliseconds => _remote?.RoundTripMilliseconds;
     internal string? NetworkServer => _remote?.Summary;
     internal long NetworkRetransmits => _remote?.RetransmittedDatagrams ?? 0;
+    internal double NetworkBlockSeconds { get; }
 
     /// <summary>Approximate filter multiply-adds per second per channel.</summary>
     public double OperationsPerSecond { get; }
@@ -618,9 +637,13 @@ internal sealed class DspPipeline : IDisposable
         long start = Stopwatch.GetTimestamp();
         double volume = Volatile.Read(ref _volume) * _levelOffset;
         double replayGain = Volatile.Read(ref _replayGain);
-        double[][] processed = _restorer is null ? input : Restore(input, frames);
-        _workers.For(_outputChannels, c => ProcessPcmChannel(c, input, processed, frames, volume, replayGain));
-        FinishRemoteChannels(volume);
+        if (_remoteCombined) ProcessCombined(input, frames, volume, replayGain);
+        else
+        {
+            double[][] processed = _restorer is null ? input : Restore(input, frames);
+            _workers.For(_outputChannels, c => ProcessPcmChannel(c, input, processed, frames, volume, replayGain));
+            FinishRemoteChannels(volume);
+        }
         _pendingLength = Interleave().Length;
         _pendingOffset = 0;
         LastProcessingSeconds = Stopwatch.GetElapsedTime(start).TotalSeconds;
@@ -653,6 +676,8 @@ internal sealed class DspPipeline : IDisposable
         {
             return false;
         }
+
+        if (!DrainNetworkPrefetch(writer)) return false;
 
         if (_plan.PassThrough)
         {
@@ -692,12 +717,13 @@ internal sealed class DspPipeline : IDisposable
             remaining -= InputBlock;
         }
 
-        return true;
+        return DrainNetworkPrefetch(writer);
     }
 
     /// <summary>Clears all filter state (after a seek).</summary>
     public void Reset()
     {
+        if (_pendingRemote is { } pending) { _remotePrefetch!.Reuse(pending.GetAwaiter().GetResult().Output); _pendingRemote = null; }
         _remote?.Reset();
         _pendingOffset = 0;
         _pendingLength = 0;
@@ -1021,6 +1047,48 @@ internal sealed class DspPipeline : IDisposable
             return;
         }
         FinishOutput(c, chain, chain.Resampler!.Process(signal, chain.Processing), volume);
+    }
+
+    private void ProcessCombined(double[][] input, int frames, double volume, double replayGain)
+    {
+        Task<DspRemotePrefetch.Result>? previous = _pendingRemote;
+        _pendingRemote = _remotePrefetch!.Submit(input, frames, replayGain);
+        if (previous is null)
+        {
+            foreach (ChannelChain chain in _chains) chain.OutputCount = 0;
+            return;
+        }
+        FinishCombined(previous.GetAwaiter().GetResult(), volume);
+    }
+
+    /// <summary>Emits the final queued audio before a track boundary or flush without injecting silence.</summary>
+    internal bool DrainNetworkPrefetch(OutputWriter writer)
+    {
+        if (!WritePending(writer)) return false;
+        if (_pendingRemote is not { } pending) return true;
+        DspRemotePrefetch.Result result = pending.GetAwaiter().GetResult();
+        _pendingRemote = null;
+        FinishCombined(result, Volatile.Read(ref _volume) * _levelOffset);
+        _pendingLength = Interleave().Length; _pendingOffset = 0;
+        UpdateBandwidth();
+        return WritePending(writer);
+    }
+
+    private void FinishCombined(DspRemotePrefetch.Result result, double volume)
+    {
+        _workers.For(2, c =>
+        {
+            ChannelChain chain = _chains[c];
+            Span<double> original = chain.Conversion.AsSpan(0, result.Frames);
+            result.Input[c].AsSpan(0, result.Frames).CopyTo(original);
+            if (result.ReplayGain != 1) SimdMath.Scale(original, result.ReplayGain);
+            MeterSource(c, original);
+            if (c == _detectorChannel) { _detector?.Push(original); _edgeTracker?.Push(original); }
+            chain.Apodization?.Process(original);
+            result.Output[c].AsSpan(0, result.Produced[c]).CopyTo(chain.Processing);
+            FinishOutput(c, chain, result.Produced[c], volume);
+        });
+        _remotePrefetch!.Reuse(result.Output);
     }
 
     private void FinishRemoteChannels(double volume)

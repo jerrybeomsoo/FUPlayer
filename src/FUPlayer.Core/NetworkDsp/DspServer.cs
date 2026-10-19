@@ -182,7 +182,11 @@ public sealed class DspServer : IAsyncDisposable
                 _ = session.Peer.Receive(_options.IdleTimeout, cancellation);
                 return;
             }
-            using var stages = new DspStageProcessor(DspProtocol.Parse<DspHello>(hello.Bytes), _options);
+            DspHello configuration = DspProtocol.Parse<DspHello>(hello.Bytes);
+            if (configuration.MaximumInput >= 8192) session.Peer.WaitForFirstProbe(cancellation);
+            configuration = configuration with { Plan = DspNetworkBuffering.ServerPlan(configuration.Plan,
+                configuration.MaximumInput, session.Peer.RoundTripMilliseconds) };
+            using var stages = new DspStageProcessor(configuration, _options);
             session.Peer.Send(DspMessage.Hello, 1, DspProtocol.Json(stages.Metadata));
             Message?.Invoke($"DSP session opened from {key.Endpoint}.");
             while (!cancellation.IsCancellationRequested)

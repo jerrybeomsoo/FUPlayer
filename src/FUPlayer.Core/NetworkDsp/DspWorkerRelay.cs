@@ -11,7 +11,7 @@ namespace FUPlayer.Core.NetworkDsp;
 /// </summary>
 internal sealed class DspWorkerRelay(Func<CancellationToken, Task<int>> startWorker, Action<byte[]> send, TimeSpan idle) : IDisposable
 {
-    private readonly Channel<(byte[] Bytes, bool Close)> _packets = Channel.CreateBounded<(byte[], bool)>(new BoundedChannelOptions(256)
+    private readonly Channel<(byte[] Bytes, bool Close)> _packets = Channel.CreateBounded<(byte[], bool)>(new BoundedChannelOptions(2048)
         { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.DropOldest });
     private readonly CancellationTokenSource _stop = new();
     private readonly TaskCompletionSource _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);

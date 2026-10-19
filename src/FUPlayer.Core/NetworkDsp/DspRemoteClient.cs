@@ -64,6 +64,7 @@ internal sealed class DspRemoteClient : IDisposable
                     || !double.IsFinite(Metadata.ResamplerDelay) || Metadata.ResamplerDelay < 0)
                     throw new InvalidDataException("Invalid DSP stage capacity.");
                 _peer.Probe();
+                _peer.WaitForFirstProbe(cancellation);
                 _heartbeat = new Timer(_ =>
                 {
                     try { _peer.Probe(); } catch (Exception ex) when (ex is SocketException or ObjectDisposedException) { }
@@ -136,12 +137,13 @@ internal sealed class DspRemoteClient : IDisposable
         }
     }
     internal INeuralRestorer CreateRestorer() => new Restorer(this);
-    internal int[] ProcessChannels(DspMessage type, double[][] input, int[] counts, double[][] output)
+    internal int[] ProcessChannels(DspMessage type, double[][] input, int[] counts, double[][] output, double replayGain = 1)
     {
         lock (_gate)
         {
             using var packet = new MemoryStream(); using var writer = new BinaryWriter(packet);
             writer.Write(input.Length);
+            if (type == DspMessage.CombinedChannels) writer.Write(replayGain);
             for (int c = 0; c < input.Length; c++)
             { writer.Write(counts[c]); DspProtocol.WriteSamples(writer, input[c].AsSpan(0, counts[c])); }
             byte[] response = Exchange(type, packet.ToArray());

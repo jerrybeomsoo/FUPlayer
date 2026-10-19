@@ -590,6 +590,7 @@ public sealed class PlaybackEngine : IDisposable
                 return;
             }
 
+            if (!pipeline.DrainNetworkPrefetch(writer)) return;
             BeginNextTrack();
             return;
         }
@@ -1409,7 +1410,7 @@ public sealed class PlaybackEngine : IDisposable
                 _settings.Processing.FifoMilliseconds / (_settings.Output.LowLatencyFifo ? 2 : 1),
                 2 * _settings.Output.BufferMilliseconds),
             (int)Math.Ceiling(Math.Max(_settings.Processing.NetworkDsp ? 0.032 : 0,
-                2.5 * pipeline.FilterBlockSeconds) * 1000.0));
+                2.5 * Math.Max(pipeline.FilterBlockSeconds, pipeline.NetworkBlockSeconds)) * 1000.0));
 
         if (_stream is not null && _stream.Format == format && _streamFailure is null && _fifoMilliseconds >= fifoMilliseconds)
         {

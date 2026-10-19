@@ -12,6 +12,7 @@ internal sealed class UdpDspPeer : IDisposable
     internal const int Header = 44, Payload = 1400;
     private const uint Magic = 0x33505546;
     private const byte Data = 0, Nack = 1, Ping = 2, Close = 3, Ack = 4;
+    private const int FlightWindow = 1024, ProgressInterval = 128;
     private readonly Action<byte[]> _send;
     private readonly Channel<byte[]> _incoming = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(16384)
         { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = true });
@@ -23,7 +24,10 @@ internal sealed class UdpDspPeer : IDisposable
     private Sent? _sent;
     private long _lastResend, _receivedSequence, _pingSent, _retransmits, _lastPacket = Stopwatch.GetTimestamp();
     private long _acknowledgedSequence;
+    private long _selectiveRecoveryAt;
+    private bool _windowSupported;
     private double _roundTrip;
+    private readonly TaskCompletionSource _firstProbe = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _disposed;
     internal Guid Session { get; }
     internal double RoundTripMilliseconds => Volatile.Read(ref _roundTrip);
@@ -33,6 +37,7 @@ internal sealed class UdpDspPeer : IDisposable
     {
         internal int SendingAll;
         internal long CompletedAt = Stopwatch.GetTimestamp();
+        internal int HighestReceived = -1;
     }
 
     internal UdpDspPeer(Guid session, Action<byte[]> send, bool server, bool protectedTransport = false)
@@ -59,15 +64,60 @@ internal sealed class UdpDspPeer : IDisposable
     {
         if (!Inspect(packet, out Guid id, out byte kind, out _) || id != Session || _stop.IsCancellationRequested) return;
         Interlocked.Exchange(ref _lastPacket, Stopwatch.GetTimestamp());
+        if (packet[42] == 1) Volatile.Write(ref _windowSupported, true);
         if (kind == Ping)
         {
+            // The client measures propagation; return that measurement so the worker need not infer
+            // it from a potentially retransmitted hello. Older servers echo this feedback once.
+            if (packet[43] == 2)
+            {
+                int microseconds = BinaryPrimitives.ReadInt32LittleEndian(packet.AsSpan(32));
+                if (_server && packet[42] == 1 && microseconds is > 0 and <= 1_000_000)
+                { Volatile.Write(ref _roundTrip, microseconds / 1000.0); _firstProbe.TrySetResult(); }
+                return;
+            }
             if (_server) _send(packet);
             else if (BinaryPrimitives.ReadInt64LittleEndian(packet.AsSpan(20)) == Volatile.Read(ref _pingSent))
+            {
                 Volatile.Write(ref _roundTrip, Stopwatch.GetElapsedTime(_pingSent).TotalMilliseconds);
+                byte[] feedback = Packet(Ping, 0, _pingSent, 0, (int)Math.Clamp(RoundTripMilliseconds * 1000, 1, 1_000_000), []);
+                feedback[43] = 2; _send(feedback);
+                _firstProbe.TrySetResult();
+            }
             return;
         }
-        if (kind == Close) { _incoming.Writer.TryComplete(); return; }
-        if (kind == Ack) { Interlocked.Exchange(ref _acknowledgedSequence, BinaryPrimitives.ReadInt64LittleEndian(packet.AsSpan(20))); return; }
+        if (kind == Close) { _stop.Cancel(); WakeSender(); _incoming.Writer.TryComplete(); return; }
+        if (kind == Ack)
+        {
+            long acknowledgedSequence = BinaryPrimitives.ReadInt64LittleEndian(packet.AsSpan(20));
+            Sent? progress = Volatile.Read(ref _sent);
+            if (progress is not null && progress.Sequence == acknowledgedSequence)
+            {
+                int count = Math.Max(1, (progress.Bytes.Length + _payload - 1) / _payload);
+                int received = packet[43] == 1 ? BinaryPrimitives.ReadInt32LittleEndian(packet.AsSpan(32)) : count - 1;
+                if (received >= 0 && received < count)
+                    lock (progress)
+                    { progress.HighestReceived = Math.Max(progress.HighestReceived, received); Monitor.PulseAll(progress); }
+            }
+            // Partial acknowledgements open the receive window; they do not acknowledge the whole message.
+            if (packet[43] == 1) return;
+            long previous = Interlocked.Read(ref _acknowledgedSequence);
+            while (acknowledgedSequence > previous)
+            {
+                long observed = Interlocked.CompareExchange(ref _acknowledgedSequence, acknowledgedSequence, previous);
+                if (observed == previous) break;
+                previous = observed;
+            }
+            // The small hello response's acknowledgement gives the worker its own propagation estimate.
+            // Large audio responses include transmission/queue time and must not inflate that estimate.
+            Sent? acknowledged = Volatile.Read(ref _sent);
+            if (!_server && acknowledged is { Type: DspMessage.Hello } && acknowledged.Sequence == acknowledgedSequence)
+                Probe();
+            if (_server && acknowledged is { Type: DspMessage.Hello } && acknowledged.Sequence == acknowledgedSequence
+                && Volatile.Read(ref acknowledged.SendingAll) == 0)
+                Volatile.Write(ref _roundTrip, Stopwatch.GetElapsedTime(Volatile.Read(ref acknowledged.CompletedAt)).TotalMilliseconds);
+            return;
+        }
         if (kind == Nack)
         {
             Sent? sent = Volatile.Read(ref _sent);
@@ -77,9 +127,10 @@ internal sealed class UdpDspPeer : IDisposable
                 // A response probe can arrive while its original burst is still leaving the socket.
                 // Never start a second whole burst beside the first, or repeat it on every short feedback tick.
                 if (Volatile.Read(ref sent.SendingAll) == 0 && Stopwatch.GetElapsedTime(Volatile.Read(ref sent.CompletedAt)).TotalMilliseconds >= 12)
-                    SendAll(sent, true);
+                    QueueSendAll(sent);
                 return;
             }
+            Interlocked.Exchange(ref _selectiveRecoveryAt, Stopwatch.GetTimestamp());
             for (int at = Header; at + 4 <= packet.Length; at += 4)
             {
                 int index = BinaryPrimitives.ReadInt32LittleEndian(packet.AsSpan(at));
@@ -90,19 +141,25 @@ internal sealed class UdpDspPeer : IDisposable
         long sequence = BinaryPrimitives.ReadInt64LittleEndian(packet.AsSpan(20));
         if (sequence <= Interlocked.Read(ref _receivedSequence))
         {
-            _send(Packet(Ack, 0, sequence, 0, 0, []));
-            Sent? sent = Volatile.Read(ref _sent);
-            if (_server && sent?.Sequence == sequence && Stopwatch.GetElapsedTime(_lastResend).TotalMilliseconds > 12)
-            { _lastResend = Stopwatch.GetTimestamp(); SendAll(sent, true); }
+            // A late request burst can contain thousands of duplicate fragments. Acknowledge receipt;
+            // only an explicit response NACK may replay cached audio. Otherwise each fragment can
+            // trigger another multi-megabyte response while the client has already moved on.
+            if (_server && Stopwatch.GetElapsedTime(_lastResend).TotalMilliseconds > 12)
+            { _lastResend = Stopwatch.GetTimestamp(); _send(Packet(Ack, 0, sequence, 0, 0, [])); }
             return;
         }
         _incoming.Writer.TryWrite(packet);
     }
     internal void Probe()
     {
-        if (_server || Stopwatch.GetElapsedTime(Volatile.Read(ref _pingSent)).TotalSeconds < 1) return;
+        if (_server || Stopwatch.GetElapsedTime(Volatile.Read(ref _pingSent)).TotalSeconds < (RoundTripMilliseconds > 0 ? 1 : .05)) return;
         long stamp = Stopwatch.GetTimestamp(); Volatile.Write(ref _pingSent, stamp);
         _send(Packet(Ping, 0, stamp, 0, 0, []));
+    }
+    internal void WaitForFirstProbe(CancellationToken cancellation, int timeoutMilliseconds = 500)
+    {
+        try { _firstProbe.Task.WaitAsync(TimeSpan.FromMilliseconds(timeoutMilliseconds), cancellation).GetAwaiter().GetResult(); }
+        catch (TimeoutException) { }
     }
     internal void Send(DspMessage type, long sequence, byte[] bytes)
     {
@@ -113,11 +170,46 @@ internal sealed class UdpDspPeer : IDisposable
     private void SendAll(Sent sent, bool retransmit)
     {
         if (Interlocked.CompareExchange(ref sent.SendingAll, 1, 0) != 0) return;
+        TransmitAll(sent, retransmit);
+    }
+    private void QueueSendAll(Sent sent)
+    {
+        if (Interlocked.CompareExchange(ref sent.SendingAll, 1, 0) != 0) return;
+        // Keep receiving window acknowledgements while replaying a response. Blocking the socket reader
+        // here would make a large replay wait for feedback that it could no longer receive.
+        _ = Task.Run(() =>
+        {
+            try { TransmitAll(sent, true); }
+            catch (Exception ex) when (ex is SocketException or ObjectDisposedException) { _stop.Cancel(); }
+        });
+    }
+    private void TransmitAll(Sent sent, bool retransmit)
+    {
         try
         {
             int count = Math.Max(1, (sent.Bytes.Length + _payload - 1) / _payload);
+            bool window = _server && Volatile.Read(ref _windowSupported) && count > FlightWindow;
+            lock (sent) sent.HighestReceived = -1;
             for (int index = 0; index < count && !_stop.IsCancellationRequested; index++)
-            { SendFragment(sent, index, retransmit); if ((index & 63) == 63) Thread.Yield(); }
+            {
+                if (window)
+                {
+                    while (!_stop.IsCancellationRequested)
+                    {
+                        bool retry;
+                        lock (sent)
+                        {
+                            if (index <= sent.HighestReceived + FlightWindow) break;
+                            retry = !Monitor.Wait(sent, (int)Math.Clamp(2 * RoundTripMilliseconds, 50, 1000));
+                        }
+                        // A lost progress acknowledgement must not deadlock the window. One duplicate
+                        // elicits current progress without replaying the entire multi-megabyte response.
+                        if (retry && !_stop.IsCancellationRequested) SendFragment(sent, index - 1, true);
+                    }
+                }
+                if (_stop.IsCancellationRequested) break;
+                SendFragment(sent, index, retransmit); if ((index & 63) == 63) Thread.Yield();
+            }
         }
         finally { Volatile.Write(ref sent.CompletedAt, Stopwatch.GetTimestamp()); Volatile.Write(ref sent.SendingAll, 0); }
     }
@@ -128,6 +220,10 @@ internal sealed class UdpDspPeer : IDisposable
         lock (_sendGate) _send(Packet(Data, sent.Type, sent.Sequence, sent.Bytes.Length, index, sent.Bytes.AsSpan(offset, count)));
         if (retransmit) Interlocked.Increment(ref _retransmits);
     }
+    private void WakeSender()
+    {
+        if (Volatile.Read(ref _sent) is { } sent) lock (sent) Monitor.PulseAll(sent);
+    }
     private byte[] Packet(byte kind, DspMessage type, long sequence, int length, int index, ReadOnlySpan<byte> payload)
     {
         var packet = new byte[Header + payload.Length];
@@ -136,14 +232,15 @@ internal sealed class UdpDspPeer : IDisposable
         BinaryPrimitives.WriteInt32LittleEndian(packet.AsSpan(28), length);
         BinaryPrimitives.WriteInt32LittleEndian(packet.AsSpan(32), index);
         BinaryPrimitives.WriteInt32LittleEndian(packet.AsSpan(36), Math.Max(1, (length + _payload - 1) / _payload));
-        packet[40] = kind; packet[41] = (byte)type; payload.CopyTo(packet.AsSpan(Header)); return packet;
+        packet[40] = kind; packet[41] = (byte)type; packet[42] = 1;
+        payload.CopyTo(packet.AsSpan(Header)); return packet;
     }
     internal (DspMessage Type, long Sequence, byte[] Bytes) Receive(TimeSpan timeout, CancellationToken cancellation = default)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token, cancellation);
         long started = Stopwatch.GetTimestamp(), lastFeedback = started;
         byte[]? result = null; bool[]? arrived = null;
-        int remaining = 0; long sequence = 0; DspMessage type = default;
+        int remaining = 0, highestReceived = -1, lastProgress = -1; long sequence = 0; DspMessage type = default;
         while (Stopwatch.GetElapsedTime(_server && result is null ? Interlocked.Read(ref _lastPacket) : started) < timeout)
         {
             linked.Token.ThrowIfCancellationRequested();
@@ -177,9 +274,24 @@ internal sealed class UdpDspPeer : IDisposable
                         return (type, sequence, result);
                     }
                 }
+                highestReceived = Math.Max(highestReceived, index);
+                if (!_server && packet[42] == 1 && count > FlightWindow
+                    && (highestReceived >= lastProgress + ProgressInterval || index <= lastProgress))
+                {
+                    byte[] progress = Packet(Ack, type, sequence, 0, highestReceived, []);
+                    progress[43] = 1; _send(progress); lastProgress = highestReceived;
+                }
                 continue;
             }
-            double feedback = Math.Clamp(RoundTripMilliseconds > 0 ? 4 * RoundTripMilliseconds : _protected ? 100 : 8, 4, _protected ? 1000 : 16);
+            // Once fragments have arrived, a short gap is enough to identify holes in that burst. Waiting
+            // four WAN round trips after its final packet turns a single loss into another audio stall.
+            // Keep the longer request/response probe interval while inference has not produced a burst.
+            // A selective request retry is progress even before its acknowledgement returns. Restart
+            // the whole-request deadline so it cannot race the fragment that was just retransmitted.
+            if (!_server && result is null) lastFeedback = Math.Max(lastFeedback, Interlocked.Read(ref _selectiveRecoveryAt));
+            double feedback = Math.Clamp(RoundTripMilliseconds > 0
+                ? (arrived is not null ? 1.5 : 4) * RoundTripMilliseconds : _protected ? 100 : 8,
+                _protected && arrived is not null ? 24 : 4, _protected ? 1000 : 16);
             if (Stopwatch.GetElapsedTime(lastFeedback).TotalMilliseconds >= feedback)
             {
                 if (arrived is not null)
@@ -223,6 +335,6 @@ internal sealed class UdpDspPeer : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         try { for (int n = 0; n < 3; n++) _send(Packet(Close, DspMessage.Close, 0, 0, 0, [])); }
         catch (Exception ex) when (ex is SocketException or ObjectDisposedException) { }
-        _stop.Cancel(); _incoming.Writer.TryComplete(); Volatile.Write(ref _sent, null);
+        _stop.Cancel(); WakeSender(); _firstProbe.TrySetCanceled(); _incoming.Writer.TryComplete(); Volatile.Write(ref _sent, null);
     }
 }
