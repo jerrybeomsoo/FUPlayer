@@ -6,7 +6,9 @@ usage() {
     cat <<'EOF'
 Usage: install-dsp-server.sh /path/to/FUPlayer-DspServer [options]
   --user                 Install for this account (requires login lingering for boot startup)
-  --listen PRIVATE_IP    Default 0.0.0.0; the server accepts only private/LAN peers
+  --listen IP            Default 0.0.0.0; LAN-only unless Internet mode is enabled
+  --allow-internet       Accept Internet peers using encrypted UDP; requires --key-file
+  --key-file FILE        Install a private copy of the Base64 server access key
   --port NUMBER          Listener UDP port, default 58181
   --worker-start NUMBER  First worker UDP port, default 58182
   --worker-end NUMBER    Last worker UDP port, default 58213
@@ -21,11 +23,13 @@ EOF
 [[ $# -gt 0 ]] || { usage; exit 2; }
 if [[ $1 == --help ]]; then usage; exit 0; fi
 binary=$(realpath -- "$1"); shift
-scope=system; listen=0.0.0.0; port=58181; first=58182; last=58213; cpu=; dry=0
+scope=system; listen=0.0.0.0; port=58181; first=58182; last=58213; cpu=; dry=0; internet=; keyfile=
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --user) scope=user; shift ;;
         --listen) listen=${2:?missing address}; shift 2 ;;
+        --allow-internet) internet=' --allow-internet'; shift ;;
+        --key-file) keyfile=$(realpath -- "${2:?missing key file}"); shift 2 ;;
         --port) port=${2:?missing port}; shift 2 ;;
         --worker-start) first=${2:?missing first port}; shift 2 ;;
         --worker-end) last=${2:?missing last port}; shift 2 ;;
@@ -35,6 +39,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 [[ -f $binary && -x $binary ]] || { printf 'The server must be an executable file.\n' >&2; exit 2; }
+[[ -z $internet || -n $keyfile ]] || { printf 'Internet mode requires --key-file.\n' >&2; exit 2; }
+[[ -z $keyfile || -r $keyfile ]] || { printf 'The access key file is not readable.\n' >&2; exit 2; }
 [[ $listen =~ ^[0-9a-fA-F:.]+$ ]] || { printf 'Use a numeric bind address.\n' >&2; exit 2; }
 for value in "$port" "$first" "$last"; do
     [[ $value =~ ^[0-9]+$ && $value -ge 1024 && $value -le 65535 ]] || { printf 'Ports must be 1024..65535.\n' >&2; exit 2; }
@@ -43,14 +49,14 @@ done
 systemctl_args=(); identity=; hardening=; groups=
 if [[ $scope == user ]]; then
     prefix="$HOME/.local/lib/fuplayer-dsp"; cache="$HOME/.cache/fuplayer-dsp"
-    unitdir="$HOME/.config/systemd/user"; systemctl_args=(--user)
+    unitdir="$HOME/.config/systemd/user"; config="$HOME/.config/fuplayer-dsp"; systemctl_args=(--user)
     if [[ $dry == 0 && $(loginctl show-user "$(id -u)" -p Linger --value) != yes ]]; then
         printf 'Boot startup requires lingering. Run: sudo loginctl enable-linger %q\n' "$(id -un)" >&2
         exit 1
     fi
 else
     [[ $dry == 1 || $EUID == 0 ]] || { printf 'Run the system installation with sudo, or select --user.\n' >&2; exit 1; }
-    prefix=/opt/fuplayer-dsp; cache=/var/cache/fuplayer-dsp; unitdir=/etc/systemd/system
+    prefix=/opt/fuplayer-dsp; cache=/var/cache/fuplayer-dsp; unitdir=/etc/systemd/system; config=/etc/fuplayer-dsp
     identity=$'User=fuplayer-dsp\nGroup=fuplayer-dsp\nCacheDirectory=fuplayer-dsp\nCacheDirectoryMode=0700'
     for group in render video; do if getent group "$group" >/dev/null; then groups+=" $group"; fi; done
     if [[ -n $groups ]]; then identity+=$'\nSupplementaryGroups='"${groups# }"; fi
@@ -61,6 +67,8 @@ unit_quote() { local value=$1; value=${value//\\/\\\\}; value=${value//\"/\\\"};
 executable=$(unit_quote "$prefix/FUPlayer-DspServer")
 cached=$(unit_quote "$cache")
 extraction=$(unit_quote "DOTNET_BUNDLE_EXTRACT_BASE_DIR=$cache/runtime")
+keyoption=
+if [[ -n $keyfile ]]; then keyoption=" --key-file $(unit_quote "$config/access.key")"; fi
 unit=$(cat <<EOF
 # Managed by FUPlayer install-dsp-server.sh
 [Unit]
@@ -70,7 +78,7 @@ After=network.target
 [Service]
 Type=simple
 $identity
-ExecStart=$executable --listen $listen --port $port --worker-port-start $first --worker-port-end $last --cache $cached$cpu
+ExecStart=$executable --listen $listen --port $port --worker-port-start $first --worker-port-end $last --cache $cached$cpu$internet$keyoption
 Environment=$extraction
 Restart=on-failure
 RestartSec=2
@@ -83,6 +91,7 @@ UMask=0077
 
 [Install]
 WantedBy=$(if [[ $scope == user ]]; then printf default.target; else printf multi-user.target; fi)
+Alias=fuplayer-dsp-server.service
 EOF
 )
 if [[ $dry == 1 ]]; then printf '%s\n' "$unit"; exit 0; fi
@@ -96,6 +105,15 @@ if [[ $scope == system ]]; then
 else
     install -d -m 0700 "$cache"
 fi
+if [[ -n $keyfile ]]; then
+    if [[ $scope == system ]]; then
+        install -d -m 0750 -o root -g fuplayer-dsp "$config"
+        if [[ $keyfile != "$config/access.key" ]]; then install -m 0640 -o root -g fuplayer-dsp -- "$keyfile" "$config/access.key"; fi
+    else
+        install -d -m 0700 "$config"
+        if [[ $keyfile != "$config/access.key" ]]; then install -m 0600 -- "$keyfile" "$config/access.key"; fi
+    fi
+fi
 install -d -m 0755 "$prefix" "$unitdir"
 systemctl "${systemctl_args[@]}" stop fuplayer-dsp.service 2>/dev/null || true
 install -m 0755 -- "$binary" "$prefix/FUPlayer-DspServer.new"
@@ -104,5 +122,5 @@ printf '%s\n' "$unit" > "$unitpath"
 systemctl "${systemctl_args[@]}" daemon-reload
 systemctl "${systemctl_args[@]}" enable --now fuplayer-dsp.service
 systemctl "${systemctl_args[@]}" --no-pager --full status fuplayer-dsp.service
-printf '\nEnabled at boot. Allow UDP %s and %s-%s through the LAN firewall.\n' "$port" "$first" "$last"
+printf '\nEnabled at boot. Forward/allow only UDP %s; worker ports stay on loopback.\n' "$port"
 printf 'The listener waits without loading models/GPU; workers exit when playback stops or pauses.\n'

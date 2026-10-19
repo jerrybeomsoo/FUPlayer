@@ -7,7 +7,7 @@
 | A GPU appears idle | Check the active chain. Measured sharing can favour the CPU; layered FFT partitions use the CPU. Neural processing and resampling have separate device choices. |
 | Restorer says idle | Automatic source type normally skips lossless input. Select Lossy only when the recording is actually from a coded source or for a controlled test. |
 | Neural Runs on is grey | That stage is selected for Network DSP. Change its network checkbox to return to the saved local adapter. |
-| No remote connection | Match client/server versions, check the private IPv4 address, and allow UDP listener and worker ports. Inspect the server console/service journal. |
+| No remote connection | Match client/server versions, check DNS/address and the access key, and allow/forward the UDP listener port. Inspect the server console/service journal. |
 | Remote dropouts despite spare CPU/GPU | Prefer wired Ethernet, check RTT and lost/retried traffic, then increase FIFO. One serial stage or a network burst can miss a deadline despite a low average utilisation. |
 | Some music formats are skipped | Install the optional LGPL FFmpeg libraries from Settings. Built-in readers do not cover every codec. |
 | Wrong or missing cover | Use embedded art, an album-title image or an explicit name such as cover.jpg. In a folder with multiple albums, use an album-specific filename. |
@@ -22,5 +22,11 @@ rate, filter/taps, enabled stages, buffer sizes, and the Now playing status/erro
 include server version, CPU/GPU and whether the connection is wired. Remove personal file paths from logs
 before posting them. Reports can be filed in [GitHub Issues](https://github.com/jerrybeomsoo/FUPlayer/issues).
 
-Known in v0.6.0: changing Stop after this track in the final buffered part of a track can miss the audible
+Known in v0.6.1: changing Stop after this track in the final buffered part of a track can miss the audible
 boundary. Native FreeBSD, Linux ARM64 hardware and all possible DAC/driver combinations are unverified.
+
+For a missing Linux service, check the installation scope: `systemctl status fuplayer-dsp.service` shows
+a system service; `systemctl --user status fuplayer-dsp.service` shows the current account's user service.
+The unit name is `fuplayer-dsp.service`, also available as `fuplayer-dsp-server.service` after installation.
+Internet DSP needs v0.6.1 client/server, a matching key, a direct IPv4 DNS record and UDP forwarding.
+An HTTPS website loading successfully does not establish that its UDP port is reachable.

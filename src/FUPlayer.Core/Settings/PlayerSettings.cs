@@ -422,6 +422,8 @@ public sealed class ProcessingSettings
 
     /// <summary>Private LAN address or name of the standalone processing server.</summary>
     public string NetworkDspHost { get; set; } = string.Empty;
+    /// <summary>Base64 256-bit server key; empty retains LAN-only plain UDP. Treat the settings file as private.</summary>
+    public string NetworkDspKey { get; set; } = string.Empty;
     /// <summary>UDP discovery port; workers are allocated automatically.</summary>
     public int NetworkDspPort { get; set; } = 58181;
     /// <summary>Run the selected resampling filter remotely.</summary>

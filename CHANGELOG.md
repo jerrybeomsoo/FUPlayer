@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.6.1 — 2026-10-19
+
+### Added
+
+- **Internet DSP through DNS or URLs.** Enter an IP address, domain, or `udp://host:port` in Settings.
+  Public connections use a server access key and authenticated AES-256-GCM UDP, without TLS. LAN-only
+  servers can retain plain UDP. The new masked key field and CLI `--dsp-key-file` configure authorised clients.
+  [Setup guide](https://github.com/jerrybeomsoo/FUPlayer/blob/v0.6.1/docs/network-dsp.md).
+- **Server key management.** `--generate-key-file` creates a random private key without printing it;
+  `--allow-internet --key-file` enables Internet access. Packet replay checks, per-session/direction keys,
+  bounded queues and authentication before worker allocation protect the processing path.
+
+### Fixed
+
+- **One external UDP port is sufficient.** Isolated workers bind loopback; the listener relays their traffic
+  through its own port. Forward UDP 58181 to internal UDP 58181. This also supports routers mapping a wider
+  external range to that single internal port. Clients no longer need separately reachable worker ports.
+- **Internet retry timing.** Encrypted sessions adapt recovery intervals to longer RTTs while retaining
+  MTU-sized packets and selective recovery. Invalid keys do not allocate DSP workers.
+- **Linux service setup and discovery.** The installer supports private key installation, Internet options
+  and the `fuplayer-dsp-server.service` alias. The guide distinguishes system services from `--user` services
+  and explains migration between them.
+
+### Compatibility
+
+- Update both player and server to v0.6.1 for Internet mode. The shared key is required from every client of
+  an Internet-enabled listener, including clients on its LAN. Plain LAN-only mode remains available.
+- The access key is saved in the player's settings. Keep those files private. This protocol has no forward
+  secrecy; use a fresh key if one is disclosed. IPv4 and a direct UDP-capable DNS address are required.
+- The late Stop after this track boundary issue remains. No new native FreeBSD/ARM64 or hardware audio claim.
+
 ## 0.6.0 — 2026-10-19
 
 ### Added

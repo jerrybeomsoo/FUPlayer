@@ -28,10 +28,12 @@ keep up with playback. This does not change filter phase or ringing.
 
 ## Network DSP
 
-In **Settings → Network DSP**, enter the server's private IPv4 address and UDP port, turn on **Process on a
+In **Settings → Network DSP**, enter the server's IP address, domain or URL and UDP port, turn on **Process on a
 server**, then select the resampling/restorer/upscaler checkboxes. The corresponding stage must also be
 enabled in DSP studio. Its local neural **Runs on** selector becomes grey while remote processing is selected.
-See [Network DSP](network-dsp.md) for server installation and firewall ports.
+For Internet access, paste the server's key in **Server access key**. It is masked on screen and saved in
+settings; keep that file private. Leave it empty only for a LAN-only server. See [Network DSP](network-dsp.md)
+for single-port forwarding, key generation and service setup.
 
 ## Language, library and optional decoders
 

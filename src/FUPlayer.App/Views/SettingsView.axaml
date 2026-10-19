@@ -92,12 +92,15 @@
         <StackPanel>
           <TextBlock Classes="h3" Text="Network DSP" Margin="0,0,0,4" />
           <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,8"
-                     Text="Select stages to run on a standalone DSP server. Unchecked stages stay here. Uses unencrypted UDP on a trusted local network; the server releases its worker when playback stops or pauses." />
+                     Text="Select remote stages. LAN servers can use plain UDP; Internet servers require an access key and use encrypted UDP. Stop or Pause releases the worker." />
           <controls:SettingRow Title="Process on a server" Description="Only selected stages that are enabled in DSP studio run remotely. Volume, limiting and audio output stay here.">
             <ToggleSwitch IsChecked="{Binding NetworkDsp}" OnContent="" OffContent="" />
           </controls:SettingRow>
-          <controls:SettingRow Title="Server address" Description="Private IP address or host name of the processing server.">
+          <controls:SettingRow Title="Server address" Description="IP address, domain or udp://host:port URL of the processing server.">
             <TextBox Text="{Binding NetworkDspHost, UpdateSourceTrigger=LostFocus}" Width="230" MinWidth="230" />
+          </controls:SettingRow>
+          <controls:SettingRow Title="Server access key" Description="Paste the server's Base64 key for encrypted UDP. Leave empty only for a LAN-only server.">
+            <TextBox Text="{Binding NetworkDspKey, UpdateSourceTrigger=LostFocus}" PasswordChar="●" Width="230" MinWidth="230" />
           </controls:SettingRow>
           <controls:SettingRow Title="UDP port" Description="The server listener port. Default: 58181.">
             <NumericUpDown Value="{Binding NetworkDspPort}" Minimum="1" Maximum="65535" Increment="1" FormatString="0" Width="150" />

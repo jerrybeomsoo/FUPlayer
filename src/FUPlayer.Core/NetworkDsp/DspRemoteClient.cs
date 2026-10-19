@@ -21,6 +21,7 @@ internal sealed class DspRemoteClient : IDisposable
     private readonly string _host;
     private int _disposed;
     private Timer? _heartbeat;
+    private readonly DspDatagramProtection? _protection;
     internal DspMetadata Metadata { get; private set; } = null!;
     internal double RoundTripMilliseconds => _peer.RoundTripMilliseconds;
     internal long RetransmittedDatagrams => _peer.RetransmittedDatagrams;
@@ -29,12 +30,16 @@ internal sealed class DspRemoteClient : IDisposable
 
     internal DspRemoteClient(PlaybackPlan plan, PlayerSettings settings, int maximumInput, CancellationToken cancellation = default)
     {
-        _host = settings.Processing.NetworkDspHost.Trim();
-        if (_host.Length == 0) throw new IOException("Enter a LAN DSP server address.");
-        IPAddress address = Dns.GetHostAddressesAsync(_host).WaitAsync(TimeSpan.FromSeconds(5), cancellation).GetAwaiter().GetResult()
-            .FirstOrDefault(a => UdpDspPeer.IsLan(a) && a.AddressFamily == AddressFamily.InterNetwork)
-            ?? throw new IOException("LAN DSP requires a reachable private IPv4 address.");
-        int port = settings.Processing.NetworkDspPort;
+        DspEndpoint target = DspEndpoint.Parse(settings.Processing.NetworkDspHost, settings.Processing.NetworkDspPort);
+        _host = target.Host;
+        if (!string.IsNullOrWhiteSpace(settings.Processing.NetworkDspKey)) _protection = new(settings.Processing.NetworkDspKey, server: false);
+        IPAddress address;
+        try
+        {
+            address = DspEndpoint.SelectAddress(Dns.GetHostAddressesAsync(_host).WaitAsync(TimeSpan.FromSeconds(5), cancellation).GetAwaiter().GetResult(), _protection is not null);
+        }
+        catch { _protection?.Dispose(); throw; }
+        int port = target.Port;
         var hello = new DspHello(DspProtocol.Version, plan, settings.Restoration, settings.Processing.RemoteResampling,
             settings.Processing.RemoteRestorer, settings.Processing.RemoteUpscaler, maximumInput);
         try
@@ -44,7 +49,7 @@ internal sealed class DspRemoteClient : IDisposable
                 Open(new IPEndPoint(address, port));
                 using CancellationTokenRegistration registration = cancellation.Register(Abort);
                 _peer.Send(DspMessage.Hello, _sequence = 1, DspProtocol.Json(hello));
-                var response = _peer.Receive(TimeSpan.FromSeconds(redirect == 0 ? 10 : 120), cancellation);
+                var response = _peer.Receive(TimeSpan.FromSeconds(120), cancellation);
                 if (response.Sequence != 1) throw new InvalidDataException("Invalid DSP hello sequence.");
                 if (response.Type == DspMessage.Redirect && response.Bytes.Length == 4 && redirect == 0)
                 {
@@ -67,7 +72,7 @@ internal sealed class DspRemoteClient : IDisposable
             }
         }
         catch (Exception ex) when (ex is not (OutOfMemoryException or AccessViolationException))
-        { CloseTransport(); throw new IOException(Loc.F("DSP server {0} could not be opened: {1}", _host, ex.Message), ex); }
+        { CloseTransport(); _protection?.Dispose(); throw new IOException(Loc.F("DSP server {0} could not be opened: {1}", _host, ex.Message), ex); }
         throw new IOException("DSP worker redirect failed.");
     }
     private void Open(IPEndPoint endpoint)
@@ -75,20 +80,30 @@ internal sealed class DspRemoteClient : IDisposable
         _receiveStop = new CancellationTokenSource();
         _socket = new Socket(endpoint.AddressFamily, SocketType.Dgram, ProtocolType.Udp)
             { ReceiveBufferSize = 4 << 20, SendBufferSize = 4 << 20 };
-        _socket.Connect(endpoint);
+        _socket.Bind(new IPEndPoint(IPAddress.Any, 0));
         Socket socket = _socket;
-        _peer = new UdpDspPeer(Guid.NewGuid(), packet => socket.Send(packet), server: false);
+        IPEndPoint destination = endpoint;
+        _peer = new UdpDspPeer(Guid.NewGuid(), packet => socket.SendTo(_protection?.Protect(packet) ?? packet, Volatile.Read(ref destination)), server: false, protectedTransport: _protection is not null);
         UdpDspPeer peer = _peer;
         CancellationToken stop = _receiveStop.Token;
         _receiving = Task.Run(async () =>
         {
-            var buffer = new byte[UdpDspPeer.Header + UdpDspPeer.Payload];
+            var buffer = new byte[UdpDspPeer.Header + UdpDspPeer.Payload + DspDatagramProtection.Overhead + 1];
             try
             {
                 while (!stop.IsCancellationRequested)
                 {
-                    int count = await socket.ReceiveAsync(buffer, SocketFlags.None, stop).ConfigureAwait(false);
-                    peer.Accept(buffer.AsSpan(0, count).ToArray());
+                    SocketReceiveFromResult received = await socket.ReceiveFromAsync(buffer, SocketFlags.None, new IPEndPoint(IPAddress.Any, 0), stop).ConfigureAwait(false);
+                    var source = (IPEndPoint)received.RemoteEndPoint;
+                    if (_protection is null)
+                    { if (source.Equals(endpoint)) peer.Accept(buffer.AsSpan(0, received.ReceivedBytes).ToArray()); }
+                    else if (_protection.TryUnprotect(buffer.AsSpan(0, received.ReceivedBytes), out byte[] packet)
+                        && UdpDspPeer.Inspect(packet, out Guid session, out _, out _) && session == peer.Session)
+                    {
+                        // Some routers forward a public address back into the LAN without rewriting the reply's source.
+                        // Only an authenticated reply for this unpredictable session may select the return endpoint.
+                        Volatile.Write(ref destination, source); peer.Accept(packet);
+                    }
                 }
             }
             catch (Exception ex) when (ex is SocketException or OperationCanceledException or ObjectDisposedException) { peer.Dispose(); }
@@ -202,5 +217,5 @@ internal sealed class DspRemoteClient : IDisposable
         try { _receiving.GetAwaiter().GetResult(); } catch (OperationCanceledException) { }
         _receiveStop?.Dispose();
     }
-    public void Dispose() { if (Interlocked.Exchange(ref _disposed, 1) == 0) CloseTransport(); }
+    public void Dispose() { if (Interlocked.Exchange(ref _disposed, 1) == 0) { CloseTransport(); _protection?.Dispose(); } }
 }

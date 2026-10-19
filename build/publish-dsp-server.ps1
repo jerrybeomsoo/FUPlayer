@@ -1,7 +1,7 @@
 param(
     [ValidateSet('win-x64','linux-x64','linux-arm64')][string]$Runtime = 'linux-x64',
     [string]$OutputDirectory,
-    [string]$Version = '0.6.0'
+    [string]$Version = '0.6.1'
 )
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot

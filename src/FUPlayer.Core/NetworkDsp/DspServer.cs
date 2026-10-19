@@ -7,8 +7,12 @@ namespace FUPlayer.Core.NetworkDsp;
 /// <summary>Resources for active DSP sessions. A waiting listener does not load models or initialise a GPU.</summary>
 public sealed record DspServerOptions
 {
-    /// <summary>Interface to bind; packets from public Internet addresses are rejected.</summary>
+    /// <summary>Interface to bind; Internet peers additionally require the access key and explicit opt-in.</summary>
     public IPAddress ListenAddress { get; init; } = IPAddress.Any;
+    /// <summary>Accept public IPv4 peers using authenticated encrypted UDP. Requires a 256-bit access key.</summary>
+    public bool AllowInternet { get; init; }
+    /// <summary>Base64 256-bit access key; empty selects the private-LAN plain transport.</summary>
+    public string AccessKey { get; init; } = string.Empty;
     /// <summary>UDP listener port, or zero for a test-selected ephemeral port.</summary>
     public int Port { get; init; } = 58181;
     /// <summary>Maximum simultaneous sessions accepted by this listener.</summary>
@@ -37,6 +41,8 @@ public sealed record DspServerOptions
     public bool ExitAfterSession { get; init; }
     /// <summary>A lightweight service broker redirects clients to isolated worker processes.</summary>
     public Func<CancellationToken, Task<int>>? StartWorker { get; init; }
+    /// <summary>Relay worker datagrams through the listener, so NAT needs only one external UDP port.</summary>
+    public bool RelayWorkers { get; init; }
 }
 
 /// <summary>Plain UDP DSP for trusted private networks, with ordered loss recovery and per-session stage selection.</summary>
@@ -46,13 +52,15 @@ public sealed class DspServer : IAsyncDisposable
     private readonly Socket _socket;
     private readonly CancellationTokenSource _stop = new();
     private readonly ConcurrentDictionary<(IPEndPoint Endpoint, Guid Id), Session> _clients = new();
+    private readonly ConcurrentDictionary<(IPEndPoint Endpoint, Guid Id), DspWorkerRelay> _relays = new();
+    private readonly DspDatagramProtection? _protection;
     private Task? _running;
     private int _started;
     private sealed record Session(UdpDspPeer Peer, TaskCompletionSource Finished);
     /// <summary>The UDP endpoint actually bound, including an ephemeral test/worker port.</summary>
     public IPEndPoint Endpoint => (IPEndPoint)_socket.LocalEndPoint!;
     /// <summary>Sessions with allocated or opening DSP resources.</summary>
-    public int ActiveSessions => _clients.Count;
+    public int ActiveSessions => _clients.Count + _relays.Count;
     /// <summary>Lifecycle messages exclude audio and user credentials.</summary>
     public event Action<string>? Message;
     /// <summary>Binds the listener without loading any neural model or opening a GPU context.</summary>
@@ -61,6 +69,9 @@ public sealed class DspServer : IAsyncDisposable
         if (options.Port is < 0 or > 65535 || options.MaximumClients is < 1 or > 16 || options.IdleTimeout <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(options));
         _options = options;
+        if (options.AllowInternet && string.IsNullOrWhiteSpace(options.AccessKey))
+            throw new ArgumentException("Internet DSP requires a server access key.", nameof(options));
+        if (!string.IsNullOrWhiteSpace(options.AccessKey)) _protection = new(options.AccessKey, server: true);
         _socket = new Socket(options.ListenAddress.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
         _socket.ReceiveBufferSize = _socket.SendBufferSize = 4 << 20;
         _socket.Bind(new IPEndPoint(options.ListenAddress, options.Port));
@@ -75,7 +86,7 @@ public sealed class DspServer : IAsyncDisposable
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, _stop.Token);
         if (_options.ExitAfterSession) _ = ExpireUnusedWorker();
-        var buffer = new byte[UdpDspPeer.Header + UdpDspPeer.Payload];
+        var buffer = new byte[UdpDspPeer.Header + UdpDspPeer.Payload + DspDatagramProtection.Overhead + 1];
         try
         {
             while (!linked.IsCancellationRequested)
@@ -85,13 +96,39 @@ public sealed class DspServer : IAsyncDisposable
                 try { received = await _socket.ReceiveFromAsync(buffer, SocketFlags.None, any, linked.Token).ConfigureAwait(false); }
                 catch (SocketException ex) when (ex.SocketErrorCode is SocketError.ConnectionReset or SocketError.MessageSize) { continue; }
                 var endpoint = (IPEndPoint)received.RemoteEndPoint;
-                ReadOnlyMemory<byte> data = buffer.AsMemory(0, received.ReceivedBytes);
-                if (!UdpDspPeer.IsLan(endpoint.Address) || !UdpDspPeer.Inspect(data.Span, out Guid id, out byte kind, out DspMessage type)) continue;
+                if (!_options.AllowInternet && !UdpDspPeer.IsLan(endpoint.Address)) continue;
+                ReadOnlyMemory<byte> wire = buffer.AsMemory(0, received.ReceivedBytes);
+                Guid route;
+                if (_protection is null)
+                { if (!UdpDspPeer.Inspect(wire.Span, out route, out _, out _)) continue; }
+                else if (!DspDatagramProtection.Inspect(wire.Span, out route)) continue;
+                ReadOnlyMemory<byte> data = wire;
+                if (_protection is not null)
+                { if (!_protection.TryUnprotect(wire.Span, out byte[] decoded)) continue; data = decoded; }
+                if (!UdpDspPeer.Inspect(data.Span, out Guid id, out byte kind, out DspMessage type)) continue;
                 var key = (endpoint, id);
+                // Authenticate control packets before forwarding; a forged close must not release a live worker.
+                if (_relays.TryGetValue(key, out DspWorkerRelay? relay)) { relay.Accept(wire.Span, kind == 3); continue; }
+                if (_options.RelayWorkers && _options.StartWorker is not null)
+                {
+                    if (kind != 0 || type != DspMessage.Hello || ActiveSessions >= _options.MaximumClients) continue;
+                    relay = new DspWorkerRelay(_options.StartWorker, packet => _socket.SendTo(packet, endpoint), _options.IdleTimeout);
+                    if (!_relays.TryAdd(key, relay)) { relay.Dispose(); continue; }
+                    relay.Accept(wire.Span);
+                    DspWorkerRelay capturedRelay = relay;
+                    _ = Task.Run(async () =>
+                    {
+                        try { await capturedRelay.RunAsync(linked.Token).ConfigureAwait(false); }
+                        catch (Exception ex) when (ex is not (OutOfMemoryException or AccessViolationException))
+                        { if (!linked.IsCancellationRequested) Message?.Invoke($"DSP relay ended: {ex.Message}"); }
+                        finally { _relays.TryRemove(key, out _); capturedRelay.Dispose(); }
+                    }, CancellationToken.None);
+                    continue;
+                }
                 if (!_clients.TryGetValue(key, out Session? session))
                 {
                     if (kind != 0 || type != DspMessage.Hello || _clients.Count >= _options.MaximumClients) continue;
-                    var peer = new UdpDspPeer(id, packet => _socket.SendTo(packet, endpoint), server: true);
+                    var peer = new UdpDspPeer(id, packet => _socket.SendTo(_protection?.Protect(packet) ?? packet, endpoint), server: true, protectedTransport: _protection is not null);
                     session = new Session(peer, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
                     if (!_clients.TryAdd(key, session)) { peer.Dispose(); continue; }
                     Interlocked.Increment(ref _started);
@@ -108,6 +145,9 @@ public sealed class DspServer : IAsyncDisposable
         {
             Session[] remaining = _clients.Values.ToArray();
             foreach (Session session in remaining) session.Peer.Dispose();
+            DspWorkerRelay[] relays = _relays.Values.ToArray();
+            foreach (DspWorkerRelay relay in relays) relay.Dispose();
+            await Task.WhenAll(relays.Select(relay => relay.Finished)).ConfigureAwait(false);
             // Isolated workers must also exit while a cancelled client was still designing a very long filter.
             if (!_options.ExitAfterSession) await Task.WhenAll(remaining.Select(s => s.Finished.Task)).ConfigureAwait(false);
         }
@@ -172,6 +212,6 @@ public sealed class DspServer : IAsyncDisposable
     {
         _stop.Cancel();
         if (_running is not null) await _running.ConfigureAwait(false);
-        _socket.Dispose(); _stop.Dispose();
+        _socket.Dispose(); _protection?.Dispose(); _stop.Dispose();
     }
 }

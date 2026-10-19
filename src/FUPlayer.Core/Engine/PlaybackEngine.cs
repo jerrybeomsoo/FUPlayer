@@ -1178,6 +1178,7 @@ public sealed class PlaybackEngine : IDisposable
             || a.Processing.GpuRetimeWhilePlaying != b.Processing.GpuRetimeWhilePlaying
             || a.Processing.NetworkDsp != b.Processing.NetworkDsp
             || a.Processing.NetworkDspHost != b.Processing.NetworkDspHost
+            || a.Processing.NetworkDspKey != b.Processing.NetworkDspKey
             || a.Processing.NetworkDspPort != b.Processing.NetworkDspPort
             || a.Processing.RemoteResampling != b.Processing.RemoteResampling
             || a.Processing.RemoteRestorer != b.Processing.RemoteRestorer

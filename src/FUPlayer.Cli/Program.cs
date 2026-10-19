@@ -87,8 +87,9 @@ internal static class Program
               filters | dithers | modulators  List processing presets
               gpus                         List CUDA, Vulkan and OpenCL convolution devices
               priority                     Show the process priority Windows granted at launch
-              --dsp-server <host>          LAN UDP processing server address
+              --dsp-server <host|URL>      UDP processing server IP address or domain
               --dsp-port <n>               Server UDP port (default 58181)
+              --dsp-key-file <file>        Read the server access key for encrypted Internet UDP
               --remote-resampling          Offload the resampler
               --remote-restorer            Offload the neural restorer
               --remote-upscaler            Offload the neural upscaler
@@ -1070,6 +1071,7 @@ internal static class Program
             settings.Processing.GpuRetimeWhilePlaying = !Has("gpu-hold");
             settings.Processing.NetworkDspHost = Get("dsp-server") ?? string.Empty;
             settings.Processing.NetworkDspPort = GetInt("dsp-port") ?? 58181;
+            settings.Processing.NetworkDspKey = Get("dsp-key-file") is { } keyFile ? File.ReadAllText(keyFile).Trim() : string.Empty;
             settings.Processing.NetworkDsp = settings.Processing.NetworkDspHost.Length > 0;
             bool allRemote = !Has("remote-resampling") && !Has("remote-restorer") && !Has("remote-upscaler");
             settings.Processing.RemoteResampling = allRemote || Has("remote-resampling");

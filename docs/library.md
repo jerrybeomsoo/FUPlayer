@@ -32,6 +32,6 @@ It remains enabled after stopping and is saved between desktop runs. Next still 
 ## Known limitations
 
 Set Stop after this track before the final buffered part of a track. A very late change can still let
-the next track play, or still stop after the toggle is disabled. v0.6.0 does not fix that boundary case.
+the next track play, or still stop after the toggle is disabled. v0.6.1 does not fix that boundary case.
 Library startup may take longer with very large flat folders, although repeated image discovery per
 album has been removed. See [troubleshooting](troubleshooting.md) for reporting a problem.

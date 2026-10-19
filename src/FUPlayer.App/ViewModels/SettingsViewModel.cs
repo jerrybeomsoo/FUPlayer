@@ -55,6 +55,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     private bool _networkDsp;
 
     [ObservableProperty] private string _networkDspHost = string.Empty;
+    [ObservableProperty] private string _networkDspKey = string.Empty;
     [ObservableProperty] private int _networkDspPort = 58181;
     [ObservableProperty, NotifyPropertyChangedFor(nameof(LocalResampling))] private bool _remoteResampling;
     [ObservableProperty] private bool _remoteRestorer;
@@ -150,6 +151,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         GpuForce = settings.Processing.GpuForce;
         NetworkDsp = settings.Processing.NetworkDsp;
         NetworkDspHost = settings.Processing.NetworkDspHost;
+        NetworkDspKey = settings.Processing.NetworkDspKey;
         NetworkDspPort = settings.Processing.NetworkDspPort;
         RemoteResampling = settings.Processing.RemoteResampling;
         RemoteRestorer = settings.Processing.RemoteRestorer;
@@ -369,6 +371,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     partial void OnNetworkDspChanged(bool value) => Update(() => Settings.Processing.NetworkDsp = value);
 
     partial void OnNetworkDspHostChanged(string value) => Update(() => Settings.Processing.NetworkDspHost = value.Trim());
+    partial void OnNetworkDspKeyChanged(string value) => Update(() => Settings.Processing.NetworkDspKey = value.Trim());
     partial void OnNetworkDspPortChanged(int value) => Update(() => Settings.Processing.NetworkDspPort = Math.Clamp(value, 1, 65535));
     partial void OnRemoteResamplingChanged(bool value) => Update(() => Settings.Processing.RemoteResampling = value);
     partial void OnRemoteRestorerChanged(bool value) => Update(() => Settings.Processing.RemoteRestorer = value);

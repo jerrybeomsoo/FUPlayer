@@ -1,94 +1,120 @@
 # Network DSP
 
-Use another computer on your trusted LAN for resampling, neural restoration, neural upscaling, or any
-combination. The player keeps decoding, the exciter, volume, limiting, DSD modulation and audio output.
-Both computers should use **v0.6.0**; older development server protocols are incompatible.
+Use another computer for resampling, neural restoration, neural upscaling, or any combination. Select
+stages in **Settings → Network DSP**; decoding, the exciter, volume, limiting, DSD modulation and audio
+output stay on the player. Use **v0.6.1** on both computers for Internet connections.
 
-## Download and start a server
+## Download and start
 
-Download the standalone server for **Windows x64** or **Linux x64** from the
-[v0.6.0 release](https://github.com/jerrybeomsoo/FUPlayer/releases/tag/v0.6.0).
-It is one portable executable containing the runtime, both neural models and licence texts. The processing
-computer does not need FUPlayer, its CLI, an audio device or a separate .NET installation.
-Normal OS libraries and GPU drivers are still needed. Native libraries/models extract to a writable cache.
-Linux ARM64 and native FreeBSD are not verified release targets.
+Download the standalone **Windows x64** or **Linux x64** server from the
+[release](https://github.com/jerrybeomsoo/FUPlayer/releases/tag/v0.6.1). It is one executable containing the
+runtime, both models and licence texts. The processing computer needs no player, CLI or audio device.
+Normal host OS libraries and GPU drivers are still required; native libraries and models extract to a cache.
 
-On Windows, open PowerShell in the download folder:
+For a LAN-only server, run it from PowerShell on Windows:
 
 ```powershell
-.\FUPlayer-DspServer-0.6.0-win-x64.exe --listen 0.0.0.0
+.\FUPlayer-DspServer-0.6.1-win-x64.exe --listen 0.0.0.0
 ```
 
-On Linux:
+Or on Linux:
 
 ```bash
-chmod +x ./FUPlayer-DspServer-0.6.0-linux-x64
-./FUPlayer-DspServer-0.6.0-linux-x64 --listen 0.0.0.0
+chmod +x ./FUPlayer-DspServer-0.6.1-linux-x64
+./FUPlayer-DspServer-0.6.1-linux-x64 --listen 0.0.0.0
 ```
 
-Allow **UDP 58181–58213** from your player computer through the server's LAN firewall.
-58181 is the listener; 58182–58213 are allocated to active workers. The installer does not change firewall rules.
+Allow **UDP 58181** through the server firewall. Active workers bind loopback and their traffic is relayed
+through this listener. They do not need separate firewall or router forwarding rules.
 
-## Start automatically on Linux
+## Internet access with a domain
 
-Download **install-dsp-server.sh** beside the Linux binary, then run:
+1. Point your domain's DNS **A record** to the router's public IPv4 address. Ordinary web reverse proxies
+   do not carry this UDP protocol; use a DNS record that resolves directly to the router.
+2. Forward external **UDP 58181** to **UDP 58181** on the processing computer. A router rule mapping a wider
+   external range to that same internal port also works when the player connects to 58181.
+3. Generate a random access key on the server and enable Internet mode. On Linux:
 
 ```bash
-sudo bash install-dsp-server.sh ./FUPlayer-DspServer-0.6.0-linux-x64
+./FUPlayer-DspServer-0.6.1-linux-x64 --generate-key-file ./dsp-access.key
+./FUPlayer-DspServer-0.6.1-linux-x64 --allow-internet --key-file ./dsp-access.key
 ```
 
-This enables and starts `fuplayer-dsp.service` with a dedicated account. The binary goes under
-`/opt/fuplayer-dsp`, and its cache under `/var/cache/fuplayer-dsp`.
-Re-running the installer upgrades its own installation and restarts it. Existing unrelated units are left alone.
+On Windows, use the `.exe` name with the same options. Keep the key file private. The generate command
+does not print the key or overwrite an existing key file. Copy its contents securely to each authorised
+player's **Server access key** field. Everyone with the key can use that server.
 
-For a per-user installation, use `bash install-dsp-server.sh ./FUPlayer-DspServer-0.6.0-linux-x64 --user`.
-Boot startup for that account needs systemd lingering; the installer prints the required command if needed.
-Use `--dry-run` to inspect the proposed unit. Management commands for a system installation are:
+4. In the player, enter a domain such as `dsp.example.net`, or `udp://dsp.example.net:58181`.
+   Pasted HTTP/HTTPS root URLs are accepted as a hostname too; DSP still uses UDP. A URL port overrides the
+   separate UDP port setting. Paths, query strings and credentials in URLs are rejected.
+   Routers with incomplete NAT loopback are supported by selecting a return endpoint only after its
+   encrypted reply authenticates for the current session. No private IP address is hardcoded.
+5. Paste the access key, turn on **Process on a server**, and select the processing stages.
+
+Public addresses require a key. An Internet-enabled server requires the key from LAN clients too;
+there is no automatic fallback to plain UDP. A default LAN-only server needs no key and rejects public peers.
+Internet traffic uses authenticated AES-256-GCM UDP with per-session/direction keys, replay checks and
+MTU-sized packets. It adds no TLS connection setup. Keep clocks synchronised within two minutes.
+This shared-key protocol does not provide forward secrecy; protect and rotate the key if it is disclosed.
+The player saves a pasted key in its settings, so treat settings files as private and remove keys before
+sharing diagnostics. IPv4 is supported; IPv6-only DNS records are not sufficient.
+
+## Install a Linux boot service
+
+Download **install-dsp-server.sh** beside the binary. For a LAN service:
 
 ```bash
-sudo systemctl status fuplayer-dsp.service
-sudo journalctl -u fuplayer-dsp.service
+sudo bash install-dsp-server.sh ./FUPlayer-DspServer-0.6.1-linux-x64
+```
+
+For Internet mode, first generate the key as above, then:
+
+```bash
+sudo bash install-dsp-server.sh ./FUPlayer-DspServer-0.6.1-linux-x64 --allow-internet --key-file ./dsp-access.key
+```
+
+The system service runs as a dedicated account. The binary is installed under `/opt/fuplayer-dsp`, cache
+under `/var/cache/fuplayer-dsp`, and a private installed key under `/etc/fuplayer-dsp/access.key`.
+Re-running the installer updates its own installation and restarts it. It leaves unrelated units and
+firewall rules unchanged. `--dry-run` shows the proposed unit.
+
+```bash
+systemctl status fuplayer-dsp.service
 sudo systemctl restart fuplayer-dsp.service
+sudo journalctl -u fuplayer-dsp.service
 sudo systemctl disable --now fuplayer-dsp.service
 ```
 
-For a user installation use `systemctl --user` / `journalctl --user` without sudo.
+The alias `fuplayer-dsp-server.service` works too. A **user service is a different scope**: installing
+with `--user` uses `~/.local/lib/fuplayer-dsp`, `~/.cache/fuplayer-dsp` and `~/.config/fuplayer-dsp/access.key`.
+Inspect it with `systemctl --user status fuplayer-dsp.service` and `journalctl --user -u fuplayer-dsp.service`.
+Boot startup requires systemd lingering; the installer prints the command when needed.
 
-## Connect the player
+When moving from a user service to a system service, first stop/disable the old user unit with
+`systemctl --user disable --now fuplayer-dsp.service`, then install the system service. Two instances cannot
+share the listener port. Normal `systemctl status` and `sudo systemctl status` inspect the system scope,
+and cannot show a unit installed only in another user's service manager.
 
-1. Open **Settings → Network DSP**.
-2. Enter the server's private IPv4 address and port **58181**.
-3. Turn on **Process on a server**.
-4. Select **Resampling on server**, **Neural restorer on server**, and/or **Neural upscaler on server**.
-5. Enable the corresponding stages in DSP studio and start playback.
+## Processing, latency and idle use
 
-A checkbox chooses where a stage runs; it does not enable a disabled neural stage. Automatic source type
-can leave the restorer idle on lossless files. A remote neural stage's local **Runs on** control is grey.
-Its previous local selection returns when you switch back to local processing.
+Remote checkboxes choose where an enabled stage runs. Enable neural stages in DSP studio too; Automatic
+source type normally leaves the restorer idle on lossless files. A remote stage's local **Runs on** selector
+becomes grey and its previous local choice is retained.
 
-## Performance and idle behaviour
+Prefer wired Ethernet on the server. Now playing shows network round trip time separately from DSP work,
+group delay and FIFO buffering. Internet paths add delay, jitter and bandwidth limits; increase FIFO if
+needed. Single-port routing does not remove the audio bandwidth requirement. Higher output rates and
+multiple remote stages can exceed a residential Internet connection.
 
-Prefer wired Ethernet. Raw float64 audio uses unencrypted UDP with loss recovery and no bandwidth cap.
-Now playing's network round trip time measures the connection, separately from DSP calculation and audio
-buffer/filter delay. High sample rates and several remote stages require more bandwidth.
-Increase the playback FIFO if short scheduling or network delays cause dropouts.
+The server uses channel workers, bounded neural threading, Automatic FFT convolution for long filters,
+and measured CPU/GPU sharing. Explicit tap-by-tap remains expensive. CUDA is preferred for NVIDIA
+convolution and Vulkan for other GPUs. Linux neural inference uses the CPU; Windows neural adapter
+options use DirectML independently of the convolution device.
 
-The server uses channel workers, bounded neural threading and measured CPU/GPU sharing. Automatic convolution
-uses FFT processing for long filters; explicitly choosing tap-by-tap can remain expensive.
-CUDA is preferred for NVIDIA convolution, Vulkan for other GPUs. Linux neural inference uses the CPU;
-Windows neural adapter options use DirectML. A low GPU percentage alone does not indicate a bottleneck.
+Stop, Pause or disconnection releases active workers and their GPU/model allocations. The small listener
+remains ready for another client. Resuming initialises processing and fills the buffer again.
 
-Stop, Pause or disconnection releases the active worker and its GPU/model allocations. The small listener
-remains ready for a new client; an abruptly lost client is cleaned up after a timeout. Resuming has to
-initialise processing and refill the buffer again. The idle listener uses some RAM, rather than zero RAM.
-
-## Options and connection scope
-
-Use `--help`, `--version`, `--devices`, `--licenses` or `--extract-licenses <folder>` on the server.
-Useful overrides include `--cpu`, `--threads`, `--gpu-device`, `--gpu-fast`, `--port`, `--models` and `--cache`.
-With custom ports, configure both the listener and worker range in the server/firewall.
-
-This protocol accepts private/link-local/loopback IPv4 peers. **It has no authentication or encryption**,
-so use it only on a trusted LAN and do not forward its ports to the Internet.
-The player reports a failed exchange instead of substituting lost audio. For errors, check the service log
-and [troubleshooting](troubleshooting.md). No JSON connection profile or certificate is needed.
+Use `--help`, `--version`, `--devices`, `--licenses` or `--extract-licenses <folder>` for server information.
+Overrides include `--cpu`, `--threads`, `--gpu-device`, `--gpu-fast`, `--port`, `--models` and `--cache`.
+Worker port options still select the internal loopback range. Native FreeBSD and Linux ARM64 hardware
+remain unverified. See [troubleshooting](troubleshooting.md) for connection and playback problems.

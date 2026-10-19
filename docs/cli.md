@@ -57,3 +57,11 @@ Neural `--restorer-device` / `--upscaler-device` refer to the adapters listed by
 Use `--dsp-port` for another listener port. `--remote-restorer` and `--remote-upscaler` select those stages;
 their normal `--neural-restore` / `--neural-upscale` flags must also enable them. If no remote stage flags
 are provided, all three are selected. See [Network DSP](network-dsp.md) for standalone server setup.
+
+For an Internet server, use its domain/URL and key file:
+
+```powershell
+.\fuplayer-cli.exe render "C:\Music\track.flac" --out .\rendered --rate 192000 --dsp-server udp://dsp.example.net:58181 --dsp-key-file .\dsp-access.key --remote-resampling
+```
+
+Keep the key out of command arguments and shared logs; `--dsp-key-file` reads the private file.

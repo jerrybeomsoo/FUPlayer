@@ -17,6 +17,8 @@ internal sealed class UdpDspPeer : IDisposable
         { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = true });
     private readonly CancellationTokenSource _stop = new();
     private readonly bool _server;
+    private readonly int _payload;
+    private readonly bool _protected;
     private readonly object _sendGate = new();
     private Sent? _sent;
     private long _lastResend, _receivedSequence, _pingSent, _retransmits, _lastPacket = Stopwatch.GetTimestamp();
@@ -33,8 +35,9 @@ internal sealed class UdpDspPeer : IDisposable
         internal long CompletedAt = Stopwatch.GetTimestamp();
     }
 
-    internal UdpDspPeer(Guid session, Action<byte[]> send, bool server)
-    { Session = session; _send = send; _server = server; }
+    internal UdpDspPeer(Guid session, Action<byte[]> send, bool server, bool protectedTransport = false)
+    { Session = session; _send = send; _server = server; _protected = protectedTransport;
+      _payload = protectedTransport ? DspDatagramProtection.ProtectedPayload : Payload; }
 
     internal static bool Inspect(ReadOnlySpan<byte> packet, out Guid session, out byte kind, out DspMessage type)
     {
@@ -80,7 +83,7 @@ internal sealed class UdpDspPeer : IDisposable
             for (int at = Header; at + 4 <= packet.Length; at += 4)
             {
                 int index = BinaryPrimitives.ReadInt32LittleEndian(packet.AsSpan(at));
-                if (index >= 0 && (long)index * Payload < Math.Max(1, sent.Bytes.Length)) SendFragment(sent, index, true);
+                if (index >= 0 && (long)index * _payload < Math.Max(1, sent.Bytes.Length)) SendFragment(sent, index, true);
             }
             return;
         }
@@ -112,7 +115,7 @@ internal sealed class UdpDspPeer : IDisposable
         if (Interlocked.CompareExchange(ref sent.SendingAll, 1, 0) != 0) return;
         try
         {
-            int count = Math.Max(1, (sent.Bytes.Length + Payload - 1) / Payload);
+            int count = Math.Max(1, (sent.Bytes.Length + _payload - 1) / _payload);
             for (int index = 0; index < count && !_stop.IsCancellationRequested; index++)
             { SendFragment(sent, index, retransmit); if ((index & 63) == 63) Thread.Yield(); }
         }
@@ -120,7 +123,7 @@ internal sealed class UdpDspPeer : IDisposable
     }
     private void SendFragment(Sent sent, int index, bool retransmit)
     {
-        int offset = index * Payload, count = Math.Min(Payload, sent.Bytes.Length - offset);
+        int offset = index * _payload, count = Math.Min(_payload, sent.Bytes.Length - offset);
         if (count < 0) return;
         lock (_sendGate) _send(Packet(Data, sent.Type, sent.Sequence, sent.Bytes.Length, index, sent.Bytes.AsSpan(offset, count)));
         if (retransmit) Interlocked.Increment(ref _retransmits);
@@ -132,7 +135,7 @@ internal sealed class UdpDspPeer : IDisposable
         BinaryPrimitives.WriteInt64LittleEndian(packet.AsSpan(20), sequence);
         BinaryPrimitives.WriteInt32LittleEndian(packet.AsSpan(28), length);
         BinaryPrimitives.WriteInt32LittleEndian(packet.AsSpan(32), index);
-        BinaryPrimitives.WriteInt32LittleEndian(packet.AsSpan(36), Math.Max(1, (length + Payload - 1) / Payload));
+        BinaryPrimitives.WriteInt32LittleEndian(packet.AsSpan(36), Math.Max(1, (length + _payload - 1) / _payload));
         packet[40] = kind; packet[41] = (byte)type; payload.CopyTo(packet.AsSpan(Header)); return packet;
     }
     internal (DspMessage Type, long Sequence, byte[] Bytes) Receive(TimeSpan timeout, CancellationToken cancellation = default)
@@ -144,6 +147,9 @@ internal sealed class UdpDspPeer : IDisposable
         while (Stopwatch.GetElapsedTime(_server && result is null ? Interlocked.Read(ref _lastPacket) : started) < timeout)
         {
             linked.Token.ThrowIfCancellationRequested();
+            if (!_server && _receivedSequence == 0 && _sent is { Type: DspMessage.Hello } opening
+                && opening.Sequence != Interlocked.Read(ref _acknowledgedSequence) && Stopwatch.GetElapsedTime(started).TotalSeconds > 10)
+                throw new IOException("No DSP response. Check the access key, DNS address and UDP forwarding.");
             if (_incoming.Reader.TryRead(out byte[]? packet))
             {
                 int length = BinaryPrimitives.ReadInt32LittleEndian(packet.AsSpan(28));
@@ -153,14 +159,14 @@ internal sealed class UdpDspPeer : IDisposable
                 // Duplicates can already be queued when the preceding message completes.
                 if (incomingSequence <= Interlocked.Read(ref _receivedSequence)) continue;
                 int maximum = _receivedSequence == 0 ? 1 << 20 : DspProtocol.MaximumMessage;
-                if (length < 0 || length > maximum || count != Math.Max(1, (length + Payload - 1) / Payload)
-                    || index < 0 || index >= count || packet.Length - Header != Math.Min(Payload, length - index * Payload)) continue;
+                if (length < 0 || length > maximum || count != Math.Max(1, (length + _payload - 1) / _payload)
+                    || index < 0 || index >= count || packet.Length - Header != Math.Min(_payload, length - index * _payload)) continue;
                 if (result is null)
                 { sequence = incomingSequence; type = (DspMessage)packet[41]; result = new byte[length]; arrived = new bool[count]; remaining = count; }
                 if (incomingSequence != sequence || type != (DspMessage)packet[41] || length != result.Length || count != arrived!.Length) continue;
                 if (!arrived[index])
                 {
-                    packet.AsSpan(Header).CopyTo(result.AsSpan(index * Payload)); arrived[index] = true; remaining--;
+                    packet.AsSpan(Header).CopyTo(result.AsSpan(index * _payload)); arrived[index] = true; remaining--;
                     // DSP may have taken much longer than a feedback interval. Give the arriving burst time
                     // to finish before asking for fragments that are still following it through the socket.
                     lastFeedback = Stopwatch.GetTimestamp();
@@ -173,7 +179,7 @@ internal sealed class UdpDspPeer : IDisposable
                 }
                 continue;
             }
-            double feedback = Math.Clamp(RoundTripMilliseconds > 0 ? 4 * RoundTripMilliseconds : 8, 4, 16);
+            double feedback = Math.Clamp(RoundTripMilliseconds > 0 ? 4 * RoundTripMilliseconds : _protected ? 100 : 8, 4, _protected ? 1000 : 16);
             if (Stopwatch.GetElapsedTime(lastFeedback).TotalMilliseconds >= feedback)
             {
                 if (arrived is not null)

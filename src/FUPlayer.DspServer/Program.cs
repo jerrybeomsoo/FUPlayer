@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using FUPlayer.Core.Dsp.Restoration;
 using FUPlayer.Core.Dsp.Acceleration;
 using FUPlayer.Core.NetworkDsp;
@@ -13,7 +14,7 @@ catch (Exception ex) when (ex is not (OutOfMemoryException or AccessViolationExc
 
 static async Task<int> Run(string[] arguments)
 {
-    var flags = new HashSet<string>(StringComparer.Ordinal) { "worker", "cpu", "gpu-fast", "gpu-force", "help", "version", "licenses", "devices" };
+    var flags = new HashSet<string>(StringComparer.Ordinal) { "worker", "cpu", "gpu-fast", "gpu-force", "help", "version", "licenses", "devices", "allow-internet" };
     var options = new Dictionary<string, string>(StringComparer.Ordinal);
     for (int i = 0; i < arguments.Length; i++)
     {
@@ -26,7 +27,10 @@ static async Task<int> Run(string[] arguments)
         Console.WriteLine("""
             FUPlayer Network DSP Server
             A self-contained LAN processing service, without the player or an audio device.
-              --listen <private IP>       Bind address (default 0.0.0.0; private peers only)
+              --listen <IP>               Bind address (default 0.0.0.0)
+              --allow-internet            Accept public peers; requires --key-file
+              --key-file <file>           Base64 256-bit key for authenticated encrypted UDP
+              --generate-key-file <file>  Create a private key file without printing its contents
               --port <n>                  UDP listener (default 58181)
               --worker-port-start <n>     First UDP worker port (default 58182)
               --worker-port-end <n>       Last UDP worker port (default 58213)
@@ -43,9 +47,20 @@ static async Task<int> Run(string[] arguments)
               --extract-licenses <dir>   Write embedded licences and notices
               --devices                  List convolution and neural adapter names
               --licenses | --version | --help
-            Audio uses unencrypted UDP with selective loss recovery on a trusted private network.
+            Forward only the listener UDP port. Workers bind loopback and are relayed through it.
+            Default: plain private-LAN UDP. Internet mode: AES-256-GCM UDP with the shared access key, no TLS.
             Workers exit on Stop/Pause/disconnect; the waiting listener does not load models or a GPU.
             """);
+        return 0;
+    }
+    if (options.TryGetValue("generate-key-file", out string? newKey))
+    {
+        var createOptions = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+        if (!OperatingSystem.IsWindows()) createOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        using var file = new FileStream(newKey, createOptions);
+        using var writer = new StreamWriter(file);
+        writer.WriteLine(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+        Console.WriteLine("DSP access key created. Keep the file private; paste its contents into the player's Server access key field.");
         return 0;
     }
     if (options.ContainsKey("version")) { Console.WriteLine(typeof(DspServer).Assembly.GetName().Version); return 0; }
@@ -65,6 +80,7 @@ static async Task<int> Run(string[] arguments)
     int first = Number("worker-port-start", 58182), last = Number("worker-port-end", 58213);
     if (first < 1024 || last < first || last > 65535) throw new ArgumentException("Invalid worker port range.");
     bool worker = options.ContainsKey("worker");
+    string accessKey = options.TryGetValue("key-file", out string? keyFile) ? File.ReadAllText(keyFile).Trim() : string.Empty;
     using var stop = new CancellationTokenSource();
     Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
     using PosixSignalRegistration? term = OperatingSystem.IsWindows() ? null : PosixSignalRegistration.Create(PosixSignal.SIGTERM, context => { context.Cancel = true; stop.Cancel(); });
@@ -100,11 +116,12 @@ static async Task<int> Run(string[] arguments)
             string executable = Environment.ProcessPath ?? throw new IOException("Cannot locate the server executable.");
             var start = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true };
             if (Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase)) start.ArgumentList.Add(Environment.GetCommandLineArgs()[0]);
-            foreach (var pair in options.Where(p => p.Key is not ("port" or "worker")))
+            foreach (var pair in options.Where(p => p.Key is not ("port" or "worker" or "listen")))
             {
                 start.ArgumentList.Add("--" + pair.Key);
                 if (!flags.Contains(pair.Key)) start.ArgumentList.Add(pair.Value);
             }
+            start.ArgumentList.Add("--listen"); start.ArgumentList.Add("127.0.0.1");
             start.ArgumentList.Add("--worker"); start.ArgumentList.Add("--port"); start.ArgumentList.Add(port.ToString());
             process = Process.Start(start) ?? throw new IOException("Cannot start DSP worker.");
             children[process.Id] = process;
@@ -136,6 +153,7 @@ static async Task<int> Run(string[] arguments)
     await using var server = new DspServer(new DspServerOptions
     {
         ListenAddress = IPAddress.Parse(options.GetValueOrDefault("listen") ?? "0.0.0.0"), Port = Number("port", 58181),
+        AllowInternet = options.ContainsKey("allow-internet"), AccessKey = accessKey, RelayWorkers = !worker,
         MaximumClients = worker ? 1 : Number("clients", 2), Threads = Number("threads", Math.Clamp(Environment.ProcessorCount - 1, 0, 63)),
         GpuDevice = options.GetValueOrDefault("gpu-device") ?? "", GpuAcceleration = !options.ContainsKey("cpu"),
         GpuHighPrecision = !options.ContainsKey("gpu-fast"), GpuForce = options.ContainsKey("gpu-force"),
@@ -144,7 +162,7 @@ static async Task<int> Run(string[] arguments)
         ExitAfterSession = worker, StartWorker = worker ? null : StartWorker,
     });
     server.Message += Console.WriteLine;
-    Console.WriteLine(worker ? $"READY {server.Endpoint.Port}" : $"FUPlayer DSP listening on UDP {server.Endpoint}; worker ports {first}–{last}.");
+    Console.WriteLine(worker ? $"READY {server.Endpoint.Port}" : $"FUPlayer DSP listening on UDP {server.Endpoint}; loopback workers {first}–{last}; {(options.ContainsKey("allow-internet") ? "Internet, encrypted" : "LAN only")}.");
     try { await server.RunAsync(stop.Token); }
     finally
     {

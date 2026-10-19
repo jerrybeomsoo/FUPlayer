@@ -15,7 +15,7 @@ of a complete GPU FFT or prove that an entire output stream is sample-identical.
 device and verification result to see which implementation actually runs.
 
 The **Passband** graph includes the transition peak and an exact cutoff marker, about **-6.02 dB**.
-A small peak near the transition is part of this filter's response. v0.6.0 fixes clipped peaks, misleading
+A small peak near the transition is part of this filter's response. v0.6.1 fixes clipped peaks, misleading
 decimation plots and crowded marker labels; it does not remove real ripple by drawing a flat line.
 The flat-band marker and cutoff are distinct frequencies.
 

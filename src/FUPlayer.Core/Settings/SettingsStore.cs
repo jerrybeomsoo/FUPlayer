@@ -122,6 +122,7 @@ public sealed class SettingsStore
 
         settings.Processing.FifoMilliseconds = Math.Clamp(settings.Processing.FifoMilliseconds, 50, 60_000);
         settings.Processing.NetworkDspHost = settings.Processing.NetworkDspHost?.Trim() ?? string.Empty;
+        settings.Processing.NetworkDspKey = settings.Processing.NetworkDspKey?.Trim() ?? string.Empty;
         settings.Processing.NetworkDspPort = Math.Clamp(settings.Processing.NetworkDspPort, 1, 65535);
         settings.Volume.MinimumDb = Math.Clamp(settings.Volume.MinimumDb, -120.0, 0.0);
         settings.Volume.MaximumDb = Math.Clamp(settings.Volume.MaximumDb, settings.Volume.MinimumDb, 12.0);

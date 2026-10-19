@@ -13,10 +13,10 @@ dotnet run --project .\src\FUPlayer.App -c Release
 To produce the same five files as a release, including self-contained Windows/Linux x64 servers:
 
 ```powershell
-pwsh .\build\release.ps1 -Version 0.6.0
+pwsh .\build\release.ps1 -Version 0.6.1
 ```
 
-The files appear in `artifacts\release-0.6.0`. The Windows ZIP includes both models and user guides.
+The files appear in `artifacts\release-0.6.1`. The Windows ZIP includes both models and user guides.
 FFmpeg and the DirectML redistributable are excluded. The player uses the DirectML library supplied by
 Windows. Keep [licences and notices](../THIRD-PARTY-NOTICES.md) with redistributed builds.
 

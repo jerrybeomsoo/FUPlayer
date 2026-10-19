@@ -11,7 +11,7 @@ so your DAC's own oversampling filter and modulator never run.
 Now with Neural Restorer and Upscaler.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg?style=flat-square)](https://github.com/jerrybeomsoo/FUPlayer/releases/tag/v0.6.0)
+[![Version](https://img.shields.io/badge/version-0.6.1-blue.svg?style=flat-square)](https://github.com/jerrybeomsoo/FUPlayer/releases/tag/v0.6.1)
 
 <img src="docs/images/dsp-studio.png" alt="FUPlayer DSP studio" width="820">
 
@@ -23,7 +23,7 @@ Whether a DAC bypasses its internal processing depends on the device and its sel
 
 ## Download and first run
 
-1. Download **FUPlayer-0.6.0-win-x64.zip** from the [latest release](https://github.com/jerrybeomsoo/FUPlayer/releases/latest).
+1. Download **FUPlayer-0.6.1-win-x64.zip** from the [latest release](https://github.com/jerrybeomsoo/FUPlayer/releases/latest).
 2. Extract the whole ZIP to a writable folder. Start **FUPlayer.exe** inside it.
 3. On **Output**, choose your audio back-end and device. Start with a PCM rate your DAC supports.
 4. Add music folders in **Library**, or open files and add them to the queue.
@@ -45,7 +45,7 @@ Those libraries are built separately and are not included in the ZIP.
 - **DSP studio:** long FIR filters, the Transient-Aligned Filter, phase choices, response plots and delay information.
 - **GPU resampling:** automatic CUDA preference on NVIDIA, Vulkan on other GPUs, with OpenCL available for manual selection.
 - **Neural restorer and upscaler:** optional processing for supported source formats, with separate Windows GPU choices.
-- **Network DSP:** send resampling, the restorer, the upscaler, or any combination to another computer on your LAN.
+- **Network DSP:** send resampling, the restorer, the upscaler, or any combination to another computer on your LAN or over the Internet.
 - **Library and Tracks:** album grouping from tags, track search, embedded/named cover art and file ratings.
 - **Monitoring:** spectrum/spectrogram, output delta, DSP load, underruns and network round trip time.
 - **Other inputs:** application audio capture on Windows and a UPnP renderer controlled by another application.
@@ -58,8 +58,8 @@ Linux users can install it as a boot service using the downloadable **install-ds
 The server releases its active workers when playback stops or pauses.
 
 Start with the [network setup guide](docs/network-dsp.md), then enable **Settings → Network DSP** and choose
-the stages to process remotely. Client and server should both be v0.6.0. The UDP connection is intended for
-a trusted private LAN; audio is unencrypted and the protocol has no authentication.
+the stages to process remotely. Client and server should both be v0.6.1. Internet servers use an access key and encrypted UDP, without TLS.
+LAN-only servers can retain plain UDP. Only the listener port needs forwarding; worker ports stay on loopback.
 
 ## Guides
 
@@ -75,9 +75,9 @@ a trusted private LAN; audio is unencrypted and the protocol has no authenticati
 | Render files or use the terminal | [Command line](docs/cli.md) |
 | Build the software | [Building](docs/building.md) |
 
-These guides are also in the ZIP's `docs` folder. [Changes in v0.6.0](CHANGELOG.md) include the standalone
+These guides are also in the ZIP's `docs` folder. [Changes in v0.6.1](CHANGELOG.md) include the standalone
 network server, CUDA/Vulkan resampling, file preprocessing, corrected TAF graphs and safer cover selection.
-This is an early release; supported output rates and sustained performance depend on your hardware.
+v0.6.1 adds domain/URL connections and single-port Internet DSP with an access key. This is an early release; supported output rates and sustained performance depend on your hardware.
 
 ## Licence and contributions
 
