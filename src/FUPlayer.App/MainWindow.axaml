@@ -97,6 +97,9 @@
         <Panel IsVisible="{Binding LiveInputNav.IsSelected}">
           <views:LiveInputView DataContext="{Binding LiveInput}" />
         </Panel>
+        <Panel IsVisible="{Binding IsStreamingPage}">
+          <views:StreamingView DataContext="{Binding Streaming}" />
+        </Panel>
         <Panel IsVisible="{Binding UpnpInputNav.IsSelected}">
           <views:UpnpInputView DataContext="{Binding UpnpInput}" />
         </Panel>
@@ -137,7 +140,7 @@
 
         <StackPanel Grid.Column="1" MaxWidth="660" VerticalAlignment="Center" Spacing="2">
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10">
-            <Button Classes="icon" Classes.on="{Binding Shuffle}" Command="{Binding ToggleShuffleCommand}" ToolTip.Tip="Shuffle">
+            <Button Classes="icon" Classes.on="{Binding Shuffle}" Command="{Binding ToggleShuffleCommand}" IsEnabled="{Binding CanShuffle}" ToolTip.Tip="Shuffle">
               <controls:LineIcon Data="{x:Static controls:Icons.Shuffle}" Width="18" Height="18" />
             </Button>
             <Button Classes="icon" Command="{Binding PreviousCommand}" IsEnabled="{Binding CanSkip}" ToolTip.Tip="Previous  (Ctrl+Left)">
@@ -155,10 +158,10 @@
             <Button Classes="icon" Command="{Binding NextCommand}" IsEnabled="{Binding CanSkip}" ToolTip.Tip="Next  (Ctrl+Right)">
               <controls:LineIcon Data="{x:Static controls:Icons.Next}" IsFilled="True" Width="20" Height="20" />
             </Button>
-            <Button Classes="icon" Classes.on="{Binding IsRepeatOn}" Command="{Binding CycleRepeatCommand}" ToolTip.Tip="Repeat: off, all, one">
+            <Button Classes="icon" Classes.on="{Binding IsRepeatOn}" Command="{Binding CycleRepeatCommand}" IsEnabled="{Binding CanRepeat}" ToolTip.Tip="Repeat: off, all, one">
               <controls:LineIcon Data="{Binding RepeatIcon}" Width="18" Height="18" />
             </Button>
-            <Button Classes="icon" Classes.on="{Binding StopAfterCurrent}" Command="{Binding ToggleStopAfterCurrentCommand}" ToolTip.Tip="Stop after this track">
+            <Button Classes="icon" Classes.on="{Binding StopAfterCurrent}" Command="{Binding ToggleStopAfterCurrentCommand}" IsEnabled="{Binding !IsBrowserTransport}" ToolTip.Tip="Stop after this track">
               <controls:LineIcon Data="{x:Static controls:Icons.StopAfterCurrent}" Width="18" Height="18" />
             </Button>
           </StackPanel>
@@ -207,7 +210,7 @@
                                Minimum="{Binding VolumeMinimum}" Maximum="{Binding VolumeMaximum}"
                                IsBypassed="{Binding IsVolumeFixed}" IsLimiting="{Binding IsLimiting}"
                                Value="{Binding VolumeDb}"
-                               ToolTip.Tip="Volume: drag up or down, scroll, or use the arrow keys (Shift for fine steps)" />
+                               ToolTip.Tip="{Binding VolumeHint}" />
         </StackPanel>
       </Grid>
     </Border>

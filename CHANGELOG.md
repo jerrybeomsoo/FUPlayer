@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.7.0 — 2026-10-20
+
+### Added
+
+- **Apple Music inside FUPlayer.** Streaming is a top-level section with Apple Music beneath it.
+  Official Firefox runs in a dedicated profile and a chromeless, resizable player panel. Sign in directly
+  in Firefox; its sandbox, DRM and normal update behaviour stay enabled.
+  [Setup guide](https://github.com/jerrybeomsoo/FUPlayer/blob/v0.7.0/docs/streaming.md).
+- **Direct browser audio into DSP.** Browser-permitted Web Audio sends 48 kHz stereo float32 to FUPlayer
+  before Windows mixer processing. Local or Network DSP and the selected FUPlayer output apply; the
+  dedicated browser's normal speaker output is silent. This is not a source-bit-perfect or lossless-tier claim.
+- **A bundled, Mozilla-signed streaming add-on.** Confirm installation once in Firefox; later launches
+  connect automatically with a fresh local session. Audio, metadata and playback state stay on this
+  computer, with optional local technical diagnostics.
+  [Privacy](https://github.com/jerrybeomsoo/FUPlayer/blob/v0.7.0/docs/streaming-privacy.md).
+- **Service controls and current-track display.** Play/pause, next/previous, seeking, Shuffle and Repeat
+  control Apple Music. Now playing and the bottom bar show current artwork, title, artist and album.
+
+### Changed
+
+- **One streaming volume control.** The FUPlayer knob and Apple Music volume stay synchronised while
+  FUPlayer's internal volume gain remains at 0 dB. Local-file volume is retained separately.
+- **User guides in the ZIP.** Apple Music setup, audio-format limits and privacy information are included
+  for offline reading. Firefox and its DRM components are installed separately.
+
+### Fixed
+
+- **Periodic streaming interruptions.** Internal media-segment seeks no longer restart the browser
+  decoder, clear Now playing or reset the volume display. Real track seeks flush the required buffers.
+- **Browser layout and shutdown.** The service popup fits the player, survives resizing and closes
+  with FUPlayer. Browser close no longer blocks the player interface.
+- **First installation and automatic startup.** The first add-on installation continues into embedded
+  Apple Music without closing/reopening Firefox or loading a temporary manifest.
+- **Pause and track-change handling.** Browser playback state and bounded PCM buffering prevent the
+  earlier pause-related queue overflow and missed-startup silence.
+
+### Compatibility and validation
+
+- Windows x64; official Firefox 142 or newer. Apple Music access depends on your account and provider.
+  Spotify and YouTube Music are deferred. The fixed Web Audio input can resample the provider's audio.
+- User-confirmed Apple Music playback includes neural restoration/upscaling, transport and mode controls,
+  volume, metadata/artwork, complete embedded layout, more than two minutes of seamless audio, persistent
+  reopening and a fresh first installation. Longer-duration and wider Firefox/device coverage remain open.
+- Network DSP retains **protocol 4**, introduced in v0.6.3. Existing v0.6.3 servers remain compatible;
+  v0.6.2 and earlier use an incompatible protocol. Standalone v0.7.0 servers are included in this release.
+
+
 ## 0.6.3 — 2026-10-19
 
 ### Added

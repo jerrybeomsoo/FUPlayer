@@ -11,7 +11,7 @@ so your DAC's own oversampling filter and modulator never run.
 Now with Neural Restorer and Upscaler.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.3-blue.svg?style=flat-square)](https://github.com/jerrybeomsoo/FUPlayer/releases/tag/v0.6.3)
+[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg?style=flat-square)](https://github.com/jerrybeomsoo/FUPlayer/releases/tag/v0.7.0)
 
 <img src="docs/images/dsp-studio.png" alt="FUPlayer DSP studio" width="820">
 
@@ -23,7 +23,7 @@ Whether a DAC bypasses its internal processing depends on the device and its sel
 
 ## Download and first run
 
-1. Download **FUPlayer-0.6.3-win-x64.zip** from the [latest release](https://github.com/jerrybeomsoo/FUPlayer/releases/latest).
+1. Download **FUPlayer-0.7.0-win-x64.zip** from the [latest release](https://github.com/jerrybeomsoo/FUPlayer/releases/latest).
 2. Extract the whole ZIP to a writable folder. Start **FUPlayer.exe** inside it.
 3. On **Output**, choose your audio back-end and device. Start with a PCM rate your DAC supports.
 4. Add music folders in **Library**, or open files and add them to the queue.
@@ -48,6 +48,7 @@ Those libraries are built separately and are not included in the ZIP.
 - **Network DSP:** send resampling, the restorer, the upscaler, or any combination to another computer on your LAN or over the Internet.
 - **Library and Tracks:** album grouping from tags, track search, embedded/named cover art and file ratings.
 - **Monitoring:** spectrum/spectrogram and level meters that follow what is being heard, output delta, DSP and server load, underruns and network round trip time.
+- **Apple Music:** embedded Firefox, a bundled signed add-on, direct audio into DSP, playback controls and current artwork. [First-use guide](docs/streaming.md).
 - **Other inputs:** application audio capture on Windows and a UPnP renderer controlled by another application.
 
 ## Network processing
@@ -58,7 +59,7 @@ Linux users can install it as a boot service using the downloadable **install-ds
 The server releases its active workers when playback stops or pauses.
 
 Start with the [network setup guide](docs/network-dsp.md), then enable **Settings → Network DSP** and choose
-the stages to process remotely. Client and server must both be v0.6.3, which changed the protocol. Internet servers use an access key and encrypted UDP, without TLS.
+the stages to process remotely. v0.7.0 retains protocol 4 from v0.6.3; existing v0.6.3 servers remain compatible. Versions through v0.6.2 use an older protocol. Internet servers use an access key and encrypted UDP, without TLS.
 LAN-only servers can retain plain UDP. Only the listener port needs forwarding; worker ports stay on loopback.
 
 ## Guides
@@ -70,15 +71,16 @@ LAN-only servers can retain plain UDP. Only the listener port needs forwarding; 
 | Set up another computer for processing | [Network DSP](docs/network-dsp.md) |
 | Organise albums, covers, tracks and the queue | [Library](docs/library.md) |
 | Try neural processing or the exciter | [Restorer](docs/neural-restorer.md), [upscaler](docs/neural-upscaler.md), [exciter](docs/exciter.md) |
+| Play Apple Music inside FUPlayer | [Apple Music streaming](docs/streaming.md) and [privacy](docs/streaming-privacy.md) |
 | Play from a UPnP controller | [UPnP input](docs/upnp-input.md) |
 | Fix dropouts or report a problem | [Troubleshooting](docs/troubleshooting.md) |
 | Render files or use the terminal | [Command line](docs/cli.md) |
 | Build the software | [Building](docs/building.md) |
 
-These guides are also in the ZIP's `docs` folder. [Changes in v0.6.3](CHANGELOG.md) include a rewritten network
-DSP protocol that keeps the server busy over slow links, the neural upscaler on a Linux server's graphics card,
-faster tap-by-tap convolution, and meters and analyzer that follow what is being heard. This is an early
-release; supported output rates and sustained performance depend on your hardware.
+These guides are also in the ZIP's `docs` folder. [Changes in v0.7.0](CHANGELOG.md) add Apple Music
+inside FUPlayer, with automatic signed add-on loading, direct audio, service playback controls,
+synchronised volume and track artwork. Firefox is installed separately. Supported output rates and
+sustained DSP performance still depend on your hardware.
 
 ## Licence and contributions
 

@@ -119,6 +119,12 @@ ships with FUPlayer, and the one Windows has in System32 is the one loaded.
 
 ## Trademarks
 
+The optional Streaming host launches the user's separately installed Mozilla Firefox (MPL-2.0).
+FUPlayer does not include Firefox code or binaries. Firefox manages any Widevine CDM under its own
+browser settings and provider terms; no CDM binary is included or copied by FUPlayer. See
+[Firefox's licence](https://www.mozilla.org/en-US/MPL/2.0/) and
+[Mozilla's DRM guidance](https://support.mozilla.org/en-US/kb/enable-drm).
+
 ASIO is a trademark of Steinberg Media Technologies GmbH. DSD and Super Audio CD are trademarks of Sony
 Corporation and Koninklijke Philips N.V. Apple Music, Spotify, YouTube and Firefox, named where the documentation
 describes what a capture carries, are trademarks of their owners. FUPlayer is an independent project and is not

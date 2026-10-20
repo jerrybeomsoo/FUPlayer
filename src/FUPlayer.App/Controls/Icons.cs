@@ -22,6 +22,7 @@ public static class Icons
     public static readonly Geometry Library = Parse("M4,4 H10 V10 H4 Z M14,4 H20 V10 H14 Z M4,14 H10 V20 H4 Z M14,14 H20 V20 H14 Z");
     public static readonly Geometry Dsp = Parse("M2,12 H5 L7.5,5 L11,19 L14,8 L16.5,15 L18,12 H22");
     public static readonly Geometry Output = Parse("M4,9 H8 L13,5 V19 L8,15 H4 Z M16.5,8.8 C18.2,10.5 18.2,13.5 16.5,15.2 M19,6.3 C22.1,9.4 22.1,14.6 19,17.7");
+    public static readonly Geometry Browser = Parse("M3,4 H21 V20 H3 Z M3,9 H21 M6,6.5 H7 M9,6.5 H10 M12,6.5 H18");
     public static readonly Geometry LiveInput = Parse("M4,9.5 H7 L11,6 V18 L7,14.5 H4 Z M14.5,12 H21 M18,9 L21,12 L18,15");
     public static readonly Geometry Upnp = Parse("M10.5,12 A1.5,1.5 0 1 0 13.5,12 A1.5,1.5 0 1 0 10.5,12 Z M7.8,8 C5.6,10.2 5.6,13.8 7.8,16 M16.2,8 C18.4,10.2 18.4,13.8 16.2,16 M5,5.2 C1.3,8.9 1.3,15.1 5,18.8 M19,5.2 C22.7,8.9 22.7,15.1 19,18.8");
     public static readonly Geometry Calibration = Parse("M12,2.5 V6 M12,18 V21.5 M2.5,12 H6 M18,12 H21.5 M5.5,12 A6.5,6.5 0 1 0 18.5,12 A6.5,6.5 0 1 0 5.5,12 Z M10.5,12 A1.5,1.5 0 1 0 13.5,12 A1.5,1.5 0 1 0 10.5,12 Z");

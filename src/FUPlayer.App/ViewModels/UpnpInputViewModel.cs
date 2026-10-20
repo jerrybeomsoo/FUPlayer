@@ -272,7 +272,7 @@ public sealed partial class UpnpInputViewModel : ObservableObject
             : upnp.StartError ?? Loc.T("Off: controllers do not see the player.");
         AddressesText = snapshot is null ? string.Empty : Loc.F("Description at {0}", string.Join("  ·  ", snapshot.DescriptionUrls));
 
-        NetworkStreamStatus? stream = status.IsStream && status.State != EngineState.Stopped ? status.Stream : null;
+        NetworkStreamStatus? stream = status.IsStream && status.State != EngineState.Stopped && status.Stream?.DirectBrowserAudio != true ? status.Stream : null;
         string state = snapshot?.TransportState ?? "NO_MEDIA_PRESENT";
         IsReceiving = stream is not null;
         TransportBadge = state switch

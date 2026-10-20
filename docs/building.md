@@ -13,10 +13,10 @@ dotnet run --project .\src\FUPlayer.App -c Release
 To produce the same five files as a release, including self-contained Windows/Linux x64 servers:
 
 ```powershell
-pwsh .\build\release.ps1 -Version 0.6.1
+pwsh .\build\release.ps1 -Version 0.7.0
 ```
 
-The files appear in `artifacts\release-0.6.1`. The Windows ZIP includes both models and user guides.
+The files appear in `artifacts\release-0.7.0`. The Windows ZIP includes both models and user guides.
 FFmpeg and the DirectML redistributable are excluded. The player uses the DirectML library supplied by
 Windows. Keep [licences and notices](../THIRD-PARTY-NOTICES.md) with redistributed builds.
 
@@ -24,3 +24,8 @@ For just a processing server, use `pwsh .\build\publish-dsp-server.ps1 -Runtime 
 or `-Runtime win-x64`. See [Network DSP](network-dsp.md) for deployment. The Linux server can also be
 built on Linux with .NET 9 SDK and PowerShell 7. Normal host GPU/OS libraries are still required.
 The desktop player currently targets Windows; a Linux server does not provide a Linux playback back-end.
+
+The Windows player includes the project's Mozilla-signed streaming add-on as an embedded resource.
+It does not include Firefox or a browser profile. The extension source is under
+`src/FUPlayer.App/StreamingAddon`; `build/firefox-addon.ps1` copies its readable source into a signing ZIP.
+Changing the extension requires a new Mozilla-signed version before replacing the bundled XPI.

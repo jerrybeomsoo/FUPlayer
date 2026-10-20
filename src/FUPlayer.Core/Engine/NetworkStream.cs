@@ -1,4 +1,5 @@
 using FUPlayer.Core.Upnp;
+using FUPlayer.Core.Decoding;
 
 namespace FUPlayer.Core.Engine;
 
@@ -6,7 +7,13 @@ namespace FUPlayer.Core.Engine;
 /// <param name="Uri">The stream's http address.</param>
 /// <param name="Metadata">What the sender said about it, if anything.</param>
 /// <param name="Controller">Who sent it, in words: "foobar2000 on this computer".</param>
-public sealed record NetworkStreamRequest(string Uri, StreamMetadata? Metadata, string Controller);
+public sealed record NetworkStreamRequest(string Uri, StreamMetadata? Metadata, string Controller, bool DirectBrowserAudio = false)
+{
+    /// <summary>Player-owned live PCM source; external controllers only supply ordinary HTTP addresses.</summary>
+    public Func<IAudioDecoder>? OpenDecoder { get; init; }
+    /// <summary>Reads current metadata from a trusted live source without restarting its audio decoder.</summary>
+    public Func<StreamMetadata?>? ReadMetadata { get; init; }
+}
 
 /// <summary>The network stream that is playing, as the interface shows it.</summary>
 public sealed record NetworkStreamStatus
@@ -14,6 +21,9 @@ public sealed record NetworkStreamStatus
     public required string Uri { get; init; }
 
     public required string Controller { get; init; }
+
+    /// <summary>True for the player's private browser PCM bridge, rather than a UPnP controller.</summary>
+    public bool DirectBrowserAudio { get; init; }
 
     /// <summary>The latest metadata, which a continuous stream updates as each track begins.</summary>
     public StreamMetadata? Metadata { get; init; }

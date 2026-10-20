@@ -15,6 +15,17 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        if (FUPlayer.Core.Streaming.FirefoxNativeMessaging.IsInvocation(args))
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try
+            {
+                FUPlayer.Core.Streaming.FirefoxNativeMessaging.Run(Console.OpenStandardInput(), Console.OpenStandardOutput(),
+                    args[0], args[1], owner => FirefoxNative.IsOwnedProcess(owner, Environment.ProcessId), timeout.Token).GetAwaiter().GetResult();
+            }
+            catch (Exception ex) when (ex is IOException or OperationCanceledException) { }
+            return;
+        }
         ProcessScheduling.RequestRealtime();
         AppDomain.CurrentDomain.UnhandledException += (_, e) => WriteCrashLog(e.ExceptionObject as Exception);
 

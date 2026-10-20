@@ -93,6 +93,9 @@ public sealed class SettingsStore
         settings.Analyzer ??= new AnalyzerSettings();
         settings.Ui ??= new UiSettings();
         settings.Upnp ??= new UpnpSettings();
+        settings.Ui.FirefoxExecutable = settings.Ui.FirefoxExecutable?.Trim() ?? string.Empty;
+        settings.Ui.StreamingAddress = string.IsNullOrWhiteSpace(settings.Ui.StreamingAddress)
+            ? "https://music.apple.com/" : settings.Ui.StreamingAddress.Trim();
         settings.Version = PlayerSettings.CurrentVersion;
 
         settings.Speakers.Channels ??= [];

@@ -75,6 +75,9 @@ public sealed class LiveSourceDescriber
 
     private async Task<LiveTrack> DescribeStreamAsync(PlaybackStatus status, NetworkStreamStatus stream)
     {
+        if (stream.DirectBrowserAudio)
+            return new LiveTrack(stream.Metadata?.Title ?? Loc.T("Firefox"), stream.Metadata?.Artist ?? Loc.T("Direct browser audio"), stream.Metadata?.Album,
+                Loc.T("Direct browser audio") + Format(status), Loc.T("Streaming"), await ArtAsync(stream.Metadata));
         string controller = stream.Controller;
         string product = ControllerProduct(controller);
         bool local = controller.EndsWith("on this computer", StringComparison.Ordinal);

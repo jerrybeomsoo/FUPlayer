@@ -1,0 +1,24 @@
+{
+  "manifest_version": 2,
+  "name": "FUPlayer Streaming",
+  "version": "0.2.0",
+  "description": "Play Apple Music through FUPlayer DSP using browser-permitted audio on this computer.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "fuplayer-direct-audio@local",
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": ["websiteContent", "websiteActivity"],
+        "optional": ["technicalAndInteraction"]
+      }
+    }
+  },
+  "permissions": ["https://music.apple.com/*", "tabs", "nativeMessaging", "http://127.0.0.1/*"],
+  "background": { "scripts": ["bootstrap.js", "background.js"] },
+  "content_scripts": [
+    { "matches": ["https://music.apple.com/*"], "js": ["page-controls.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["https://music.apple.com/*"], "js": ["content.js"], "run_at": "document_start", "world": "ISOLATED" }
+  ],
+  "web_accessible_resources": ["worklet.js"],
+  "content_security_policy": "script-src 'self'; object-src 'self'; connect-src ws://127.0.0.1:*"
+}

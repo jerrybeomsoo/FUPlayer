@@ -22,11 +22,11 @@
     to keep.
 
 .EXAMPLE
-    pwsh build/package.ps1 -Version 0.6.3
+    pwsh build/package.ps1 -Version 0.7.0
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = "0.6.3",
+    [string]$Version = "0.7.0",
     [string]$Runtime = "win-x64",
     [switch]$FrameworkDependent,
     [switch]$IncludeFFmpeg
@@ -89,7 +89,7 @@ Copy-Item (Join-Path $root "licenses") (Join-Path $stage "licenses") -Recurse
 # Only public user guides belong in the offline package, never development reports.
 $guideDirectory = Join-Path $stage 'docs'
 New-Item -ItemType Directory -Path $guideDirectory -Force | Out-Null
-foreach ($guide in @('settings.md', 'dsp.md', 'library.md', 'network-dsp.md', 'neural-restorer.md', 'neural-upscaler.md', 'exciter.md', 'transient-aligned-filter.md', 'cli.md', 'building.md', 'building-ffmpeg.md', 'upnp-input.md', 'troubleshooting.md')) {
+foreach ($guide in @('settings.md', 'dsp.md', 'library.md', 'network-dsp.md', 'neural-restorer.md', 'neural-upscaler.md', 'exciter.md', 'transient-aligned-filter.md', 'cli.md', 'building.md', 'building-ffmpeg.md', 'upnp-input.md', 'streaming.md', 'streaming-privacy.md', 'troubleshooting.md')) {
     $guidePath = Join-Path $root "docs\$guide"
     if (Test-Path -LiteralPath $guidePath) { Copy-Item -LiteralPath $guidePath -Destination $guideDirectory }
 }

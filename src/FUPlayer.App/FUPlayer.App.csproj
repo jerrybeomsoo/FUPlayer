@@ -18,6 +18,9 @@
 
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
+    <EmbeddedResource Include="StreamingAddon\*.js" />
+    <EmbeddedResource Include="StreamingAddon\*.html" />
+    <EmbeddedResource Include="StreamingAddon\*.xpi" />
   </ItemGroup>
 
   <ItemGroup>

@@ -130,9 +130,11 @@ public sealed class PlaybackEngine : IDisposable
 
     public double VolumeDb
     {
-        get => Volatile.Read(ref _volumeDb);
+        get => _network?.DirectBrowserAudio == true ? 0 : Volatile.Read(ref _volumeDb);
         set
         {
+            // The service owns browser volume. Retain the local-file level for when this stream closes.
+            if (_network?.DirectBrowserAudio == true) return;
             Volatile.Write(ref _volumeDb, ClampVolume(_settings.Volume, value));
             ApplyLiveGain();
         }
@@ -246,6 +248,12 @@ public sealed class PlaybackEngine : IDisposable
     public void PlayCapture(int processId) { _networkStopRequested = false; Post(new CaptureCommand(processId), interrupt: true); }
 
     /// <summary>
+    /// Stops only this captured application, including a capture command still waiting to start. A file or another
+    /// application's capture chosen in the meantime is left playing. The guard runs on the engine command thread.
+    /// </summary>
+    public void StopCapture(int processId) => Post(new StopCaptureCommand(processId), interrupt: false);
+
+    /// <summary>
     /// Plays a stream from a network address, as a UPnP controller asks for: another source outside the queue, like
     /// a capture, that runs until the sender stops it or its stream ends.
     /// </summary>
@@ -255,6 +263,12 @@ public sealed class PlaybackEngine : IDisposable
         _networkStopRequested = false;
         Post(new NetworkStreamCommand(request), interrupt: true);
     }
+
+    /// <summary>Stops an owned stream without stopping a file or another sender selected in the meantime.</summary>
+    public void StopNetworkStream(string uri) => Post(new StopNetworkStreamCommand(uri), interrupt: false);
+
+    /// <summary>Flushes a seek in the owned browser stream without reopening its decoder or losing source identity.</summary>
+    public void ResetBrowserStream(string uri) => Post(new ResetBrowserStreamCommand(uri), interrupt: true);
 
     /// <summary>
     /// New metadata for the network stream at <paramref name="uri"/>, which a sender streaming continuously sends as
@@ -312,17 +326,21 @@ public sealed class PlaybackEngine : IDisposable
 
         int index = marker is not null ? ResolveIndex(marker.Index, marker.Item) : Volatile.Read(ref _reportedIndex);
         NetworkStreamStatus? network = null;
-        if (marker?.IsStream == true && _network is { } request && _decoder is NetworkStreamDecoder streaming)
+        var request = _network;
+        // Browser seek resets briefly clear output markers, but the same decoder and owned source remain live.
+        bool isStream = marker?.IsStream == true || (request?.DirectBrowserAudio == true && _decoder is not null);
+        if (isStream && request is not null && _decoder is { } streaming)
         {
             network = new NetworkStreamStatus
             {
                 Uri = request.Uri,
                 Controller = request.Controller,
-                Metadata = _networkMetadata,
+                DirectBrowserAudio = request.DirectBrowserAudio,
+                Metadata = request.ReadMetadata?.Invoke() ?? _networkMetadata,
                 Container = streaming.CodecName,
-                ContentType = streaming.ContentType,
-                BufferedSeconds = streaming.BufferedSeconds,
-                StarvedReads = streaming.StarvedReads,
+                ContentType = (streaming as NetworkStreamDecoder)?.ContentType,
+                BufferedSeconds = (streaming as NetworkStreamDecoder)?.BufferedSeconds ?? 0,
+                StarvedReads = (streaming as NetworkStreamDecoder)?.StarvedReads ?? 0,
             };
         }
 
@@ -335,7 +353,7 @@ public sealed class PlaybackEngine : IDisposable
             IsCapture = marker?.IsCapture ?? false,
             CaptureProcessId = marker?.IsCapture == true ? _captureProcessId : 0,
             CaptureNote = marker?.IsCapture == true ? (_decoder as IDiagnosticCapture)?.DirectOutputNote : null,
-            IsStream = marker?.IsStream ?? false,
+            IsStream = isStream,
             Stream = network,
             Bandwidth = Describe(pipeline),
             Position = position,
@@ -536,8 +554,18 @@ public sealed class PlaybackEngine : IDisposable
             case CaptureCommand capture:
                 StartCapture(capture.ProcessId);
                 break;
+            case StopCaptureCommand capture:
+                if (capture.ProcessId > 0 && _captureProcessId == capture.ProcessId) StopInternal();
+                break;
             case NetworkStreamCommand stream:
                 StartNetworkStream(stream.Request);
+                break;
+            case StopNetworkStreamCommand stream:
+                if (_network?.Uri == stream.Uri) StopInternal();
+                break;
+            case ResetBrowserStreamCommand reset:
+                if (_network is { DirectBrowserAudio: true } browser && browser.Uri == reset.Uri && _decoder is { } decoder)
+                    StartPipeline(-1, decoder, null, PlanFor(decoder), TimeSpan.Zero, keepPaused: _state == EngineState.Paused);
                 break;
         }
     }
@@ -722,15 +750,17 @@ public sealed class PlaybackEngine : IDisposable
         _draining = false;
         CloseDecoder();
         _captureProcessId = 0;
+        IAudioDecoder? decoder = null;
         try
         {
-            NetworkStreamDecoder decoder = NetworkStreamDecoder.Open(request.Uri, request.Metadata?.ProtocolInfo);
+            decoder = request.OpenDecoder?.Invoke() ?? NetworkStreamDecoder.Open(request.Uri, request.Metadata?.ProtocolInfo);
             _network = request;
             _networkMetadata = request.Metadata;
             StartPipeline(-1, decoder, null, PlanFor(decoder), TimeSpan.Zero, keepPaused: false);
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
+            if (!ReferenceEquals(_decoder, decoder)) decoder?.Dispose();
             _network = null;
             if (!_networkStopRequested) ReportError(Loc.F(NetworkStreamErrorFormat, request.Controller, ex.Message));
             StopInternal();
@@ -839,7 +869,7 @@ public sealed class PlaybackEngine : IDisposable
             decoder.Length,
             decoder is TestToneDecoder,
             _captureProcessId > 0,
-            decoder is NetworkStreamDecoder);
+            _network is not null);
 
         lock (_statusGate)
         {
@@ -869,7 +899,7 @@ public sealed class PlaybackEngine : IDisposable
     private void BeginNextTrack()
     {
         int finished = ResolveIndex(_decoderIndex, _decoderItem);
-        bool wasTestTone = _decoder is TestToneDecoder || _captureProcessId > 0 || _decoder is NetworkStreamDecoder;
+        bool wasTestTone = _decoder is TestToneDecoder || _captureProcessId > 0 || _network is not null;
         CloseDecoder();
 
         if (!wasTestTone && !StopAfterCurrent)
@@ -1120,7 +1150,7 @@ public sealed class PlaybackEngine : IDisposable
         {
             StartCapture(_captureProcessId);
         }
-        else if (marker?.IsStream == true && _decoder is NetworkStreamDecoder stream && _network is not null)
+        else if (marker?.IsStream == true && _decoder is { } stream && _network is not null)
         {
             // The same stream carries on under the new processing: opening it again would ask the sender for a
             // second stream, which a live one does not have.
@@ -1682,7 +1712,8 @@ public sealed class PlaybackEngine : IDisposable
             return 0.0;
         }
 
-        double linear = _settings.Volume.IsBypassed ? 1.0 : Math.Pow(10.0, Volatile.Read(ref _volumeDb) / 20.0);
+        double linear = _network?.DirectBrowserAudio == true || _settings.Volume.IsBypassed
+            ? 1.0 : Math.Pow(10.0, Volatile.Read(ref _volumeDb) / 20.0);
         return _invert ? -linear : linear;
     }
 
@@ -1756,8 +1787,11 @@ public sealed class PlaybackEngine : IDisposable
     private sealed record TestToneCommand(TestToneMode Mode) : Command;
 
     private sealed record CaptureCommand(int ProcessId) : Command;
+    private sealed record StopCaptureCommand(int ProcessId) : Command;
 
     private sealed record NetworkStreamCommand(NetworkStreamRequest Request) : Command;
+    private sealed record StopNetworkStreamCommand(string Uri) : Command;
+    private sealed record ResetBrowserStreamCommand(string Uri) : Command;
 
     private sealed record ShutdownCommand : Command;
     private sealed record NetworkPauseCommand : Command;

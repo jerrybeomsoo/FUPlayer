@@ -91,6 +91,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _canSeek;
 
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(VolumeHint))] private bool _isBrowserTransport;
+    [ObservableProperty] private bool _canShuffle = true;
+    [ObservableProperty] private bool _canRepeat = true;
+    private bool _receivingBrowserVolume;
+    public string VolumeHint => IsBrowserTransport
+        ? Loc.T("Browser volume only. FUPlayer DSP gain stays at 0 dB.")
+        : Loc.T("Volume: drag up or down, scroll, or use the arrow keys (Shift for fine steps)");
+
     [ObservableProperty]
     private string _positionText = "0:00";
 
@@ -185,6 +193,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Output = new OutputViewModel(services, dialogs);
         Calibration = new CalibrationViewModel(services);
         LiveInput = new LiveInputViewModel(services);
+        Streaming = new StreamingViewModel(services);
+        Streaming.VolumeChanged += volume =>
+        {
+            _receivingBrowserVolume = true;
+            try { VolumeDb = volume <= 0 ? VolumeMinimum : Math.Clamp(20 * Math.Log10(volume), VolumeMinimum, VolumeMaximum); }
+            finally { _receivingBrowserVolume = false; }
+        };
         UpnpInput = new UpnpInputViewModel(services);
         General = new SettingsViewModel(services);
         Glossary = new GlossaryViewModel();
@@ -196,11 +211,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         DspNav = new NavItem("Dsp", "DSP studio", Icons.Dsp, Dsp);
         OutputNav = new NavItem("Output", "Output", Icons.Output, Output);
         LiveInputNav = new NavItem("LiveInput", "Live input", Icons.LiveInput, LiveInput);
+        StreamingNav = new NavItem("Streaming", "Streaming", Icons.Browser, Streaming);
+        AppleMusicNav = new NavItem("AppleMusic", "Apple Music", Icons.Music, Streaming, isChild: true);
         UpnpInputNav = new NavItem("UpnpInput", "UPnP input", Icons.Upnp, UpnpInput, isChild: true);
         CalibrationNav = new NavItem("Calibration", "Calibration", Icons.Calibration, Calibration);
         SettingsNav = new NavItem("Settings", "Settings", Icons.Settings, General);
         GlossaryNav = new NavItem("Glossary", "Glossary", Icons.Glossary, Glossary, isChild: true);
-        Navigation = [NowPlayingNav, QueueNav, LibraryNav, TracksNav, LiveInputNav, UpnpInputNav, DspNav, OutputNav, CalibrationNav, SettingsNav, GlossaryNav];
+        Navigation = [NowPlayingNav, QueueNav, LibraryNav, TracksNav, LiveInputNav, UpnpInputNav, StreamingNav, AppleMusicNav, DspNav, OutputNav, CalibrationNav, SettingsNav, GlossaryNav];
         SelectedNav = Navigation.FirstOrDefault(n => n.Key == services.Settings.Ui.LastPage) ?? NowPlayingNav;
 
         PlaybackSettings playback = services.Settings.Playback;
@@ -242,6 +259,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public LiveInputViewModel LiveInput { get; }
 
+    public StreamingViewModel Streaming { get; }
+
     public UpnpInputViewModel UpnpInput { get; }
 
     public SettingsViewModel General { get; }
@@ -262,6 +281,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public NavItem OutputNav { get; }
 
     public NavItem LiveInputNav { get; }
+
+    public NavItem StreamingNav { get; }
+    public NavItem AppleMusicNav { get; }
+    public bool IsStreamingPage => SelectedNav == StreamingNav || SelectedNav == AppleMusicNav;
 
     public NavItem UpnpInputNav { get; }
 
@@ -298,6 +321,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _timer.Stop();
         General.CancelFfmpegBuildOnExit();
         Library.Dispose();
+        Streaming.Dispose();
     }
 
     partial void OnSelectedNavChanged(NavItem? oldValue, NavItem newValue)
@@ -308,6 +332,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         newValue.IsSelected = true;
+        OnPropertyChanged(nameof(IsStreamingPage));
+        Streaming.IsAppleMusicPage = newValue == AppleMusicNav;
         if (newValue == OutputNav)
         {
             // Probing a device opens it, so it waits until the page is on screen.
@@ -334,11 +360,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnVolumeDbChanged(double value)
     {
-        if (!_ready)
+        if (!_ready || _receivingBrowserVolume)
         {
             return;
         }
 
+        if (Streaming.Owns(_services.Engine.GetStatus()))
+        {
+            if (!_receivingBrowserVolume) Streaming.SetVolume(value);
+            return;
+        }
         _services.Engine.VolumeDb = value;
         _services.Settings.Volume.VolumeDb = value;
         _services.NotifySettingsChanged(applyToEngine: false);
@@ -347,6 +378,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void PlayPause()
     {
+        if (Streaming.TryPlayPause(_services.Engine.GetStatus())) return;
         if (_services.Engine.State == EngineState.Stopped && _services.Engine.Queue.Count == 0)
         {
             SelectedNav = LibraryNav;
@@ -357,14 +389,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private void Stop() => _services.Engine.Stop();
+    private void Stop()
+    {
+        if (Streaming.Owns(_services.Engine.GetStatus())) Streaming.CloseCommand.Execute(null);
+        else _services.Engine.Stop();
+    }
 
     [RelayCommand]
-    private void Next() => _services.Engine.Next();
+    private void Next()
+    {
+        if (!Streaming.TrySkip(_services.Engine.GetStatus(), next: true)) _services.Engine.Next();
+    }
 
     [RelayCommand]
     private void Previous()
     {
+        if (Streaming.TrySkip(_services.Engine.GetStatus(), next: false)) return;
         if (CanSeek && PositionSeconds > 3)
         {
             _services.Engine.Seek(TimeSpan.Zero);
@@ -376,11 +416,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private void Seek(double seconds) => _services.Engine.Seek(TimeSpan.FromSeconds(Math.Max(0, seconds)));
+    private void Seek(double seconds)
+    {
+        if (!Streaming.TrySeek(_services.Engine.GetStatus(), seconds)) _services.Engine.Seek(TimeSpan.FromSeconds(Math.Max(0, seconds)));
+    }
 
     [RelayCommand]
     private void CycleRepeat()
     {
+        if (Streaming.TryRepeat(_services.Engine.GetStatus())) return;
         Repeat = Repeat switch
         {
             RepeatMode.Off => RepeatMode.All,
@@ -393,6 +437,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ToggleShuffle()
     {
+        if (Streaming.TryShuffle(_services.Engine.GetStatus())) return;
         Shuffle = !Shuffle;
         ApplyQueueOptions();
     }
@@ -465,12 +510,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void RefreshVolumeRange()
     {
         VolumeSettings volume = _services.Settings.Volume;
-        VolumeMinimum = volume.MinimumDb;
-        VolumeMaximum = volume.MaximumDb;
-        IsVolumeFixed = volume.IsBypassed;
-        if (VolumeDb < volume.MinimumDb || VolumeDb > volume.MaximumDb)
+        VolumeMinimum = IsBrowserTransport ? -60 : volume.MinimumDb;
+        VolumeMaximum = IsBrowserTransport ? Math.Min(0, volume.MaximumDb) : volume.MaximumDb;
+        IsVolumeFixed = !IsBrowserTransport && volume.IsBypassed;
+        if (VolumeDb < VolumeMinimum || VolumeDb > VolumeMaximum)
         {
-            VolumeDb = Math.Clamp(VolumeDb, volume.MinimumDb, volume.MaximumDb);
+            VolumeDb = Math.Clamp(VolumeDb, VolumeMinimum, VolumeMaximum);
         }
     }
 
@@ -481,9 +526,31 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         bool active = status.State != EngineState.Stopped;
         IsActive = active;
         IsPlaying = status.State == EngineState.Playing;
+        bool browser = Streaming.Owns(status);
+        if (IsBrowserTransport != browser)
+        {
+            IsBrowserTransport = browser;
+            Repeat = _services.Settings.Playback.Repeat;
+            Shuffle = _services.Settings.Playback.Shuffle;
+            if (!browser)
+            {
+                _receivingBrowserVolume = true;
+                try { VolumeDb = engine.VolumeDb; }
+                finally { _receivingBrowserVolume = false; }
+            }
+            RefreshVolumeRange();
+        }
+        Streaming.Update(status);
+        CanShuffle = !browser || Streaming.CanShuffle;
+        CanRepeat = !browser || Streaming.CanRepeat;
+        if (browser && Streaming.Transport is { } transport)
+        {
+            if (transport.Shuffle is { } shuffle) Shuffle = shuffle;
+            if (transport.Repeat is { } repeat) Repeat = repeat switch { "all" => RepeatMode.All, "one" => RepeatMode.One, _ => RepeatMode.Off };
+        }
 
         UpdateCurrent(status);
-        CanSkip = !(active && (status.IsCapture || status.IsStream));
+        CanSkip = Streaming.Owns(status) ? Streaming.CanSkipTracks : !(active && (status.IsCapture || status.IsStream));
         if (active && (status.IsCapture || status.IsStream) && DateTime.UtcNow >= _liveNextUtc)
         {
             _ = RefreshLiveAsync(status);
@@ -552,9 +619,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         else if (status.IsStream && status.Stream is { } stream)
         {
-            TrackTitle = Loc.T("UPnP stream");
+            TrackTitle = stream.DirectBrowserAudio ? stream.Metadata?.Title ?? Loc.T("Firefox") : Loc.T("UPnP stream");
             TrackSubtitle = stream.Controller;
-            NowPlaying.SetPlaceholder(TrackTitle, TrackSubtitle, Loc.T("UPNP"));
+            NowPlaying.SetPlaceholder(TrackTitle, TrackSubtitle, stream.DirectBrowserAudio ? Loc.T("Streaming") : Loc.T("UPNP"));
         }
         else if (status.IsTestTone)
         {
@@ -594,7 +661,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             LiveTrack? track = await _describer.DescribeAsync(status);
-            if (track is null || _current != key)
+            if (track is null || _current != key || (status.Stream?.DirectBrowserAudio == true
+                && status.Stream.Metadata != _services.Engine.GetStatus().Stream?.Metadata))
             {
                 return;
             }
@@ -637,9 +705,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         TimeSpan position = status.Position;
         TimeSpan duration = status.Duration;
+        if (Streaming.Owns(status) && Streaming.Transport is { } transport)
+        {
+            position = TimeSpan.FromSeconds(transport.Position);
+            duration = TimeSpan.FromSeconds(transport.Duration);
+        }
         PositionSeconds = position.TotalSeconds;
         DurationSeconds = duration.TotalSeconds;
-        CanSeek = active && duration > TimeSpan.Zero && !status.IsTestTone;
+        CanSeek = active && duration > TimeSpan.Zero && !status.IsTestTone && (!Streaming.Owns(status) || Streaming.CanSeek);
         PositionText = Formatting.Time(position);
         DurationText = _services.Settings.Playback.TimeDisplay switch
         {

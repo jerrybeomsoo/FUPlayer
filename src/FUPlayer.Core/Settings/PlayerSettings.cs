@@ -570,6 +570,12 @@ public sealed class AnalyzerSettings
 
 public sealed class UiSettings
 {
+    /// <summary>Installed Firefox used by the Streaming page; empty discovers the normal installation.</summary>
+    public string FirefoxExecutable { get; set; } = string.Empty;
+
+    /// <summary>The initial service page; subsequent browser navigation belongs to Firefox's dedicated profile.</summary>
+    public string StreamingAddress { get; set; } = "https://music.apple.com/";
+
     public string Theme { get; set; } = "Dark";
 
     public double WindowWidth { get; set; } = 1440;
