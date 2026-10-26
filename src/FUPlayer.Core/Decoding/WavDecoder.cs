@@ -45,6 +45,8 @@ internal sealed class WavDecoder : UncompressedPcmDecoder
             string id = ReadId(reader);
             uint size = reader.ReadUInt32();
             long start = stream.Position;
+            if (id != "data" && size > stream.Length - start)
+                throw new InvalidDataException("WAVE chunk extends beyond the file.");
 
             if (id == "ds64" && size >= 16)
             {

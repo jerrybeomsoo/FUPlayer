@@ -20,6 +20,7 @@ internal sealed class RenderSource : IAudioRenderSource
     private readonly int _fadeFrames;
     private long _renderedFrames;
     private long _underrunFrames;
+    private long _lastCallback;
     private volatile bool _paused;
     private volatile bool _endOfStream;
     private double _fadeGain = 1.0;
@@ -56,10 +57,13 @@ internal sealed class RenderSource : IAudioRenderSource
 
     public long UnderrunFrames => Interlocked.Read(ref _underrunFrames);
 
+    internal long LastCallback => Interlocked.Read(ref _lastCallback);
+
     public bool IsDrained => _endOfStream && _ring.Count == 0;
 
     public int Render(Span<byte> destination, int frames, bool realtime)
     {
+        Interlocked.Exchange(ref _lastCallback, System.Diagnostics.Stopwatch.GetTimestamp());
         Span<byte> target = destination[..(frames * _frameBytes)];
         // A paused device must acknowledge a seek/restart without waiting for resumed audio to arrive.
         if (_ring.IsClearPending)
@@ -99,6 +103,17 @@ internal sealed class RenderSource : IAudioRenderSource
             }
             else if (_format.Kind == OutputSampleKind.Dop)
             {
+                // Silence is generated on the device clock, independently of the producer. After an odd
+                // number of silence frames, rephase only the transport bytes; the DSD payload stays intact.
+                byte expected = _lastDopMarker == DsdConstants.DopMarkerA ? DsdConstants.DopMarkerB : DsdConstants.DopMarkerA;
+                if (target[3] != expected)
+                {
+                    for (int f = 0; f < got; f++)
+                    {
+                        for (int c = 0; c < _format.Channels; c++) target[f * _frameBytes + c * 4 + 3] = expected;
+                        expected = expected == DsdConstants.DopMarkerA ? DsdConstants.DopMarkerB : DsdConstants.DopMarkerA;
+                    }
+                }
                 _lastDopMarker = target[(got - 1) * _frameBytes + 3];
             }
 

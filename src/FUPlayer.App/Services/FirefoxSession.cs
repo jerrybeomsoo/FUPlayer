@@ -13,7 +13,11 @@ public sealed class FirefoxSession(string settingsDirectory) : IDisposable
     private FileStream? _profileLease;
     private FirefoxNative.Attachment? _attachment;
     private nint _window, _host;
-    private bool _servicePopup;
+    private bool _servicePopup, _minimizeSetup;
+    private FirefoxStartupVisibility? _startupVisibility;
+    private FirefoxWindowEvents? _startupEvents;
+    private int _startupOwner;
+    private long _startupAt;
 
     /// <summary>The browser's process, whose children supply the audio; zero before its window is found.</summary>
     public int CaptureProcessId { get; private set; }
@@ -75,15 +79,27 @@ public sealed class FirefoxSession(string settingsDirectory) : IDisposable
                     File.AppendAllText(preferences, "\n// FUPlayer direct audio: keep native browser output silent.\n" + setting + "\n");
             }
             _servicePopup = audioBridgeSetup;
+            _minimizeSetup = persistentAddon && installAddon is null;
+            if (_minimizeSetup)
+            {
+                _startupVisibility = new FirefoxStartupVisibility(WindowTitleMarker, FirefoxNative.SetCloaked);
+                FirefoxStartupVisibility visibility = _startupVisibility;
+                _startupAt = Stopwatch.GetTimestamp();
+                _startupEvents = new FirefoxWindowEvents(window =>
+                    FirefoxNative.ObserveStartup(Volatile.Read(ref _startupOwner), window, WindowTitleMarker, visibility));
+            }
             _process = Process.Start(start) ?? throw new IOException(Loc.T("Firefox could not be started."));
+            Volatile.Write(ref _startupOwner, _process.Id);
         }
-        catch { _profileLease?.Dispose(); _profileLease = null; throw; }
+        catch { EndStartup(reveal: true); _profileLease?.Dispose(); _profileLease = null; throw; }
     }
 
     /// <summary>Called on the UI thread. The native container follows Avalonia's visibility and DPI-aware layout.</summary>
     internal void SetHost(nint handle)
     {
         if (_host == handle) return;
+        // Native host recreation must never return the browser to a visible desktop top-level window.
+        if (_attachment is not null) FirefoxNative.SetCloaked(_window, true);
         Detach();
         _host = handle;
     }
@@ -92,16 +108,38 @@ public sealed class FirefoxSession(string settingsDirectory) : IDisposable
     public void Update(bool embed)
     {
         if (!IsRunning) { ReleaseExited(); return; }
+        if (_startupVisibility is not null && Stopwatch.GetElapsedTime(_startupAt).TotalSeconds > 30)
+            EndStartup(reveal: true); // Expose unexpected first-run/permission prompts instead of trapping them.
         if (_window == 0 || !FirefoxNative.IsWindow(_window))
         {
+            if (_startupVisibility is { } visibility)
+                foreach (nint window in FirefoxNative.FindWindows(_process!.Id, visibleOnly: false))
+                    FirefoxNative.ObserveStartup(_process.Id, window, WindowTitleMarker, visibility);
+            if (_minimizeSetup) FirefoxNative.ParkSetup(_process!.Id, WindowTitleMarker);
             _attachment = null;
-            _window = FirefoxNative.FindWindow(_process!.Id, _servicePopup ? WindowTitleMarker : null);
+            _window = FirefoxNative.FindWindows(_process!.Id, _servicePopup ? WindowTitleMarker : null, visibleOnly: !_servicePopup).FirstOrDefault();
             CaptureProcessId = _window == 0 ? 0 : FirefoxNative.ProcessId(_window);
         }
         if (_window == 0) return;
-        if (!embed) Detach();
+        if (!embed) { Detach(); PresentService(); }
         else if (_host != 0 && _attachment is null) _attachment = FirefoxNative.Attach(_window, _host);
-        if (_attachment is not null) FirefoxNative.Resize(_window, _host);
+        if (_attachment is not null) { FirefoxNative.Resize(_window, _host); PresentService(); }
+    }
+
+    private void PresentService()
+    {
+        _startupEvents?.Dispose(); _startupEvents = null;
+        _startupVisibility?.Present(_window);
+        _startupVisibility = null;
+        FirefoxNative.ShowService(_window);
+    }
+
+    private void EndStartup(bool reveal)
+    {
+        Volatile.Write(ref _startupOwner, 0);
+        _startupEvents?.Dispose(); _startupEvents = null;
+        if (reveal) _startupVisibility?.RevealAll();
+        _startupVisibility = null;
     }
 
     /// <summary>Close normally, so Firefox can save the profile and show its own pending-dialog prompts.</summary>
@@ -113,6 +151,7 @@ public sealed class FirefoxSession(string settingsDirectory) : IDisposable
             foreach (nint window in FirefoxNative.FindWindows(_process!.Id, visibleOnly: false))
                 FirefoxNative.Close(window);
         if (_window != 0) FirefoxNative.Close(_window);
+        EndStartup(reveal: true);
     }
 
     private void Detach()
@@ -122,6 +161,7 @@ public sealed class FirefoxSession(string settingsDirectory) : IDisposable
 
     private void ReleaseExited()
     {
+        EndStartup(reveal: true);
         Detach();
         _window = 0; CaptureProcessId = 0;
         _process?.Dispose(); _process = null;

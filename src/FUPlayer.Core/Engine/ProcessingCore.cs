@@ -216,6 +216,12 @@ internal sealed class ProcessingCore : IDisposable
     private readonly ParallelWorkers _workers;
     private readonly CoreParts _parts;
     private readonly Channel[] _channels;
+    private readonly double[][] _mapSources, _mapDry;
+    private readonly Action<int> _mapWork, _channelWork;
+    private CoreBlock _activeBlock = null!;
+    private int _mapFrames;
+    private bool _mapHasDry;
+    private CoreStage _runFrom, _runTo;
 
     // The restorer's own buffers: two channels always, a mono source played as both.
     private readonly double[][] _restored = [[], []];
@@ -229,6 +235,10 @@ internal sealed class ProcessingCore : IDisposable
         _last = last;
         _parts = parts;
         _workers = workers;
+        _mapSources = new double[layout.SourceChannels][];
+        _mapDry = new double[layout.SourceChannels][];
+        _mapWork = c => Map(c, _activeBlock, _mapSources, _mapHasDry ? _mapDry : [], _mapFrames);
+        _channelWork = c => RunChannel(c, _activeBlock, _runFrom, _runTo);
         if (Builds(CoreStage.Restore))
         {
             if (parts.Restorer is null)
@@ -278,6 +288,7 @@ internal sealed class ProcessingCore : IDisposable
     /// <summary>Runs the stages from <paramref name="from"/> to <paramref name="to"/>, those of them that this core builds.</summary>
     public void Run(CoreBlock block, CoreStage from, CoreStage to)
     {
+        _activeBlock = block;
         if (from <= CoreStage.Restore && to >= CoreStage.Restore && Builds(CoreStage.Restore))
         {
             Restore(block);
@@ -290,16 +301,19 @@ internal sealed class ProcessingCore : IDisposable
             if (map)
             {
                 // The map reads every source channel, so it runs before the channels split.
-                double[][] sources = block.Signal.Take(block.Channels).ToArray();
-                double[][] dry = block.HasDry ? block.Dry.Take(block.Channels).ToArray() : [];
-                _workers.For(_layout.OutputChannels, c => Map(c, block, sources, dry));
+                Array.Copy(block.Signal, _mapSources, block.Channels);
+                _mapHasDry = block.HasDry;
+                if (_mapHasDry) Array.Copy(block.Dry, _mapDry, block.Channels);
+                _mapFrames = block.Counts[0];
+                _workers.For(_layout.OutputChannels, _mapWork);
                 block.Channels = _layout.OutputChannels;
                 block.HasDry = _layout.DryBefore(CoreStage.Upscale);
             }
 
             if (to >= start)
             {
-                _workers.For(block.Channels, c => RunChannel(c, block, start, to));
+                _runFrom = start; _runTo = to;
+                _workers.For(block.Channels, _channelWork);
                 block.HasDry = to < CoreStage.Excite && _layout.DryBefore(to + 1);
             }
         }
@@ -418,11 +432,10 @@ internal sealed class ProcessingCore : IDisposable
     /// One output channel from its source channel with replay gain. After the restorer with the output delta and nothing
     /// in front of the filter to take it later, the delta is taken here, at the source rate.
     /// </summary>
-    private void Map(int c, CoreBlock block, double[][] sources, double[][] dry)
+    private void Map(int c, CoreBlock block, double[][] sources, double[][] dry, int frames)
     {
         Channel channel = _channels[c];
         int source = SourceChannel(c);
-        int frames = block.Counts[0];
         EnsureCapacity(ref channel.Conversion, frames + 16);
         Span<double> signal = channel.Conversion.AsSpan(0, frames);
         if (source < 0)

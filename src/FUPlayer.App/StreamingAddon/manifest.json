@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "FUPlayer Streaming",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "description": "Play Apple Music through FUPlayer DSP using browser-permitted audio on this computer.",
   "browser_specific_settings": {
     "gecko": {

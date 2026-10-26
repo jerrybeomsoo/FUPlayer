@@ -62,6 +62,12 @@ public sealed class GpuAccelerator : IDisposable
     /// <summary>Whether at least one filter stage actually runs on the device.</summary>
     public bool IsActive => _accelerated > 0;
 
+    /// <summary>Initial timing probes still need blocks before the chosen division can be held.</summary>
+    internal bool IsCalibrating
+    {
+        get { lock (_gate) return _balances.Values.Any(b => b.Measuring || b.Confirming); }
+    }
+
     /// <summary>
     /// Whether any filter was uploaded and accepted, which is known once the stages have been planned and before
     /// any channel has been given its state. A device that refused every filter, for want of memory or because

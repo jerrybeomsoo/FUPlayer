@@ -468,7 +468,7 @@ internal sealed unsafe class AsioStream : IAudioStream
                 throw new InvalidOperationException(Loc.F("ASIO output is limited to {0} channels.", MaxChannels));
             }
 
-            if (_options.ChannelOffset + _channels > outputs)
+            if (!AsioChannelRange.Fits(_options.ChannelOffset, _channels, outputs))
             {
                 throw new InvalidOperationException(Loc.F("The driver has {0} outputs; {1} channels starting at {2} do not fit.", outputs, _channels, _options.ChannelOffset));
             }

@@ -1,6 +1,6 @@
-<# Builds the player, standalone servers and checksums used by the GitHub release. #>
+<# Builds the player, standalone servers, Windows controller and release checksums. #>
 [CmdletBinding()]
-param([ValidatePattern('^\d+\.\d+\.\d+(-[A-Za-z0-9.-]+)?$')][string]$Version = '0.7.0')
+param([ValidatePattern('^\d+\.\d+\.\d+(-[A-Za-z0-9.-]+)?$')][string]$Version = '0.7.1')
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 $taskAssets = Join-Path $taskRoot "artifacts\release-$Version"
@@ -14,10 +14,13 @@ foreach ($taskRuntime in @('win-x64', 'linux-x64')) {
     Copy-Item -LiteralPath (Join-Path $taskRoot "artifacts\dsp-server\$taskRuntime\FUPlayer-DspServer$taskExtension") `
         -Destination (Join-Path $taskAssets "FUPlayer-DspServer-$Version-$taskRuntime$taskExtension")
 }
+& (Join-Path $PSScriptRoot 'publish-dsp-server-windows.ps1') -Version $Version
+Copy-Item -LiteralPath (Join-Path $taskRoot 'artifacts\dsp-server-windows\win-x64\FUPlayer-DspServer-Windows.exe') `
+    -Destination (Join-Path $taskAssets "FUPlayer-DspServer-Windows-$Version-win-x64.exe")
 # Bash downloads must retain LF endings even when the checkout uses CRLF.
 $taskInstaller = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'install-dsp-server.sh')).Replace("`r`n", "`n")
 [System.IO.File]::WriteAllText((Join-Path $taskAssets 'install-dsp-server.sh'), $taskInstaller, [System.Text.UTF8Encoding]::new($false))
-$taskNames = @("FUPlayer-$Version-win-x64.zip", "FUPlayer-DspServer-$Version-win-x64.exe", "FUPlayer-DspServer-$Version-linux-x64", 'install-dsp-server.sh')
+$taskNames = @("FUPlayer-$Version-win-x64.zip", "FUPlayer-DspServer-$Version-win-x64.exe", "FUPlayer-DspServer-$Version-linux-x64", "FUPlayer-DspServer-Windows-$Version-win-x64.exe", 'install-dsp-server.sh')
 $taskChecksums = foreach ($taskName in $taskNames) {
     $taskHash = (Get-FileHash -LiteralPath (Join-Path $taskAssets $taskName) -Algorithm SHA256).Hash.ToLowerInvariant()
     "$taskHash  $taskName"

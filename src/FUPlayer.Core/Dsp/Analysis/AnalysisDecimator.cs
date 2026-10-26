@@ -73,6 +73,12 @@ public sealed class AnalysisDecimator
         return signal;
     }
 
+    /// <summary>Forgets display history at the same seek boundary as the audio stages.</summary>
+    public void Reset()
+    {
+        foreach (Stage stage in _stages) stage.Reset();
+    }
+
     /// <summary>The coefficients of every stage for one input rate and factor.</summary>
     public sealed class Design
     {
@@ -148,6 +154,8 @@ public sealed class AnalysisDecimator
         private double[] _work = [];
         private double[] _output = [];
         private int _parity;
+
+        internal void Reset() { Array.Clear(_history); _parity = 0; }
 
         public ReadOnlySpan<double> Process(ReadOnlySpan<double> input)
         {

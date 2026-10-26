@@ -24,7 +24,7 @@ internal sealed class DsfDecoder : IAudioDecoder
         _blockSize = blockSize;
         _lsbFirst = lsbFirst;
         _totalBytes = (samples + 7) / 8;
-        _block = new byte[blockSize * channels];
+        _block = samples == 0 ? [] : new byte[blockSize * channels];
         Format = StreamFormat.Dsd(rate, channels);
         Length = samples;
         MetadataOffset = metadataOffset;
@@ -82,7 +82,8 @@ internal sealed class DsfDecoder : IAudioDecoder
         int bitsPerSample = BinaryPrimitives.ReadInt32LittleEndian(fmt[32..]);
         long samples = (long)BinaryPrimitives.ReadUInt64LittleEndian(fmt[36..]);
         int blockSize = BinaryPrimitives.ReadInt32LittleEndian(fmt[44..]);
-        if (formatId != 0 || channels is < 1 or > 16 || rate <= 0 || blockSize <= 0 || bitsPerSample is not (1 or 8))
+        if (formatId != 0 || channels is < 1 or > 16 || rate <= 0 || blockSize <= 0 || bitsPerSample is not (1 or 8)
+            || samples < 0 || samples > long.MaxValue - 7 || fmtSize < 52 || fmtSize > stream.Length - 40)
         {
             throw new InvalidDataException("Unsupported DSF format parameters.");
         }
@@ -94,6 +95,12 @@ internal sealed class DsfDecoder : IAudioDecoder
         {
             throw new InvalidDataException("DSF data chunk missing.");
         }
+
+        ulong dataSize = BinaryPrimitives.ReadUInt64LittleEndian(data[4..]);
+        long blockBytes = (long)blockSize * channels;
+        if (dataSize < 12 || dataSize - 12 > (ulong)(stream.Length - stream.Position)
+            || blockBytes > Array.MaxLength || (samples > 0 && (ulong)blockBytes > dataSize - 12))
+            throw new InvalidDataException("DSF data or channel block size is invalid.");
 
         return new DsfDecoder(stream, stream.Position, channels, rate, samples, blockSize, bitsPerSample == 1, metadataOffset);
     }

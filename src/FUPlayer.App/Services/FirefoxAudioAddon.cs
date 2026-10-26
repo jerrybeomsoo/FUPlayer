@@ -10,14 +10,30 @@ namespace FUPlayer.App.Services;
 /// <summary>Stores the signed add-on unchanged, or stages the optional temporary developer preview.</summary>
 internal static class FirefoxAudioAddon
 {
+    internal const string BundledVersion = "0.3.1";
     internal static string InstalledMarker(string settingsDirectory) => Path.Combine(settingsDirectory, "browser", "streaming-addon-installed");
-    internal static string PackagePath(string settingsDirectory) => Path.Combine(settingsDirectory, "browser", "streaming-addon.xpi");
+    internal static string PackagePath(string settingsDirectory) => Path.Combine(settingsDirectory, "browser", $"streaming-addon-{BundledVersion}.xpi");
+
+    internal static bool NeedsBundledInstall(string settingsDirectory) =>
+        !File.Exists(InstalledMarker(settingsDirectory))
+        || !Version.TryParse(File.ReadAllText(InstalledMarker(settingsDirectory)).Trim(), out Version? installed)
+        || installed < Version.Parse(BundledVersion);
+
+    internal static Version? PackageVersion(string path)
+    {
+        using var archive = ZipFile.OpenRead(path);
+        var entry = archive.GetEntry("manifest.json");
+        if (entry is null || entry.Length > 65536) return null;
+        using var stream = entry.Open(); using var manifest = JsonDocument.Parse(stream);
+        return manifest.RootElement.TryGetProperty("version", out var value) && value.ValueKind == JsonValueKind.String
+            && Version.TryParse(value.GetString(), out Version? version) ? version : null;
+    }
 
     internal static string EnsureBundledPackage(string settingsDirectory)
     {
         string target = PackagePath(settingsDirectory);
         if (File.Exists(target)) return target;
-        using var package = Assembly.GetExecutingAssembly().GetManifestResourceStream("FUPlayer.App.StreamingAddon.fuplayer-streaming-0.2.0.xpi")
+        using var package = Assembly.GetExecutingAssembly().GetManifestResourceStream($"FUPlayer.App.StreamingAddon.fuplayer-streaming-{BundledVersion}.xpi")
             ?? throw new InvalidDataException(Loc.T("Choose a Mozilla-signed FUPlayer streaming add-on."));
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
         using (var output = File.Create(target)) package.CopyTo(output);

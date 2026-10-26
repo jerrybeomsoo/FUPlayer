@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:FUPlayer.App.ViewModels"
              xmlns:controls="using:FUPlayer.App.Controls"
+             xmlns:views="using:FUPlayer.App.Views"
              x:Class="FUPlayer.App.Views.SettingsView"
              x:DataType="vm:SettingsViewModel">
   <ScrollViewer Classes="page">
@@ -10,6 +11,10 @@
         <TextBlock Classes="h1" Text="Settings" />
         <TextBlock Classes="secondary" Text="Playback behaviour, processing resources and information about this build." />
       </StackPanel>
+
+      <Border Classes="card">
+        <views:StreamingSettingsView DataContext="{Binding Streaming}" />
+      </Border>
 
       <Border Classes="card">
         <StackPanel>
@@ -92,8 +97,8 @@
         <StackPanel>
           <TextBlock Classes="h3" Text="Network DSP" Margin="0,0,0,4" />
           <TextBlock Classes="muted small" TextWrapping="Wrap" Margin="0,0,0,8"
-                     Text="Select remote stages; a stage between two selected ones runs there too. LAN servers can use plain UDP; Internet servers require an access key and use encrypted UDP. Stop or Pause releases the worker." />
-          <controls:SettingRow Title="Process on a server" Description="Only selected stages that are enabled in DSP studio run remotely. Volume, limiting and audio output stay here.">
+                     Text="Select remote stages; a stage between two selected ones runs there too. LAN servers can use plain UDP; Internet servers require an access key and use encrypted UDP. Stop releases the worker; a short Apple Music pause keeps it ready for ten seconds." />
+          <controls:SettingRow Title="Process on a server" Description="Only enabled, selected stages run remotely. A compatible server can also finish DSD conversion; the DAC stays on this computer.">
             <ToggleSwitch IsChecked="{Binding NetworkDsp}" OnContent="" OffContent="" />
           </controls:SettingRow>
           <controls:SettingRow Title="Server address" Description="IP address, domain or udp://host:port URL of the processing server.">
@@ -109,6 +114,15 @@
             <CheckBox IsChecked="{Binding RemoteResampling}" Content="Resampling on server" />
             <CheckBox IsChecked="{Binding RemoteRestorer}" Content="Neural restorer on server" />
             <CheckBox IsChecked="{Binding RemoteUpscaler}" Content="Neural upscaler on server" />
+            <CheckBox IsChecked="{Binding RemoteDsdOutput}" Content="DSD output conversion on server" />
+            <TextBlock Classes="muted small" TextWrapping="Wrap" Text="DSD output conversion needs remote resampling and an updated server. Older servers keep this step on the client." />
+            <controls:SettingRow Title="Server FIFO (ms)" Description="Audio kept ready on the server to absorb network jitter. This adds the selected delay. Requires an updated server.">
+              <NumericUpDown Value="{Binding ServerFifoMilliseconds}" Minimum="100" Maximum="5000" Increment="100" FormatString="0" Width="150" />
+            </controls:SettingRow>
+            <controls:SettingRow Title="Server threads" Description="Total threads for this session; 0 uses the server default. The server administrator's limit always applies.">
+              <NumericUpDown Value="{Binding ServerThreads}" Minimum="0" Maximum="64" Increment="1" FormatString="0" Width="150" />
+            </controls:SettingRow>
+            <CheckBox IsChecked="{Binding ServerGpu}" Content="Allow server GPU filtering" />
           </StackPanel>
         </StackPanel>
       </Border>

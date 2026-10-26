@@ -51,6 +51,8 @@ internal sealed class DspLink : IDisposable
     private readonly Queue<Packet> _ready = new();
     private readonly SortedDictionary<long, Packet> _unacked = new();
     private readonly Queue<Packet> _lost = new();
+    // Only the sender thread uses this list. Empty idle polls must not allocate a fresh batch.
+    private readonly List<byte[]> _sendBatch = new(Batch);
     private long _nextPacket;
     private long _unackedBytes;
     private long _queuedBytes;
@@ -207,6 +209,7 @@ internal sealed class DspLink : IDisposable
         int packets = Math.Max(1, (total + _payload - 1) / _payload);
         lock (_gate)
         {
+            cancellation.ThrowIfCancellationRequested();
             while (_unackedBytes + _queuedBytes > 0 && _unackedBytes + _queuedBytes >= Window())
             {
                 ThrowIfClosed();
@@ -654,7 +657,8 @@ internal sealed class DspLink : IDisposable
     /// <summary>Sends what pacing allows, lost packets first, then timed-out ones, then new ones; returns the milliseconds to wait before looking again.</summary>
     private int SendDue(long now)
     {
-        var batch = new List<byte[]>(Batch);
+        List<byte[]> batch = _sendBatch;
+        batch.Clear();
         int wait = 50;
         lock (_gate)
         {
@@ -786,7 +790,9 @@ internal sealed class DspLink : IDisposable
 
     private void ThrowIfClosed()
     {
-        if (IsClosed && !_incoming.Reader.TryPeek(out _))
+        // Receive takes already-delivered messages before checking this. A closed sender must never
+        // accept more work merely because its independent receive queue still contains audio.
+        if (IsClosed)
         {
             throw new IOException(CloseReason ?? "The DSP session was closed.");
         }

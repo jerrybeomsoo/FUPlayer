@@ -195,6 +195,15 @@
               <TextBlock Text="FIFO fill" Classes="muted" />
               <TextBlock Grid.Column="1" Text="{Binding Buffer}" Classes="numeric" />
             </Grid>
+            <ProgressBar Value="{Binding ClientFifoPercent}" Minimum="0" Maximum="100" Height="5" />
+            <TextBlock Text="{Binding ClientFifoSize}" Classes="muted small" />
+            <StackPanel IsVisible="{Binding HasServerLoad}" Spacing="5" ToolTip.Tip="Audio actually received and waiting for processing on the server. Network packets still in flight are excluded.">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="Server FIFO" Classes="muted" />
+                <TextBlock Grid.Column="1" Text="{Binding ServerFifo}" Classes="numeric small" />
+              </Grid>
+              <ProgressBar Value="{Binding ServerFifoPercent}" Minimum="0" Maximum="100" Height="5" />
+            </StackPanel>
             <Grid ColumnDefinitions="*,Auto" ToolTip.Tip="The filters' own group delay. It is part of what a linear-phase filter does; only a different filter changes it.">
               <TextBlock Text="Filter delay" Classes="muted" />
               <TextBlock Grid.Column="1" Text="{Binding Latency}" Classes="numeric" />

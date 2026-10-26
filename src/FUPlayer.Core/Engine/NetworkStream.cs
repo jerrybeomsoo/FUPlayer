@@ -13,6 +13,12 @@ public sealed record NetworkStreamRequest(string Uri, StreamMetadata? Metadata, 
     public Func<IAudioDecoder>? OpenDecoder { get; init; }
     /// <summary>Reads current metadata from a trusted live source without restarting its audio decoder.</summary>
     public Func<StreamMetadata?>? ReadMetadata { get; init; }
+    /// <summary>Trusted live-source notification before every DSP rebuild; true means playback should continue.</summary>
+    public Action<bool>? PreparingProcessing { get; init; }
+    /// <summary>Runs after the replacement DSP, device and decoder are ready, including settings changes.</summary>
+    public Action? ProcessingReady { get; init; }
+    /// <summary>Stops the owned live source when opening or playback ends, including device failures.</summary>
+    public Action? ProcessingStopped { get; init; }
 }
 
 /// <summary>The network stream that is playing, as the interface shows it.</summary>

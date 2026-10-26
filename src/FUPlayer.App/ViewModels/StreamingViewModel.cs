@@ -25,9 +25,13 @@ public sealed partial class StreamingViewModel : ObservableObject, IDisposable
     private bool _volumeInitialised;
     private bool _windowPresented;
     private string? _nativeManifest;
-    private bool _rememberedAddon;
+    private bool _rememberedAddon, _reopenAfterUpgrade, _upgradeClosing;
+    private Version? _expectedAddonVersion;
+    private bool _playbackStopped, _stopAcknowledged;
+    private int _stoppedVersion;
     private double? _pendingVolume, _lastVolume;
     private DateTime _volumeRequested;
+    private BrowserPlaybackSession? _playback;
 
     [ObservableProperty] private string _executable;
     [ObservableProperty] private string _address;
@@ -65,6 +69,10 @@ public sealed partial class StreamingViewModel : ObservableObject, IDisposable
     public bool CanShuffle => _audio?.CanShuffle == true;
     public bool CanRepeat => _audio?.CanRepeat == true;
     public BrowserAudioBridge.BrowserTransport? Transport => _audio?.Transport;
+    /// <summary>Aligns the player's track clock to audio reaching the DAC instead of the source's decode clock.</summary>
+    public double PositionAtOutput(PlaybackStatus status) => _audio?.PositionAtOutput(
+        status.BufferFill * status.FifoSeconds + status.DspBufferedSeconds + status.PipelineLatencySeconds
+        + _audio.PendingFrames / (double)BrowserAudioBridge.SampleRate) ?? 0;
     /// <summary>Mirrors the service's normal linear volume into the display; DSP gain remains unity.</summary>
     public event Action<double>? VolumeChanged;
     public string ProfileDirectory => Browser.ProfileDirectory;
@@ -76,14 +84,21 @@ public sealed partial class StreamingViewModel : ObservableObject, IDisposable
     partial void OnSelectedServiceChanged(Service? value) { if (value is not null) Address = value.Address; }
     partial void OnCaptureNoteChanged(string? value) => OnPropertyChanged(nameof(HasCaptureNote));
 
+    /// <summary>Entering Apple Music opens its owned browser without adding controls above the service.</summary>
+    public void Activate()
+    {
+        if (!Browser.IsRunning) Open();
+    }
+
     [RelayCommand]
     private void Open()
     {
         try
         {
             string settings = _services.Store.SettingsDirectory;
-            bool installed = File.Exists(FirefoxAudioAddon.InstalledMarker(settings));
-            Launch(temporary: false, installed ? null : FirefoxAudioAddon.EnsureBundledPackage(settings));
+            bool install = FirefoxAudioAddon.NeedsBundledInstall(settings);
+            Launch(temporary: false, install ? FirefoxAudioAddon.EnsureBundledPackage(settings) : null,
+                reopenAfterInstall: install && File.Exists(FirefoxAudioAddon.InstalledMarker(settings)));
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
         { Status = Loc.F("The streaming add-on could not install: {0}", ex.Message); }
@@ -96,7 +111,7 @@ public sealed partial class StreamingViewModel : ObservableObject, IDisposable
         {
             if (Browser.IsRunning) throw new InvalidOperationException(Loc.T("Close this browser before opening another service."));
             string package = FirefoxAudioAddon.StorePackage(_services.Store.SettingsDirectory, path);
-            Launch(temporary: false, package);
+            Launch(temporary: false, package, reopenAfterInstall: File.Exists(FirefoxAudioAddon.InstalledMarker(_services.Store.SettingsDirectory)));
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.Text.Json.JsonException)
         { Status = Loc.F("The streaming add-on could not install: {0}", ex.Message); }
@@ -105,24 +120,31 @@ public sealed partial class StreamingViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void OpenTemporaryAddon() => Launch(temporary: true, installAddon: null);
 
-    private void Launch(bool temporary, string? installAddon)
+    private void Launch(bool temporary, string? installAddon, bool reopenAfterInstall = false)
     {
         try
         {
             if (Browser.IsRunning) throw new InvalidOperationException(Loc.T("Close this browser before opening another service."));
-            _audio?.Dispose();
-            FirefoxNativeMessaging.Revoke(_nativeManifest);
-            _nativeManifest = null;
+            // A browser may have exited between poll ticks. Retire its URI/engine source as well as
+            // the bridge, otherwise the new connection can be mistaken for an already-open stream.
+            StopOwnedStream();
             _audio = new BrowserAudioBridge();
+            _playback = new BrowserPlaybackSession(_audio);
+            IsReady = false;
+            _playbackStopped = _stopAcknowledged = false;
             _windowPresented = false;
             _rememberedAddon = false;
+            _reopenAfterUpgrade = reopenAfterInstall; _upgradeClosing = false;
+            _expectedAddonVersion = temporary ? null : installAddon is null ? Version.Parse(FirefoxAudioAddon.BundledVersion)
+                : FirefoxAudioAddon.PackageVersion(installAddon);
             if (temporary)
                 AddonManifest = FirefoxAudioAddon.Prepare(_services.Store.SettingsDirectory, Address, _audio, Browser.WindowTitleMarker);
             else
             {
                 AddonManifest = null;
-                // Firefox consumes the XPI as an installation request and leaves about:blank, not a file-URL document.
-                string startup = FirefoxLaunch.PersistentSetupAddress;
+                // During an upgrade neither background may consume the blank installer tab. First install
+                // and routine startup still create the service popup from Firefox's ordinary blank tab.
+                string startup = FirefoxLaunch.PersistentSessionSetupAddress(installAddon is not null, reopenAfterInstall);
                 _nativeManifest = FirefoxNativeMessaging.Prepare(_services.Store.SettingsDirectory, Environment.ProcessPath!,
                     new(_audio.SocketUri, Address, new Uri(Address).GetLeftPart(UriPartial.Authority), Browser.WindowTitleMarker, startup));
                 using var key = Registry.CurrentUser.CreateSubKey(@"Software\Mozilla\NativeMessagingHosts\" + FirefoxNativeMessaging.HostName);
@@ -146,7 +168,8 @@ public sealed partial class StreamingViewModel : ObservableObject, IDisposable
     private void Poll()
     {
         // Native file pickers need Firefox's own top-level window during add-on setup.
-        try { Browser.Update(EmbedBrowser && _audio?.IsConnected == true); }
+        // Audio connection loss must not override the user's hosting preference or detach the window.
+        try { Browser.Update(EmbedBrowser); }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
         {
             EmbedBrowser = false;
@@ -168,15 +191,24 @@ public sealed partial class StreamingViewModel : ObservableObject, IDisposable
                 _ => Loc.T("Waiting for media playback")
             }, audio.Watched, audio.Captured)
             : Loc.T("Waiting for browser audio status.");
-        bool ready = IsRunning && _audio?.IsConnected == true;
+        bool ready = IsRunning && _audio?.IsConnected == true && (_expectedAddonVersion is null
+            || Version.TryParse(_audio.AddonVersion, out Version? connectedVersion) && connectedVersion >= _expectedAddonVersion);
         if (ready && _audio!.IsPersistentAddon && !_rememberedAddon)
         {
-            try { File.WriteAllText(FirefoxAudioAddon.InstalledMarker(_services.Store.SettingsDirectory), "0.2.0"); _rememberedAddon = true; }
+            try { File.WriteAllText(FirefoxAudioAddon.InstalledMarker(_services.Store.SettingsDirectory), _audio.AddonVersion ?? "0.0.0"); _rememberedAddon = true; }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { CaptureNote = ex.Message; }
         }
-        if (ready && !IsReady)
+        if (ready && _reopenAfterUpgrade && !_upgradeClosing)
         {
-            Status = Loc.T("Direct audio bridge connected. Sign in and play in Firefox; audio enters FUPlayer before Windows mixing.");
+            // The upgrade session leaves Firefox's installer tab intact. Once the new signed version
+            // acknowledges, reopen the owned browser once with the ordinary service bootstrap.
+            _upgradeClosing = true; Browser.Close(); return;
+        }
+        if (ready && _playbackStopped && !_stopAcknowledged && _audio!.MediaStateVersion > _stoppedVersion && _audio.IsMediaPlaying == false)
+        { _audio.DiscardBufferedAudio(); _stopAcknowledged = true; }
+        if (ready && _streamUri is null && _audio!.WantsPlayback && (!_playbackStopped || (_stopAcknowledged && _audio.IsMediaPlaying == true)))
+        {
+            _playbackStopped = false;
             Listen();
         }
         IsReady = ready;
@@ -188,6 +220,7 @@ public sealed partial class StreamingViewModel : ObservableObject, IDisposable
         {
             StopOwnedStream();
             _timer.Stop();
+            if (_upgradeClosing) { _upgradeClosing = false; _reopenAfterUpgrade = false; Open(); return; }
             Status = Loc.T("Firefox is closed. Its profile and sign-ins are kept for next time.");
         }
         else if (_audio?.Error is { } error) Status = Loc.F("Direct audio stopped: {0}", error);
@@ -204,15 +237,21 @@ public sealed partial class StreamingViewModel : ObservableObject, IDisposable
             : _audio?.ControlError is { } control ? Loc.F("Firefox control: {0}", control) : null;
         if (IsCapturing && _audio is { } bridge)
         {
+            _playback?.Update();
             if (bridge.DiscontinuityVersion != _discontinuity)
             {
                 _discontinuity = bridge.DiscontinuityVersion;
                 _services.Engine.ResetBrowserStream(_streamUri!);
             }
             // Drain already-sent PCM before pausing. Otherwise its queue can block the later playing report.
-            if (bridge.IsMediaPlaying == false && bridge.PendingFrames == 0 && status.State == EngineState.Playing)
+            if (_playback?.BlocksEnginePause != true
+                && bridge.IsMediaPlaying == false && bridge.PendingFrames == 0 && status.State == EngineState.Playing)
                 _services.Engine.Pause();
-            else if (bridge.IsMediaPlaying == true && status.State == EngineState.Paused) _services.Engine.Resume();
+            else if (_playback?.BlocksEnginePause != true && bridge.IsMediaPlaying == true && status.State == EngineState.Paused)
+            {
+                if (!status.PipelineReady) _playback?.PreparingProcessing(true);
+                _services.Engine.Resume();
+            }
             if (bridge.CanVolume && bridge.Transport.Volume is { } volume)
             {
                 if (!wasCapturing) _lastVolume = null;
@@ -234,13 +273,35 @@ public sealed partial class StreamingViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Direct browser input owns transport actions without touching the local file queue.</summary>
-    public bool Owns(PlaybackStatus status) => _streamUri is not null && status.Stream?.Uri == _streamUri;
+    public bool Owns(PlaybackStatus status) => (_streamUri is not null && status.Stream?.Uri == _streamUri)
+        || ((_streamUri is not null || _playbackStopped || (IsReady && IsAppleMusicPage)) && Browser.IsRunning
+            && status.State == EngineState.Stopped && !status.IsStream && !status.IsCapture);
+
+    /// <summary>Stops service playback and its DSP worker while retaining the embedded browser and authenticated bridge.</summary>
+    public bool TryStop(PlaybackStatus status)
+    {
+        if (!Owns(status) || _audio is not { } bridge) return false;
+        _playbackStopped = true; _stopAcknowledged = false; _stoppedVersion = bridge.MediaStateVersion;
+        _playback?.Stop();
+        bridge.RequestControl(bridge.CanStop ? "stop" : "pause");
+        if (!bridge.CanStop && bridge.CanSeek) bridge.RequestControl("seekto", 0.0);
+        bridge.DiscardBufferedAudio();
+        if (_streamUri is not null) _services.Engine.StopNetworkStream(_streamUri);
+        _streamUri = null;
+        IsCapturing = false;
+        return true;
+    }
 
     /// <summary>Let the provider pause before the engine stops reading, so the PCM queue cannot fill during pause.</summary>
     public bool TryPlayPause(PlaybackStatus status)
     {
         if (!Owns(status)) return false;
-        _audio?.RequestControl(status.State == EngineState.Paused ? "play" : "pause");
+        if (_playback?.TryTogglePreparation() == true) return true;
+        if (_playbackStopped || status.State == EngineState.Stopped)
+        { _streamUri = null; _playbackStopped = false; Listen(); }
+        else if (status.State == EngineState.Paused && !status.PipelineReady)
+        { _playback?.PreparingProcessing(true); _services.Engine.Resume(); }
+        else _audio?.RequestControl(status.State == EngineState.Paused ? "play" : "pause");
         return true;
     }
 
@@ -288,10 +349,12 @@ public sealed partial class StreamingViewModel : ObservableObject, IDisposable
         if (_audio?.RequestControl("volume", volume) == true) { _pendingVolume = volume; _volumeRequested = DateTime.UtcNow; }
     }
 
-    [RelayCommand]
     private void Listen()
     {
         if (_audio?.IsConnected != true || !IsSupported || _streamUri is not null) return;
+        // Let the first normal browser gesture start its PCM graph before DSP preparation pauses the provider.
+        // A service can report Playing and advance its clock while Web Audio is still suspended.
+        if (_playback?.TryStartPlayback() != true) return;
         _streamUri = _audio.StreamUri;
         _volumeInitialised = false; _pendingVolume = _lastVolume = null;
         _discontinuity = _audio.DiscontinuityVersion;
@@ -302,20 +365,22 @@ public sealed partial class StreamingViewModel : ObservableObject, IDisposable
 
     private void StartEngineStream()
     {
-        if (_audio is null || _streamUri is null) return;
+        if (_audio is null || _streamUri is null || _playback is not { } playback) return;
         _services.Engine.PlayNetworkStream(new NetworkStreamRequest(_streamUri, new FUPlayer.Core.Upnp.StreamMetadata
         { Title = SelectedService?.Name ?? Loc.T("Firefox"), SampleRate = BrowserAudioBridge.SampleRate, BitsPerSample = 32, Channels = 2 }, Loc.T("Firefox"), DirectBrowserAudio: true)
-        { OpenDecoder = _audio.OpenDecoder, ReadMetadata = () => _audio?.Metadata });
+        { OpenDecoder = _audio.OpenDecoder, ReadMetadata = () => _audio?.Metadata,
+            PreparingProcessing = playback.PreparingProcessing, ProcessingReady = playback.ProcessingReady,
+            ProcessingStopped = playback.ProcessingStopped });
     }
-
-    [RelayCommand]
-    private void StopListening() => Close();
 
     private void StopOwnedStream()
     {
+        _playback?.Stop();
         if (_streamUri is not null) _services.Engine.StopNetworkStream(_streamUri);
         _streamUri = null;
+        _playbackStopped = _stopAcknowledged = false;
         _audio?.Dispose(); _audio = null;
+        _playback = null;
         FirefoxNativeMessaging.Revoke(_nativeManifest); _nativeManifest = null;
         IsCapturing = false;
     }
@@ -323,6 +388,7 @@ public sealed partial class StreamingViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void Close()
     {
+        _upgradeClosing = _reopenAfterUpgrade = false;
         Browser.Close();
         StopOwnedStream();
         Status = Loc.T("Closing Firefox. Complete any browser prompts to finish closing.");

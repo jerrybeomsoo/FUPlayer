@@ -137,7 +137,7 @@ internal static class UpnpHttp
         };
     }
 
-    public static async Task WriteAsync(Stream stream, UpnpResponse response, CancellationToken cancel)
+    public static async Task WriteAsync(Stream stream, UpnpResponse response, CancellationToken cancel, bool headersOnly = false)
     {
         byte[] body = response.Body ?? [];
         var head = new StringBuilder();
@@ -157,7 +157,7 @@ internal static class UpnpHttp
         head.Append(CultureInfo.InvariantCulture, $"Content-Length: {body.Length}\r\n");
         head.Append("Connection: close\r\n\r\n");
         await stream.WriteAsync(Encoding.ASCII.GetBytes(head.ToString()), cancel).ConfigureAwait(false);
-        if (body.Length > 0)
+        if (!headersOnly && body.Length > 0)
         {
             await stream.WriteAsync(body, cancel).ConfigureAwait(false);
         }

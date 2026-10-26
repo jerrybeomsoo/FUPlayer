@@ -33,6 +33,9 @@ public sealed class PlayQueue
     private readonly List<QueueItem> _items = [];
     private readonly Random _random = new();
     private List<Guid> _shuffleOrder = [];
+    private readonly Dictionary<Guid, int> _indices = [];
+    private bool _indicesDirty = true;
+    private IReadOnlyList<QueueItem>? _snapshot;
 
     public event EventHandler? Changed;
 
@@ -54,7 +57,7 @@ public sealed class PlayQueue
         {
             lock (_gate)
             {
-                return _items.ToArray();
+                return _snapshot ??= Array.AsReadOnly(_items.ToArray());
             }
         }
     }
@@ -71,7 +74,7 @@ public sealed class PlayQueue
     {
         lock (_gate)
         {
-            return _items.FindIndex(item => item.Id == id);
+            return FindIndex(id);
         }
     }
 
@@ -88,6 +91,7 @@ public sealed class PlayQueue
         lock (_gate)
         {
             _items.InsertRange(Math.Clamp(index, 0, _items.Count), added);
+            Invalidate();
             RebuildShuffle();
         }
 
@@ -105,6 +109,7 @@ public sealed class PlayQueue
                 return;
             }
 
+            Invalidate();
             RebuildShuffle();
         }
 
@@ -123,6 +128,7 @@ public sealed class PlayQueue
             QueueItem item = _items[from];
             _items.RemoveAt(from);
             _items.Insert(Math.Clamp(to, 0, _items.Count), item);
+            Invalidate();
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
@@ -169,6 +175,7 @@ public sealed class PlayQueue
 
             moving.Reverse();
             _items.InsertRange(Math.Clamp(target, 0, _items.Count), moving);
+            Invalidate();
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
@@ -180,6 +187,7 @@ public sealed class PlayQueue
         {
             _items.Clear();
             _shuffleOrder.Clear();
+            Invalidate();
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
@@ -215,7 +223,7 @@ public sealed class PlayQueue
             if (position + 1 < _shuffleOrder.Count)
             {
                 Guid id = _shuffleOrder[position + 1];
-                return _items.FindIndex(item => item.Id == id);
+                return FindIndex(id);
             }
 
             if (repeat == RepeatMode.Off)
@@ -225,7 +233,7 @@ public sealed class PlayQueue
 
             RebuildShuffle();
             Guid first = _shuffleOrder[0];
-            return _items.FindIndex(item => item.Id == first);
+            return FindIndex(first);
         }
     }
 
@@ -250,8 +258,26 @@ public sealed class PlayQueue
             }
 
             Guid id = _shuffleOrder[position - 1];
-            return _items.FindIndex(item => item.Id == id);
+            return FindIndex(id);
         }
+    }
+
+    private void Invalidate()
+    {
+        _snapshot = null;
+        _indicesDirty = true;
+    }
+
+    // Called under _gate. Playback queries greatly outnumber edits, so rebuild only after a mutation.
+    private int FindIndex(Guid id)
+    {
+        if (_indicesDirty)
+        {
+            _indices.Clear();
+            for (int i = 0; i < _items.Count; i++) _indices.Add(_items[i].Id, i);
+            _indicesDirty = false;
+        }
+        return _indices.GetValueOrDefault(id, -1);
     }
 
     private void RebuildShuffle()

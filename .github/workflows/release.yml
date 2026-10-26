@@ -1,6 +1,6 @@
 name: Release
 
-# Tags publish the player, two portable DSP servers, installer and checksums.
+# Tags publish the player, two console servers, Windows controller, installer and checksums.
 # Manual runs keep the same files as build artifacts without publishing.
 on:
   push:
@@ -61,7 +61,7 @@ jobs:
           }
           $text = ($notes -join "`n").Trim()
           $packages = @(Get-ChildItem "artifacts/release-$env:VERSION" -File | ForEach-Object FullName)
-          if ($packages.Count -ne 5) { throw 'Expected player, two servers, installer and checksums.' }
+          if ($packages.Count -ne 6) { throw 'Expected player, two console servers, Windows controller, installer and checksums.' }
           if ($text) {
             Set-Content -Path release-notes.md -Value $text -Encoding utf8
             gh release create $env:GITHUB_REF_NAME @packages --title "FUPlayer $env:GITHUB_REF_NAME" --notes-file release-notes.md --verify-tag --latest

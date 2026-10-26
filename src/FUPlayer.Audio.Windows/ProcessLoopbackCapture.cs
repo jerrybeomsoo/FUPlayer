@@ -39,7 +39,9 @@ public sealed class ProcessLoopbackCapture : IDisposable
         Channels = channels;
 
         int bytesPerFrame = channels * sizeof(float);
-        _ring = new SpscByteRing((int)(sampleRate * RingSeconds) * bytesPerFrame);
+        // For 3/5/6/7 channels a power-of-two byte capacity ends in a partial audio frame. On overflow
+        // a partial write would shift every subsequent channel; a whole-frame capacity keeps alignment.
+        _ring = new SpscByteRing((int)(sampleRate * RingSeconds) * bytesPerFrame, exactCapacity: true);
     }
 
     public int SampleRate { get; }

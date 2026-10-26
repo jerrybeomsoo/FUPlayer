@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.7.1 — 2026-10-27
+
+### Added
+
+- **Portable Windows DSP server controller.** A separate Windows Forms executable includes the server,
+  runtime and both neural models. Start/Stop, connection and key-file settings, resource choices,
+  clients/CPU/memory status, bounded logs, tray operation and English/Korean are included. No player,
+  Firefox, .NET installation or Windows service is required on a processing-only computer.
+  [Guide](https://github.com/jerrybeomsoo/FUPlayer/blob/v0.7.1/docs/windows-dsp-controller.md).
+- **Server DSD conversion and separate FIFO controls.** Compatible endpoints can move final DSD
+  conversion to the server. Client and server FIFO gauges appear in Now playing; the client can set
+  server buffer size, thread budget and GPU use. Packed DSD and reduced-rate monitoring lower
+  DSD128 download payload to about 16.9/18.4 Mbps before network overhead, depending on the rate family.
+  Both endpoints need the new capability; protocol 4 remains compatible with older servers.
+
+### Improved
+
+- Apple Music fills the player content area; setup controls and diagnostics are in Settings → Streaming.
+  Routine startup hides intermediate windows where possible. Stop leaves the browser hosted and clears
+  playback. The signed 0.3.1 add-on improves startup, pause/resume, seeks and track changes.
+- Browser audio uses bounded continuous transport, avoids unnecessary reader replacement and discards
+  stale data on seeks. Track transitions keep controls and the processing-chain layout stable.
+- Remote processing reduces client work with final DSD offload, lower-cost monitoring and configurable
+  server buffering. Long tap-by-tap filters still need sufficient computing power and network headroom.
+- Limiter activity colours the volume control without moving playback controls. Automatic source mode
+  allows the enabled Restorer on browser audio, whose PCM format cannot identify the original codec.
+- Queue, capture and worker paths avoid repeated list allocation, unnecessary copying and idle work.
+
+### Fixed
+
+- Browser startup and playback-reader recovery, output mode/rate changes, failed output-device startup,
+  cancellation during seeks and several Stop/Play races. Output without device callbacks now reports
+  an error rather than leaving playback stuck with a full FIFO.
+- DSD-over-PCM marker continuity and packed DSD transport validation, without changing DSD output bits.
+- Concurrent preference saves colliding on a temporary file; null speaker settings and damaged library
+  cache entries causing startup failures. Valid cached tracks are retained when invalid rows are dropped.
+- ASIO output-channel validation could overflow on malformed saved values.
+- The controller could stop a healthy server when a second Start was rejected. Stop now cancels an
+  unfinished startup; pipe draining is bounded and unexpected exit clears the stale Listening notice.
+- UPnP HEAD responses no longer send a body. Failed listener setup and server shutdown release resources.
+- In-memory artwork thumbnails now follow the source file stamp used by the disk thumbnail cache.
+
+### Upgrade
+
+- Download the player ZIP and replace the complete extracted folder while the old player is closed.
+  Settings and the dedicated Firefox sign-in remain in the user's profile, outside the ZIP.
+- Update the server binary as well to use final DSD offload and the lower-bandwidth DSD transport.
+  Restarting a service alone does not replace its installed executable. The Linux installer and SHA-256
+  manifest are included as separate downloads. Do not run two listeners on the same UDP port.
+- Firefox may request one approval for the signed add-on update. Firefox itself is installed separately.
+  Apple Music quality/DRM restrictions still apply; Web Audio is not a source-bit-perfect guarantee.
+
 ## 0.7.0 — 2026-10-20
 
 ### Added

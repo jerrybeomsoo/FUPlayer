@@ -20,7 +20,7 @@
     <AvaloniaResource Include="Assets\**" />
     <EmbeddedResource Include="StreamingAddon\*.js" />
     <EmbeddedResource Include="StreamingAddon\*.html" />
-    <EmbeddedResource Include="StreamingAddon\*.xpi" />
+    <EmbeddedResource Include="StreamingAddon\fuplayer-streaming-0.3.1.xpi" />
   </ItemGroup>
 
   <ItemGroup>

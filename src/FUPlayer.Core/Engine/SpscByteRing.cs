@@ -7,18 +7,22 @@ public sealed class SpscByteRing
 {
     private readonly byte[] _buffer;
     private readonly int _mask;
+    private readonly int _capacity;
     private long _writeTotal;
     private long _readTotal;
+    private long _clearPosition;
     private int _clearRequested;
 
-    public SpscByteRing(int minimumCapacity)
+    /// <summary>Can limit usable bytes exactly while retaining power-of-two storage for cheap wraparound.</summary>
+    public SpscByteRing(int minimumCapacity, bool exactCapacity = false)
     {
         int capacity = (int)BitOperations.RoundUpToPowerOf2((uint)Math.Max(4096, minimumCapacity));
         _buffer = new byte[capacity];
         _mask = capacity - 1;
+        _capacity = exactCapacity ? Math.Max(1, minimumCapacity) : capacity;
     }
 
-    public int Capacity => _buffer.Length;
+    public int Capacity => _capacity;
 
     /// <summary>Bytes ever written by the producer.</summary>
     public long WriteTotal => Volatile.Read(ref _writeTotal);
@@ -26,7 +30,16 @@ public sealed class SpscByteRing
     /// <summary>Bytes ever consumed (or discarded by a clear) by the consumer.</summary>
     public long ReadTotal => Volatile.Read(ref _readTotal);
 
-    public long Count => WriteTotal - ReadTotal;
+    public long Count
+    {
+        get
+        {
+            // Read first: an observer must not subtract a newer consumer position from an older write.
+            // Both can move during a UI snapshot, whose result still has to fit the physical capacity.
+            long read = ReadTotal;
+            return Math.Clamp(WriteTotal - read, 0, Capacity);
+        }
+    }
 
     public long FreeSpace => Capacity - Count;
 
@@ -45,7 +58,7 @@ public sealed class SpscByteRing
         }
 
         int start = (int)(write & _mask);
-        int first = Math.Min(count, Capacity - start);
+        int first = Math.Min(count, _buffer.Length - start);
         data[..first].CopyTo(_buffer.AsSpan(start));
         if (count > first)
         {
@@ -63,7 +76,11 @@ public sealed class SpscByteRing
         long write = Volatile.Read(ref _writeTotal);
         if (Interlocked.Exchange(ref _clearRequested, 0) != 0)
         {
-            read = write;
+            // Discard only the audio present when reset was requested. A delayed device callback must
+            // retain new seek/restart audio written after that boundary, and must never move backwards.
+            long boundary = Volatile.Read(ref _clearPosition);
+            write = Volatile.Read(ref _writeTotal);
+            read = Math.Max(read, Math.Min(boundary, write));
             Volatile.Write(ref _readTotal, read);
         }
 
@@ -74,7 +91,7 @@ public sealed class SpscByteRing
         }
 
         int start = (int)(read & _mask);
-        int first = Math.Min(count, Capacity - start);
+        int first = Math.Min(count, _buffer.Length - start);
         _buffer.AsSpan(start, first).CopyTo(destination);
         if (count > first)
         {
@@ -85,8 +102,12 @@ public sealed class SpscByteRing
         return count;
     }
 
-    /// <summary>Asks the consumer to discard everything buffered on its next read.</summary>
-    public void RequestClear() => Volatile.Write(ref _clearRequested, 1);
+    /// <summary>Asks the consumer to discard the audio buffered now, retaining later writes.</summary>
+    public void RequestClear()
+    {
+        Volatile.Write(ref _clearPosition, Volatile.Read(ref _writeTotal));
+        Volatile.Write(ref _clearRequested, 1);
+    }
 
     /// <summary>Discards everything immediately. Only valid while no consumer is running.</summary>
     public void ClearNow()

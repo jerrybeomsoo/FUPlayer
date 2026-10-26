@@ -1,0 +1,50 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:FUPlayer.App.ViewModels"
+             xmlns:controls="using:FUPlayer.App.Controls"
+             x:Class="FUPlayer.App.Views.StreamingSettingsView"
+             x:DataType="vm:StreamingViewModel">
+  <Grid RowDefinitions="Auto,Auto,Auto" Margin="0" RowSpacing="10">
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+      <StackPanel Spacing="3">
+        <TextBlock Classes="h1" Text="{Binding PageTitle}" />
+        <TextBlock Classes="secondary small" TextWrapping="Wrap" IsVisible="{Binding !IsRunning}"
+                   Text="Play Apple Music through FUPlayer. Install the signed add-on once; Firefox loads it automatically afterwards." />
+      </StackPanel>
+      <Button Grid.Column="1" Classes="subtle" Content="Close browser" Command="{Binding CloseCommand}" IsEnabled="{Binding IsRunning}" VerticalAlignment="Center" />
+    </Grid>
+    <StackPanel Grid.Row="1" Spacing="7">
+      <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8" IsVisible="{Binding !IsRunning}">
+        <Button Classes="primary" Content="Open Apple Music" Command="{Binding OpenCommand}" />
+        <Button Grid.Column="1" Content="Install add-on…" Click="BrowseAddon" />
+      </Grid>
+      <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" IsVisible="{Binding !IsRunning}">
+        <TextBlock Text="Firefox executable" Classes="muted small" VerticalAlignment="Center" />
+        <TextBox Grid.Column="1" Text="{Binding Executable}" PlaceholderText="Path to firefox.exe" />
+        <Button Grid.Column="2" Content="Browse…" Click="BrowseFirefox" Classes="subtle" />
+      </Grid>
+      <CheckBox Content="Show inside player" IsChecked="{Binding EmbedBrowser}" VerticalAlignment="Center" />
+      <TextBlock Text="{Binding Status}" Classes="secondary small" TextWrapping="Wrap" IsVisible="{Binding !IsCapturing}" />
+      <TextBlock Text="{Binding AddonManifest}" Classes="muted small" TextTrimming="CharacterEllipsis" IsVisible="{Binding !IsCapturing}" />
+    </StackPanel>
+    <Expander Grid.Row="2" Header="Browser details" IsExpanded="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+    <StackPanel Spacing="4">
+      <TextBlock Text="{Binding Status}" Classes="secondary small" TextWrapping="Wrap" />
+      <TextBlock Classes="muted small" TextWrapping="Wrap"
+                 Text="48 kHz stereo float PCM goes directly from Firefox to FUPlayer. The signed add-on reconnects automatically; native browser output stays silent." />
+      <TextBlock Text="{Binding CaptureNote}" IsVisible="{Binding HasCaptureNote}" Classes="secondary small" TextWrapping="Wrap" />
+      <TextBlock Text="{Binding AudioReceived}" IsVisible="{Binding IsRunning}" Classes="secondary small" />
+      <TextBlock Text="{Binding AudioDetails}" IsVisible="{Binding IsRunning}" Classes="secondary small" TextWrapping="Wrap" />
+      <TextBlock Text="{Binding HostDetails}" IsVisible="{Binding IsRunning}" Classes="secondary small" TextWrapping="Wrap" />
+      <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding !IsRunning}">
+        <Button Content="Temporary add-on preview" Command="{Binding OpenTemporaryAddonCommand}" Classes="subtle" />
+        <Button Content="Open audio add-on folder" Command="{Binding OpenAddonFolderCommand}" Classes="subtle" />
+      </StackPanel>
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+        <TextBlock Text="{Binding ProfileDirectory}" Classes="muted small" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+        <Button Grid.Column="1" Content="Open browser profile folder" Command="{Binding OpenProfileFolderCommand}" Classes="subtle" />
+      </Grid>
+    </StackPanel>
+    </Expander>
+  </Grid>
+</UserControl>

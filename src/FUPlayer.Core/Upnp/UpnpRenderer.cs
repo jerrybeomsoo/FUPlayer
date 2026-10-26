@@ -214,6 +214,7 @@ public sealed class UpnpRenderer : IDisposable
             }
             catch (SocketException) when (candidate != 0)
             {
+                listener.Stop();
                 // Taken by something else: try the next one.
             }
         }
@@ -269,7 +270,7 @@ public sealed class UpnpRenderer : IDisposable
                 UpnpResponse response = MayControl(remote.Address)
                     ? Handle(request)
                     : UpnpResponse.Empty(403, "Forbidden");
-                await UpnpHttp.WriteAsync(stream, response, timeout.Token).ConfigureAwait(false);
+                await UpnpHttp.WriteAsync(stream, response, timeout.Token, headersOnly: request.Method == "HEAD").ConfigureAwait(false);
                 if (response.Status == 200 && request.Method == "SUBSCRIBE" && response.Headers.TryGetValue("SID", out string? sid))
                 {
                     SendInitialEvent(sid);

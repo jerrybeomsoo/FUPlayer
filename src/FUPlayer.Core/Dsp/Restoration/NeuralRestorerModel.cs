@@ -131,7 +131,17 @@ public sealed class NeuralRestorerModel : IDisposable
     /// The window the description beside the network names, or Hann when it names none: every restorer before the
     /// window could be chosen was trained with Hann, and its description does not say so.
     /// </summary>
-    private static double[] ReadWindow(string path)
+    internal static double[] ReadWindow(string path)
+    {
+        try { return ReadWindowDescription(path); }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException or FormatException)
+        {
+            // TryLoadRestorer reports invalid model data and keeps playback available without that model.
+            throw new InvalidDataException($"{System.IO.Path.GetFileName(path)}: its window description is malformed.", ex);
+        }
+    }
+
+    private static double[] ReadWindowDescription(string path)
     {
         string description = System.IO.Path.ChangeExtension(path, ".json");
         if (!File.Exists(description))

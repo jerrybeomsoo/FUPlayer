@@ -16,7 +16,7 @@ namespace FUPlayer.App.ViewModels;
 
 /// <summary>An entry of the navigation rail.</summary>
 /// <param name="isChild">A page that belongs to the entry above it, shown indented under it.</param>
-public sealed partial class NavItem(string key, string title, Geometry icon, ObservableObject page, bool isChild = false) : ObservableObject
+public sealed partial class NavItem(string key, string title, Geometry icon, ObservableObject page, bool isChild = false, bool isSelectable = true) : ObservableObject
 {
     [ObservableProperty]
     private bool _isSelected;
@@ -30,6 +30,7 @@ public sealed partial class NavItem(string key, string title, Geometry icon, Obs
     public ObservableObject Page { get; } = page;
 
     public bool IsChild { get; } = isChild;
+    public bool IsSelectable { get; } = isSelectable;
 }
 
 /// <summary>The application shell: navigation, transport bar, signal-path summary and the status poll.</summary>
@@ -37,7 +38,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
     private static readonly TimeSpan LimiterHold = TimeSpan.FromSeconds(1.5);
     private static readonly TimeSpan ErrorHold = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan LoadSampleLength = TimeSpan.FromSeconds(1);
 
     private static readonly TimeSpan LiveRefresh = TimeSpan.FromSeconds(1);
 
@@ -53,17 +53,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private DateTime _limiterUntilUtc;
     private DateTime _errorUntilUtc;
     private bool _metersIdle;
-    private readonly Queue<(double Load, bool Dropout)> _loadHistory = new();
-    private DateTime _loadSampleStartUtc;
-    private double _loadSampleMaximum;
-    private double _loadSampleServer;
-    private long _loadSampleUnderruns = -1;
-    private bool _overloadDismissed;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasOverloadWarning))]
-    private string? _overloadMessage;
-
     [ObservableProperty]
     private NavItem _selectedNav = null!;
 
@@ -95,7 +84,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _canShuffle = true;
     [ObservableProperty] private bool _canRepeat = true;
     private bool _receivingBrowserVolume;
-    public string VolumeHint => IsBrowserTransport
+    public string VolumeHint => IsLimiting
+        ? Loc.T("The soft limiter is catching overs. Lower the volume for a clean signal.")
+        : IsBrowserTransport
         ? Loc.T("Browser volume only. FUPlayer DSP gain stays at 0 dB.")
         : Loc.T("Volume: drag up or down, scroll, or use the arrow keys (Shift for fine steps)");
 
@@ -117,7 +108,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isVolumeFixed;
 
-    [ObservableProperty]
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(VolumeHint))]
     private bool _isLimiting;
 
     /// <summary>A UPnP controller muted the player.</summary>
@@ -201,7 +192,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             finally { _receivingBrowserVolume = false; }
         };
         UpnpInput = new UpnpInputViewModel(services);
-        General = new SettingsViewModel(services);
+        General = new SettingsViewModel(services) { Streaming = Streaming };
         Glossary = new GlossaryViewModel();
 
         NowPlayingNav = new NavItem("NowPlaying", "Now playing", Icons.NowPlaying, NowPlaying);
@@ -211,14 +202,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         DspNav = new NavItem("Dsp", "DSP studio", Icons.Dsp, Dsp);
         OutputNav = new NavItem("Output", "Output", Icons.Output, Output);
         LiveInputNav = new NavItem("LiveInput", "Live input", Icons.LiveInput, LiveInput);
-        StreamingNav = new NavItem("Streaming", "Streaming", Icons.Browser, Streaming);
+        StreamingNav = new NavItem("Streaming", "Streaming", Icons.Browser, Streaming, isSelectable: false);
         AppleMusicNav = new NavItem("AppleMusic", "Apple Music", Icons.Music, Streaming, isChild: true);
         UpnpInputNav = new NavItem("UpnpInput", "UPnP input", Icons.Upnp, UpnpInput, isChild: true);
         CalibrationNav = new NavItem("Calibration", "Calibration", Icons.Calibration, Calibration);
         SettingsNav = new NavItem("Settings", "Settings", Icons.Settings, General);
         GlossaryNav = new NavItem("Glossary", "Glossary", Icons.Glossary, Glossary, isChild: true);
         Navigation = [NowPlayingNav, QueueNav, LibraryNav, TracksNav, LiveInputNav, UpnpInputNav, StreamingNav, AppleMusicNav, DspNav, OutputNav, CalibrationNav, SettingsNav, GlossaryNav];
-        SelectedNav = Navigation.FirstOrDefault(n => n.Key == services.Settings.Ui.LastPage) ?? NowPlayingNav;
+        SelectedNav = services.Settings.Ui.LastPage == "Streaming" ? AppleMusicNav
+            : Navigation.FirstOrDefault(n => n.IsSelectable && n.Key == services.Settings.Ui.LastPage) ?? NowPlayingNav;
 
         PlaybackSettings playback = services.Settings.Playback;
         Repeat = playback.Repeat;
@@ -284,7 +276,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public NavItem StreamingNav { get; }
     public NavItem AppleMusicNav { get; }
-    public bool IsStreamingPage => SelectedNav == StreamingNav || SelectedNav == AppleMusicNav;
+    public bool IsStreamingPage => SelectedNav == AppleMusicNav;
 
     public NavItem UpnpInputNav { get; }
 
@@ -302,7 +294,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public bool HasError => ErrorMessage is not null;
 
-    public bool HasOverloadWarning => OverloadMessage is not null;
 
     public void SetWindowHandle(IntPtr handle) => _services.Engine.WindowHandle = handle;
 
@@ -334,6 +325,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         newValue.IsSelected = true;
         OnPropertyChanged(nameof(IsStreamingPage));
         Streaming.IsAppleMusicPage = newValue == AppleMusicNav;
+        if (newValue == AppleMusicNav) Streaming.Activate();
         if (newValue == OutputNav)
         {
             // Probing a device opens it, so it waits until the page is on screen.
@@ -391,8 +383,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void Stop()
     {
-        if (Streaming.Owns(_services.Engine.GetStatus())) Streaming.CloseCommand.Execute(null);
-        else _services.Engine.Stop();
+        if (!Streaming.TryStop(_services.Engine.GetStatus())) _services.Engine.Stop();
     }
 
     [RelayCommand]
@@ -475,16 +466,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void DismissError() => ErrorMessage = null;
 
     [RelayCommand]
-    private void DismissOverload()
-    {
-        _overloadDismissed = true;
-        OverloadMessage = null;
-    }
-
-    [RelayCommand]
-    private void OpenDspStudio() => SelectedNav = DspNav;
-
-    [RelayCommand]
     private void Navigate(string? key)
     {
         if (Navigation.FirstOrDefault(n => n.Key == key) is { } item)
@@ -560,7 +541,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         UpdateSignalPath(status, active);
 
         DateTime now = DateTime.UtcNow;
-        UpdateOverload(status, now);
         if (status.LimiterEvents > _lastLimiterEvents)
         {
             _limiterUntilUtc = now + LimiterHold;
@@ -707,7 +687,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         TimeSpan duration = status.Duration;
         if (Streaming.Owns(status) && Streaming.Transport is { } transport)
         {
-            position = TimeSpan.FromSeconds(transport.Position);
+            position = TimeSpan.FromSeconds(status.State == EngineState.Stopped ? 0 : Streaming.PositionAtOutput(status));
             duration = TimeSpan.FromSeconds(transport.Duration);
         }
         PositionSeconds = position.TotalSeconds;
@@ -750,77 +730,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         IsDspOverloaded = active && load > 0.9;
         BufferFill = active ? status.BufferFill : 0;
         BufferText = active ? Formatting.Percent(status.BufferFill) : "-";
-    }
-
-    /// <summary>
-    /// Shows a warning when processing cannot keep up: DSP load at 95 % or more for three seconds in a row, or dropouts
-    /// in three of the last five seconds. The warning goes away after three calm seconds.
-    /// </summary>
-    private void UpdateOverload(PlaybackStatus status, DateTime now)
-    {
-        if (status.State != EngineState.Playing)
-        {
-            _loadHistory.Clear();
-            _loadSampleUnderruns = -1;
-            if (status.State == EngineState.Stopped)
-            {
-                OverloadMessage = null;
-                _overloadDismissed = false;
-            }
-
-            return;
-        }
-
-        if (_loadSampleUnderruns < 0 || status.UnderrunFrames < _loadSampleUnderruns)
-        {
-            _loadSampleUnderruns = status.UnderrunFrames;
-            _loadSampleStartUtc = now;
-            _loadSampleMaximum = 0;
-        }
-
-        _loadSampleMaximum = Math.Max(_loadSampleMaximum, EffectiveLoad(status));
-        _loadSampleServer = Math.Max(_loadSampleServer, status.NetworkServerLoad ?? 0);
-        if (now - _loadSampleStartUtc < LoadSampleLength)
-        {
-            return;
-        }
-
-        _loadHistory.Enqueue((_loadSampleMaximum, status.UnderrunFrames > _loadSampleUnderruns));
-        while (_loadHistory.Count > 5)
-        {
-            _loadHistory.Dequeue();
-        }
-
-        _loadSampleUnderruns = status.UnderrunFrames;
-        _loadSampleStartUtc = now;
-        _loadSampleMaximum = 0;
-        double server = _loadSampleServer;
-        _loadSampleServer = 0;
-
-        (double Load, bool Dropout)[] recent = _loadHistory.TakeLast(3).ToArray();
-        bool saturated = recent.Length == 3 && recent.All(s => s.Load >= 0.95);
-        bool dropouts = _loadHistory.Count(s => s.Dropout) >= 3;
-        bool calm = recent.Length == 3 && recent.All(s => s.Load < 0.9 && !s.Dropout);
-        if ((saturated || dropouts) && !_overloadDismissed)
-        {
-            // Tap by tap first, because it is the largest lever by far: a filter of several thousand taps a phase
-            // costs a multiply-add for every one of them, where the frequency domain costs a transform.
-            bool tapByTap = _services.Settings.Processing.Convolution == ConvolutionMode.TapByTap;
-            OverloadMessage = server >= 0.95
-                ? (tapByTap
-                    ? Loc.F("The DSP server cannot keep up: this processing takes it {0} of the music's time, so the sound drops out. In the DSP studio, shorten the filter or set Convolution to Frequency domain.", Formatting.Percent(server))
-                    : Loc.F("The DSP server cannot keep up: this processing takes it {0} of the music's time, so the sound drops out. In the DSP studio, shorten the filter or lower the output rate.", Formatting.Percent(server)))
-                : tapByTap
-                ? Loc.T("Processing cannot keep up with this output, so the sound may drop out. In the DSP studio, set Convolution to Frequency domain, which costs a transform rather than a multiply-add for every tap.")
-                : status.Plan is { Output.IsDsd: true }
-                    ? Loc.T("Processing cannot keep up with this output, so the sound may drop out. In the DSP studio, lower the highest DSD rate, choose a lighter modulator or filter, or use multi-stage filter staging.")
-                    : Loc.T("Processing cannot keep up with this output, so the sound may drop out. In the DSP studio, lower the highest PCM rate, choose a lighter filter, or use multi-stage filter staging.");
-        }
-        else if (calm)
-        {
-            OverloadMessage = null;
-            _overloadDismissed = false;
-        }
     }
 
     /// <summary>The load that decides whether playback keeps up: this computer's, or the DSP server's when it is the higher.</summary>

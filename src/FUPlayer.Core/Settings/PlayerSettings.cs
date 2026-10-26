@@ -433,6 +433,15 @@ public sealed class ProcessingSettings
     /// <summary>Run the neural upscaler remotely when enabled for this source.</summary>
     public bool RemoteUpscaler { get; set; } = true;
 
+    /// <summary>Finish DSD interpolation/modulation remotely when the filter is remote and the server supports it.</summary>
+    public bool RemoteDsdOutput { get; set; } = true;
+    /// <summary>Server input FIFO capacity in milliseconds, negotiated with capable servers.</summary>
+    public int ServerFifoMilliseconds { get; set; } = 500;
+    /// <summary>Total server threads requested; zero uses its administrator's limit.</summary>
+    public int ServerThreads { get; set; }
+    /// <summary>Allow this session to use the server's configured convolution GPU.</summary>
+    public bool ServerGpu { get; set; } = true;
+
     /// <summary>Chosen compute device, or empty to prefer CUDA for NVIDIA and Vulkan for other GPUs.</summary>
     public string GpuDeviceId { get; set; } = string.Empty;
 

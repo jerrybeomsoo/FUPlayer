@@ -64,6 +64,8 @@ internal sealed class AiffDecoder : UncompressedPcmDecoder
                 channels = BinaryPrimitives.ReadInt16BigEndian(common);
                 bits = BinaryPrimitives.ReadInt16BigEndian(common.AsSpan(6));
                 rate = ReadExtended(common.AsSpan(8, 10));
+                if (channels <= 0 || !double.IsFinite(rate) || rate < 1 || rate > int.MaxValue)
+                    throw new InvalidDataException("Invalid AIFF audio parameters.");
                 if (isAifc && common.Length >= 22)
                 {
                     compression = Encoding.ASCII.GetString(common, 18, 4);
@@ -73,6 +75,7 @@ internal sealed class AiffDecoder : UncompressedPcmDecoder
             }
             else if (id == "SSND")
             {
+                if (size < 8) throw new InvalidDataException("AIFF sound chunk is too short.");
                 if (!haveCommon)
                 {
                     throw new InvalidDataException("AIFF sound data appears before the common chunk.");
@@ -81,6 +84,7 @@ internal sealed class AiffDecoder : UncompressedPcmDecoder
                 Span<byte> ssnd = stackalloc byte[8];
                 stream.ReadExactly(ssnd);
                 uint offset = BinaryPrimitives.ReadUInt32BigEndian(ssnd);
+                if (offset > size - 8) throw new InvalidDataException("AIFF sound offset extends beyond its chunk.");
                 long dataOffset = start + 8 + offset;
                 long dataBytes = Math.Min((long)size - 8 - offset, stream.Length - dataOffset);
 

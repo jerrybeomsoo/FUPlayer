@@ -47,7 +47,7 @@ browser.runtime.onConnect.addListener(port => {
         ? "Browser direct audio stopped." : String(message.error).slice(0, 240) }));
       return;
     }
-    if (message.state === "playing" || message.state === "paused") { socket.send(JSON.stringify({ state: message.state })); return; }
+    if (message.state === "playing" || message.state === "paused" || message.state === "stopped") { socket.send(JSON.stringify({ state: message.state })); return; }
     if (message.audio) { if (FUPlayerBridge.reportDiagnostics !== false) socket.send(JSON.stringify({ audio: message.audio })); return; }
     if (message.transport) { socket.send(JSON.stringify({ transport: message.transport })); return; }
     if (Object.hasOwn(message, "metadata")) { socket.send(JSON.stringify({ metadata: message.metadata })); return; }
@@ -70,7 +70,7 @@ socket.onmessage = event => {
       windowReady = true;
       openService();
     }
-    if (["play", "pause", "nexttrack", "previoustrack", "seekto", "volume", "shuffle", "repeat"].includes(message.action))
+    if (["play", "pause", "stop", "nexttrack", "previoustrack", "seekto", "volume", "shuffle", "repeat"].includes(message.action))
       for (const port of ports) port.postMessage({ action: message.action, value: message.value });
     if (message.action === "viewport" && Number.isFinite(message.width) && Number.isFinite(message.height)) {
       // Fit the service's full player chrome to the host; longer catalogues retain their own normal scrolling.
@@ -82,7 +82,7 @@ socket.onmessage = event => {
 };
 socket.onopen = async () => {
   connected = true;
-  socket.send(JSON.stringify({ addon: { mode: FUPlayerBridge.mode || "temporary", version: "0.2.0" } }));
+  socket.send(JSON.stringify({ addon: { mode: FUPlayerBridge.mode || "temporary", version: "0.3.1" } }));
   for (const port of ports) port.postMessage({ connected });
   // Kiosk main windows are forced fullscreen. A normal popup has no browser chrome and can reflow to the host.
   const setup = (await browser.tabs.query({})).filter(tab =>
@@ -90,7 +90,7 @@ socket.onopen = async () => {
   if (setup.length) {
     try {
       const created = await browser.windows.create({ type: "popup", url: browser.runtime.getURL("host.html"),
-        width: 1120, height: 760, titlePreface: FUPlayerBridge.windowTitleMarker });
+        state: "minimized", focused: false, titlePreface: FUPlayerBridge.windowTitleMarker });
       serviceWindow = created.id;
       serviceTab = created.tabs?.[0]?.id;
       if (!Number.isInteger(serviceTab)) throw new Error("Missing service tab");

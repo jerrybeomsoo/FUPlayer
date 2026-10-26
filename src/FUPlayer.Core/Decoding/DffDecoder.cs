@@ -67,6 +67,8 @@ internal sealed class DffDecoder : IAudioDecoder
             string id = Encoding.ASCII.GetString(chunk[..4]);
             long size = (long)BinaryPrimitives.ReadUInt64BigEndian(chunk[4..]);
             long start = stream.Position;
+            if (size < 0 || size > stream.Length - start)
+                throw new InvalidDataException("DSDIFF chunk extends beyond the file.");
 
             switch (id)
             {
@@ -132,6 +134,7 @@ internal sealed class DffDecoder : IAudioDecoder
 
     private static void ParseProperties(Stream stream, long start, long size, ref int rate, ref int channels, ref string compression)
     {
+        if (size < 4) throw new InvalidDataException("DSDIFF properties chunk is too short.");
         Span<byte> type = stackalloc byte[4];
         stream.ReadExactly(type);
         if (Encoding.ASCII.GetString(type) != "SND ")
@@ -148,6 +151,9 @@ internal sealed class DffDecoder : IAudioDecoder
             string id = Encoding.ASCII.GetString(chunk[..4]);
             long chunkSize = (long)BinaryPrimitives.ReadUInt64BigEndian(chunk[4..]);
             long chunkStart = stream.Position;
+            int required = id switch { "FS  " or "CMPR" => 4, "CHNL" => 2, _ => 0 };
+            if (chunkSize < required || chunkSize > end - chunkStart)
+                throw new InvalidDataException("DSDIFF property extends beyond its chunk.");
 
             switch (id)
             {

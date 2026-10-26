@@ -1,9 +1,9 @@
 // Use public Media Session and MusicKit playback controls only. Never read account, licence or provider internals.
 (() => {
-  const allowed = new Set(["play", "pause", "nexttrack", "previoustrack", "seekto", "shuffle", "repeat", "volume"]);
+  const allowed = new Set(["play", "pause", "stop", "nexttrack", "previoustrack", "seekto", "shuffle", "repeat", "volume"]);
   const handlers = new Map();
   const session = navigator.mediaSession;
-  let positionState, lastReport;
+  let positionState, lastReport, lastPlaybackState;
   const post = data => window.postMessage({ source: "fuplayer-page-controls", ...data }, location.origin);
   function player() {
     if (location.hostname !== "music.apple.com") return null;
@@ -32,7 +32,18 @@
     try {
     const music = player(), actions = new Set(handlers.keys());
     const transport = {};
+    let playbackState = session?.playbackState;
     if (music) {
+      if (typeof music.stop === "function") actions.add("stop");
+      if (typeof music.play === "function") actions.add("play");
+      if (typeof music.pause === "function") actions.add("pause");
+      const states = globalThis.MusicKit?.PlaybackStates;
+      const state = music.playbackState;
+      if (state != null && states?.stopped != null && state === states.stopped) playbackState = "stopped";
+      else if (state != null && states?.paused != null && state === states.paused) playbackState = "paused";
+      else if (music.isPlaying === true) playbackState = "playing";
+      else if (state != null && states) playbackState = lastPlaybackState; // Loading/waiting between segments is not an explicit pause.
+      if (music.nowPlayingItem?.id != null) transport.trackId = String(music.nowPlayingItem.id).slice(0, 256);
       if (typeof music.seekToTime === "function") actions.add("seekto");
       if ("shuffleMode" in music) { actions.add("shuffle"); transport.shuffle = music.shuffleMode === 1; }
       if ("repeatMode" in music) {
@@ -43,7 +54,9 @@
       transport.duration = music.currentPlaybackDuration;
       transport.position = music.currentPlaybackTime;
     } else if (positionState) Object.assign(transport, positionState);
-    const result = { actions: [...actions], ...(Object.keys(transport).length ? { transport } : {}), metadata: metadata(music) };
+    if (["playing", "paused", "stopped"].includes(playbackState)) lastPlaybackState = playbackState;
+    const result = { actions: [...actions], ...(Object.keys(transport).length ? { transport } : {}), metadata: metadata(music),
+      ...(["playing", "paused", "stopped"].includes(playbackState) ? { playbackState } : {}) };
     const serialised = JSON.stringify(result);
     if (force || serialised !== lastReport) { lastReport = serialised; post(result); }
     } catch { /* Optional SDK state must never change the provider's native registration behaviour. */ }
@@ -72,6 +85,9 @@
     if (!allowed.has(action)) return;
     const music = player();
     Promise.resolve().then(() => {
+      if (action === "stop" && music && typeof music.stop === "function") return music.stop();
+      if (action === "play" && !handlers.has(action) && music && typeof music.play === "function") return music.play();
+      if (action === "pause" && !handlers.has(action) && music && typeof music.pause === "function") return music.pause();
       if (action === "volume" && music && Number.isFinite(value) && value >= 0 && value <= 1) music.volume = value;
       else if (action === "shuffle" && music && typeof value === "boolean") music.shuffleMode = value ? 1 : 0;
       else if (action === "repeat" && music && ["off", "all", "one"].includes(value)) music.repeatMode = value === "one" ? 1 : value === "all" ? 2 : 0;

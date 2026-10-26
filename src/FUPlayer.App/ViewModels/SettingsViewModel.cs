@@ -14,6 +14,8 @@ namespace FUPlayer.App.ViewModels;
 /// <summary>The Settings page: playback behaviour, processing resources and information about the build.</summary>
 public sealed partial class SettingsViewModel : ObservableObject
 {
+    public StreamingViewModel Streaming { get; init; } = null!;
+
     private readonly PlayerServices _services;
     private readonly bool _ready;
 
@@ -60,6 +62,10 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty, NotifyPropertyChangedFor(nameof(LocalResampling))] private bool _remoteResampling;
     [ObservableProperty] private bool _remoteRestorer;
     [ObservableProperty] private bool _remoteUpscaler;
+    [ObservableProperty] private bool _remoteDsdOutput;
+    [ObservableProperty] private int _serverFifoMilliseconds;
+    [ObservableProperty] private int _serverThreads;
+    [ObservableProperty] private bool _serverGpu;
     public bool LocalResampling => !NetworkDsp || !RemoteResampling;
 
     [ObservableProperty]
@@ -156,6 +162,10 @@ public sealed partial class SettingsViewModel : ObservableObject
         RemoteResampling = settings.Processing.RemoteResampling;
         RemoteRestorer = settings.Processing.RemoteRestorer;
         RemoteUpscaler = settings.Processing.RemoteUpscaler;
+        RemoteDsdOutput = settings.Processing.RemoteDsdOutput;
+        ServerFifoMilliseconds = settings.Processing.ServerFifoMilliseconds;
+        ServerThreads = settings.Processing.ServerThreads;
+        ServerGpu = settings.Processing.ServerGpu;
         GpuStatus = HasGpuDevices
             ? string.Join(Environment.NewLine, GpuRuntime.Devices.Select(d => $"{d.Name}: {d.Summary}"))
             : GpuRuntime.Unavailable ?? Loc.T("No usable compute device was found.");
@@ -201,8 +211,8 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// How much audio is kept ahead of the device, and what that costs in memory. A PCM frame in the FIFO is four
     /// bytes a channel whatever the word length, and a native DSD frame is one byte per eight bits a channel,
     /// which comes to the same 5.4 MiB a second for 705.6 kHz stereo as for DSD512 stereo, since they carry the
-    /// same number of bits. The ring is a power of two bytes, so every figure below is the allocation after
-    /// rounding up, and the audio it holds is correspondingly longer than the setting asks for.
+    /// same number of bits. Storage is rounded up for cheap wraparound, but usable audio capacity follows
+    /// the selected duration. The memory estimates below describe storage, not an extra audio delay.
     /// </summary>
     public IReadOnlyList<Choice> FifoChoices { get; } =
     [
@@ -214,8 +224,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         new("4 s", 4_000, "2 MiB at 44.1 kHz stereo, 32 MiB at 705.6 kHz or DSD512."),
         new("8 s", 8_000, "4 MiB at 44.1 kHz stereo, 64 MiB at 705.6 kHz or DSD512."),
         new("15 s", 15_000, "8 MiB at 44.1 kHz stereo, 128 MiB at 705.6 kHz or DSD512. Seeks refill slowly."),
-        new("30 s", 30_000, "16 MiB at 44.1 kHz stereo. Hits the 256 MiB cap at 705.6 kHz, giving 47 s there."),
-        new("60 s", 60_000, "32 MiB at 44.1 kHz stereo. Same 256 MiB cap and 47 s at 705.6 kHz as 30 s."),
+        new("30 s", 30_000, "16 MiB at 44.1 kHz stereo, 256 MiB at 705.6 kHz or DSD512."),
+        new("60 s", 60_000, "32 MiB at 44.1 kHz stereo. The 256 MiB cap limits 705.6 kHz or DSD512 to about 47 s."),
     ];
 
     /// <summary>What the FIFO is actually holding, once something is playing and the real format is known.</summary>
@@ -231,7 +241,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         FifoSize = bytes <= 0
             ? Loc.T("No stream, no FIFO allocated.")
             : Loc.F(
-                "Allocated {0} MiB, {1} ms at the current format. Rounded up to a power of two, and raised by the device buffer or a block-based filter.",
+                "Usable {0} MiB, {1} ms at the current format. The device buffer, filter blocks and network delivery can raise the minimum.",
                 (bytes / (1024.0 * 1024.0)).ToString("0.###", System.Globalization.CultureInfo.CurrentCulture),
                 (seconds * 1000.0).ToString("N0", System.Globalization.CultureInfo.CurrentCulture));
     }
@@ -370,6 +380,10 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     partial void OnNetworkDspChanged(bool value) => Update(() => Settings.Processing.NetworkDsp = value);
 
+    partial void OnRemoteDsdOutputChanged(bool value) => Update(() => Settings.Processing.RemoteDsdOutput = value);
+    partial void OnServerFifoMillisecondsChanged(int value) => Update(() => Settings.Processing.ServerFifoMilliseconds = Math.Clamp(value, 100, 5000));
+    partial void OnServerThreadsChanged(int value) => Update(() => Settings.Processing.ServerThreads = Math.Clamp(value, 0, 64));
+    partial void OnServerGpuChanged(bool value) => Update(() => Settings.Processing.ServerGpu = value);
     partial void OnNetworkDspHostChanged(string value) => Update(() => Settings.Processing.NetworkDspHost = value.Trim());
     partial void OnNetworkDspKeyChanged(string value) => Update(() => Settings.Processing.NetworkDspKey = value.Trim());
     partial void OnNetworkDspPortChanged(int value) => Update(() => Settings.Processing.NetworkDspPort = Math.Clamp(value, 1, 65535));

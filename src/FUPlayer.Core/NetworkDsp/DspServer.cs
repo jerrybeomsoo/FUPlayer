@@ -104,8 +104,12 @@ public sealed class DspServer : IAsyncDisposable
             ReceiveBufferSize = 8 << 20,
             SendBufferSize = 8 << 20,
         };
-        DspEndpoint.IgnoreConnectionReset(_socket);
-        _socket.Bind(new IPEndPoint(options.ListenAddress, options.Port));
+        try
+        {
+            DspEndpoint.IgnoreConnectionReset(_socket);
+            _socket.Bind(new IPEndPoint(options.ListenAddress, options.Port));
+        }
+        catch { _socket.Dispose(); _protection?.Dispose(); _stop.Dispose(); throw; }
     }
 
     /// <summary>The UDP endpoint actually bound, including an ephemeral test/worker port.</summary>
@@ -318,13 +322,12 @@ public sealed class DspServer : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _stop.Cancel();
-        if (_running is not null)
+        try { if (_running is not null) await _running.ConfigureAwait(false); }
+        finally
         {
-            await _running.ConfigureAwait(false);
+            _socket.Dispose();
+            _protection?.Dispose();
+            _stop.Dispose();
         }
-
-        _socket.Dispose();
-        _protection?.Dispose();
-        _stop.Dispose();
     }
 }

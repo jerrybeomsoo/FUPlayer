@@ -23,7 +23,7 @@ rate, filter/taps, enabled stages, buffer sizes, and the Now playing status/erro
 include server version, CPU/GPU and whether the connection is wired. Remove personal file paths from logs
 before posting them. Reports can be filed in [GitHub Issues](https://github.com/jerrybeomsoo/FUPlayer/issues).
 
-Known in v0.7.0: changing Stop after this track in the final buffered part of a track can miss the audible
+Known in v0.7.1: changing Stop after this track in the final buffered part of a track can miss the audible
 boundary. Native FreeBSD, Linux ARM64 hardware and all possible DAC/driver combinations are unverified.
 
 For a missing Linux service, check the installation scope: `systemctl status fuplayer-dsp.service` shows
@@ -31,3 +31,9 @@ a system service; `systemctl --user status fuplayer-dsp.service` shows the curre
 The unit name is `fuplayer-dsp.service`, also available as `fuplayer-dsp-server.service` after installation.
 Internet DSP needs compatible protocol 4 versions (v0.6.3 or v0.7.0), a matching key, a direct IPv4 DNS record and UDP forwarding.
 An HTTPS website loading successfully does not establish that its UDP port is reachable.
+
+If a neural adapter cannot open a model, the active chain reports the reason and processing falls back
+to the CPU. During v0.7.1 checks one local Intel HD 630 adapter returned DirectML error `0x887A0020`;
+hardware-required tests on that adapter could not pass. Microsoft defines it as a
+[driver internal error](https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/dxgi-error).
+CPU fallback was available. GPU support still depends on a functioning driver and device.

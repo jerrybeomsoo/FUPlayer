@@ -74,6 +74,9 @@ public sealed record PlaybackPlan
     /// <summary>The source's codec as the decoder names it, or null before one is open.</summary>
     public string? SourceCodec { get; init; }
 
+    /// <summary>Decoded browser PCM does not identify its original service codec.</summary>
+    public bool SourceCodecUnknown { get; init; }
+
     /// <summary>
     /// Whether the neural restorer runs, at the source rate, on the source's two channels (or its one), before the
     /// per-channel chain. Planned for PCM at 44.1 and 48 kHz; the engine turns it off again for a lossless source.

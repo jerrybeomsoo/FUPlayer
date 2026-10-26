@@ -12,6 +12,7 @@ namespace FUPlayer.Core.Settings;
 /// <summary>Loads and saves <see cref="PlayerSettings"/> as JSON in the user's application-data folder.</summary>
 public sealed class SettingsStore
 {
+    private static readonly object FileGate = new();
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,
@@ -40,6 +41,11 @@ public sealed class SettingsStore
 
     public PlayerSettings Load()
     {
+        lock (FileGate) return LoadCore();
+    }
+
+    private PlayerSettings LoadCore()
+    {
         try
         {
             if (File.Exists(FilePath))
@@ -57,10 +63,19 @@ public sealed class SettingsStore
 
     public void Save(PlayerSettings settings)
     {
+        lock (FileGate) SaveCore(settings);
+    }
+
+    private void SaveCore(PlayerSettings settings)
+    {
         Directory.CreateDirectory(SettingsDirectory);
-        string temporary = FilePath + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(settings, Options));
-        File.Move(temporary, FilePath, overwrite: true);
+        string temporary = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, JsonSerializer.Serialize(settings, Options));
+            File.Move(temporary, FilePath, overwrite: true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
     public static PlayerSettings Clone(PlayerSettings settings) =>
@@ -104,6 +119,14 @@ public sealed class SettingsStore
             settings.Speakers.Channels.Add(new SpeakerTrim { Name = SpeakerSettings.ChannelNames[i] });
         }
 
+        for (int i = 0; i < settings.Speakers.Channels.Count; i++)
+        {
+            settings.Speakers.Channels[i] ??= new SpeakerTrim();
+            settings.Speakers.Channels[i].Name ??= string.Empty;
+            if (settings.Speakers.Channels[i].Name.Length == 0 && i < SpeakerSettings.ChannelNames.Length)
+                settings.Speakers.Channels[i].Name = SpeakerSettings.ChannelNames[i];
+        }
+
         settings.Library.Folders ??= [];
         settings.Restoration.RestorerDevice ??= string.Empty;
         settings.Restoration.UpscalerDevice ??= string.Empty;
@@ -126,6 +149,8 @@ public sealed class SettingsStore
         settings.Processing.FifoMilliseconds = Math.Clamp(settings.Processing.FifoMilliseconds, 50, 60_000);
         settings.Processing.NetworkDspHost = settings.Processing.NetworkDspHost?.Trim() ?? string.Empty;
         settings.Processing.NetworkDspKey = settings.Processing.NetworkDspKey?.Trim() ?? string.Empty;
+        settings.Processing.ServerFifoMilliseconds = Math.Clamp(settings.Processing.ServerFifoMilliseconds, 100, 5000);
+        settings.Processing.ServerThreads = Math.Clamp(settings.Processing.ServerThreads, 0, 64);
         settings.Processing.NetworkDspPort = Math.Clamp(settings.Processing.NetworkDspPort, 1, 65535);
         settings.Volume.MinimumDb = Math.Clamp(settings.Volume.MinimumDb, -120.0, 0.0);
         settings.Volume.MaximumDb = Math.Clamp(settings.Volume.MaximumDb, settings.Volume.MinimumDb, 12.0);

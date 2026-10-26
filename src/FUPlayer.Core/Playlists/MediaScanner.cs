@@ -38,36 +38,44 @@ public static class MediaScanner
     /// <summary>Audio files of a folder in natural order, followed by those of its sub-folders.</summary>
     public static IEnumerable<string> EnumerateFolder(string folder, bool recursive, CancellationToken cancellation = default)
     {
-        string[] files;
-        string[] folders;
-        try
+        foreach (string current in EnumerateFolders(folder, recursive, cancellation))
         {
-            files = Directory.GetFiles(folder);
-            folders = recursive ? Directory.GetDirectories(folder) : [];
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            yield break;
-        }
-
-        Array.Sort(files, NaturalOrder);
-        foreach (string file in files)
-        {
-            if (DecoderFactory.IsAudioFile(file))
+            string[] files;
+            try { files = Directory.GetFiles(current); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+            Array.Sort(files, NaturalOrder);
+            foreach (string file in files)
             {
-                yield return file;
+                cancellation.ThrowIfCancellationRequested();
+                if (DecoderFactory.IsAudioFile(file)) yield return file;
             }
         }
+    }
 
-        Array.Sort(folders, NaturalOrder);
-        foreach (string child in folders)
+    /// <summary>Natural-order depth-first traversal shared by queue expansion and library scans.</summary>
+    internal static IEnumerable<string> EnumerateFolders(string root, bool recursive, CancellationToken cancellation)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.TryPop(out string? folder))
         {
             cancellation.ThrowIfCancellationRequested();
-            foreach (string file in EnumerateFolder(child, recursive, cancellation))
-            {
-                yield return file;
-            }
+            yield return folder;
+            if (!recursive) continue;
+            string[] children;
+            try { children = Directory.GetDirectories(folder); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+            Array.Sort(children, NaturalOrder);
+            for (int i = children.Length - 1; i >= 0; i--)
+                // Directory junctions can point back to an ancestor. Explicitly chosen roots still work.
+                if (!IsLinkedDirectory(children[i])) pending.Push(children[i]);
         }
+    }
+
+    private static bool IsLinkedDirectory(string path)
+    {
+        try { return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return true; }
     }
 
     /// <summary>Compares strings treating digit runs as numbers ("track 2" before "track 10").</summary>

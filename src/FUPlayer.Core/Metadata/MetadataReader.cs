@@ -299,6 +299,8 @@ public static partial class MetadataReader
             stream.ReadExactly(header);
             string id = Encoding.ASCII.GetString(header[..4]);
             long size = (long)BinaryPrimitives.ReadUInt64BigEndian(header[4..]);
+            if (size < 0 || size > stream.Length - stream.Position)
+                throw new InvalidDataException("DSDIFF metadata chunk extends beyond the file.");
             if (id == chunkId && size is > 0 and < 64 * 1024 * 1024)
             {
                 var data = new byte[size];

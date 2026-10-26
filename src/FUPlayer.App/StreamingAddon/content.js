@@ -5,7 +5,7 @@
   const playing = new WeakSet(), attempted = new WeakSet();
   const pageActions = new Set(), resumeTargets = new Set();
   let context, sink, initialising, connected = false, pending = Promise.resolve(), lastAudioStatus, pageTimeline = false, pageVolume = false;
-  let lastTimeline, requestedSeek;
+  let lastTimeline, requestedSeek, serviceState, lastMediaState, clock;
   const activeMedia = () => [...sources.keys()].find(element => !element.paused && !element.ended)
     || [...resumeTargets][0] || [...sources.keys()].at(-1);
   function discontinuity() {
@@ -19,12 +19,14 @@
     const requested = requestedSeek && now - requestedSeek.at < 5000;
     // The public track clock is authoritative. Providers can seek segment/preview elements internally.
     const acknowledged = requested && Math.abs(value.position - requestedSeek.position) < 1;
-    const jumped = previous && value.duration === previous.duration
+    const changedTrack = previous?.trackId && value.trackId && previous.trackId !== value.trackId;
+    const naturalRepeat = previous && previous.duration - previous.position < 3 && value.position < 1;
+    const jumped = previous && !changedTrack && !naturalRepeat && value.duration === previous.duration
       && (value.position < previous.position - 0.75
         || value.position > previous.position + (now - previous.at) / 1000 + 1.5);
     if (acknowledged || (!requested && jumped)) { discontinuity(); requestedSeek = undefined; }
     else if (requestedSeek && !requested) requestedSeek = undefined;
-    lastTimeline = { position: value.position, duration: value.duration, at: now };
+    lastTimeline = { position: value.position, duration: value.duration, trackId: value.trackId, at: now };
     pageTimeline = true;
   }
   function reportTransport() {
@@ -68,8 +70,13 @@
         numberOfInputs: 1, numberOfOutputs: 0, channelCount: 2, channelCountMode: "explicit"
       });
       sink.port.onmessage = event => {
-        if (connected) port.postMessage({ pcm: event.data });
+        if (connected && serviceState !== "paused" && serviceState !== "stopped") port.postMessage({ pcm: event.data });
       };
+      // An output-free zero source keeps the PCM clock alive while a provider swaps media elements.
+      clock = context.createConstantSource();
+      clock.offset.value = 0;
+      clock.connect(sink);
+      clock.start();
       sink.onprocessorerror = () => failure("worklet processing", { name: "ProcessorError" });
       // Neither the source nor the output-free sink connects to context.destination.
       // Suspending an unstarted context can wait indefinitely. It has no speaker connection to silence here.
@@ -78,7 +85,11 @@
   function suspend() { context?.suspend().catch(() => {}); }
   function reportState() {
     if (!sources.size) return;
-    try { port.postMessage({ state: [...sources.keys()].some(element => !element.paused && !element.ended) ? "playing" : "paused" }); } catch { }
+    const state = serviceState || ([...sources.keys()].some(element => !element.paused && !element.ended) ? "playing" : "paused");
+    if (state !== lastMediaState) {
+      lastMediaState = state;
+      try { port.postMessage({ state }); } catch { }
+    }
   }
   function failure(stage, error) {
     suspend();
@@ -108,7 +119,8 @@
     pending = pending.then(() => attach(element)).catch(error => failure("attachment", error));
   }
   function pauseIfIdle() {
-    if (![...sources.keys()].some(element => !element.paused && !element.ended)) suspend();
+    // A paused/ended segment is not the lifetime of the service's track or audio context.
+    // Keep the graph warm; explicit provider pause suppresses PCM without closing its connection.
     reportState();
   }
   function watch(element) {
@@ -124,7 +136,7 @@
       const time = element.currentTime;
       if (time > lastTime && !element.paused && !element.ended && !element.seeking && element.readyState >= 2) {
         playing.add(element);
-        if (!sources.has(element)) schedule(element);
+        if (!sources.has(element) || context?.state !== "running") schedule(element);
       }
       lastTime = time;
       reportTransport();
@@ -138,6 +150,15 @@
     element.addEventListener("pause", pauseIfIdle);
     element.addEventListener("ended", pauseIfIdle);
     reportAudio();
+    recover(element);
+  }
+  function recover(element) {
+    // A reused element can already have played before it becomes observable. Played ranges confirm
+    // ordinary playback without waiting for a clock that a suspended context itself may have stopped.
+    if (!connected || element.paused || element.ended || element.seeking || element.readyState < 2) return;
+    if (!playing.has(element) && !(element.played?.length > 0)) return;
+    playing.add(element);
+    if (!sources.has(element) || context?.state !== "running") schedule(element);
   }
   function scan(root) {
     if (root instanceof HTMLMediaElement) watch(root);
@@ -149,14 +170,18 @@
       const action = message.action;
       if (action === "seekto" && Number.isFinite(message.value))
         requestedSeek = { position: message.value, at: performance.now() };
-      if (action === "pause") {
+      if (["play", "pause", "stop"].includes(action)) {
+        serviceState = action === "play" ? "playing" : action === "stop" ? "stopped" : "paused";
+        if (action === "play") resume();
+      }
+      if (action === "pause" || action === "stop") {
         resumeTargets.clear();
         for (const element of sources.keys()) if (!element.paused && !element.ended) resumeTargets.add(element);
       }
       if (pageActions.has(action)) {
         window.postMessage({ source: "fuplayer-content-controls", action, value: message.value }, location.origin);
-      } else if (action === "pause") {
-        for (const element of resumeTargets) element.pause();
+      } else if (action === "pause" || action === "stop") {
+        for (const element of resumeTargets) { element.pause(); if (action === "stop") element.currentTime = 0; }
         pauseIfIdle();
       } else if (action === "play") {
         const targets = resumeTargets.size ? resumeTargets : sources.keys();
@@ -171,6 +196,7 @@
         for (const element of sources.keys()) { element.volume = message.value; element.muted = message.value === 0; }
         reportTransport();
       }
+      reportState();
       return;
     }
     connected = message.connected === true;
@@ -178,7 +204,7 @@
       lastAudioStatus = undefined;
       reportAudio();
       window.postMessage({ source: "fuplayer-content-controls", action: "query" }, location.origin);
-      for (const element of elements) if (playing.has(element)) schedule(element);
+      for (const element of elements) recover(element);
     } else {
       for (const element of sources.keys()) element.pause();
       suspend();
@@ -194,6 +220,10 @@
   const activate = event => { if (connected && event.isTrusted) resume(); };
   window.addEventListener("pointerdown", activate, true);
   window.addEventListener("keydown", activate, true);
+  // Also discover playback events when an existing element moves into the page or an open shadow root.
+  document.addEventListener("playing", event => {
+    if (event.target instanceof HTMLMediaElement) { watch(event.target); playing.add(event.target); schedule(event.target); }
+  }, true);
   new MutationObserver(records => {
     for (const record of records) for (const node of record.addedNodes)
       if (node.nodeType === Node.ELEMENT_NODE) scan(node);
@@ -203,8 +233,13 @@
     if (Array.isArray(event.data.actions)) {
       pageActions.clear();
       for (const action of event.data.actions)
-        if (["play", "pause", "nexttrack", "previoustrack", "seekto", "shuffle", "repeat", "volume"].includes(action)) pageActions.add(action);
+        if (["play", "pause", "stop", "nexttrack", "previoustrack", "seekto", "shuffle", "repeat", "volume"].includes(action)) pageActions.add(action);
       reportActions();
+    }
+    if (["playing", "paused", "stopped"].includes(event.data.playbackState)) {
+      serviceState = event.data.playbackState;
+      if (serviceState === "playing" && context?.state !== "running") resume();
+      reportState();
     }
     if (event.data.transport) {
       const value = event.data.transport;
@@ -222,4 +257,9 @@
   });
   window.postMessage({ source: "fuplayer-content-controls", action: "query" }, location.origin);
   scan(document);
+  setInterval(() => {
+    scan(document);
+    for (const element of elements) recover(element);
+    if (connected && sources.size && serviceState === "playing" && context?.state !== "running") resume();
+  }, 500);
 })();

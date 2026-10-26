@@ -8,10 +8,11 @@ are not bundled with FUPlayer. Spotify and YouTube Music are not included in thi
 ## First use
 
 1. Install official desktop Firefox, then open **Streaming → Apple Music** in FUPlayer.
-2. Click **Open Apple Music**. FUPlayer includes its Mozilla-signed streaming add-on. On first use,
+2. Open it using **Settings → Streaming → Open Apple Music** if it is not already open. FUPlayer includes its Mozilla-signed streaming add-on. On first use,
    confirm the normal add-on installation and permissions in Firefox. Audio, metadata and playback
    state go to FUPlayer on this computer; optional technical diagnostics stay local too.
-3. Apple Music opens inside the player when **Show inside player** is checked. Sign in and complete
+3. Apple Music fills the Streaming → Apple Music content area. Browser setup and diagnostics are in
+   **Settings → Streaming**; **Show inside player** is enabled there by default. Sign in and complete
    any subscription or two-factor prompts directly in Firefox. Do not share credentials with FUPlayer
    developers or include them in bug reports.
 4. Start a track using Apple Music's own Play button once. This gives Firefox a normal user gesture
@@ -22,7 +23,9 @@ are not bundled with FUPlayer. Spotify and YouTube Music are not included in thi
 Later, **Open Apple Music** loads the installed add-on automatically. There is no temporary manifest
 or extension developer page to load each time. FUPlayer uses a dedicated Firefox profile; an add-on
 installed in your regular Firefox profile is separate. The dedicated profile keeps its sign-in across
-player launches. **Close browser**, **Stop listening** and player exit close that dedicated browser.
+player launches. **Close browser** and player exit close that dedicated browser.
+The playback **Stop** button keeps Apple Music open and clears active playback; Play can start it again.
+The Streaming section heading only groups pages; select its Apple Music child to open the page.
 
 ## Controls and display
 
@@ -35,7 +38,9 @@ gain stays at **0 dB**, avoiding a second reduction. Changing volume in either i
 other. The saved volume for local files returns when the browser input closes.
 
 The embedded browser has no address or tab bar. Its content fits the available player area when
-resized; longer catalogue lists can still scroll. Clear **Show inside player** to use a separate
+resized; longer catalogue lists can still scroll. Setup windows are hidden during routine startup where
+possible; Firefox installation/permission prompts can still require attention. In Settings → Streaming,
+clear **Show inside player** to use a separate
 chromeless Firefox window. Authentication windows can appear separately.
 
 ## Audio format and latency
@@ -48,6 +53,10 @@ Web Audio can resample the provider's decoded audio. This feature does not promi
 playback, a particular Apple Music quality tier or the same formats as Apple's native applications.
 Firefox's ordinary media-access and DRM restrictions remain enabled.
 
+The bundled signed add-on is version **0.3.1**. Firefox may ask once to approve an update from an older
+version. Audio transport remains continuous across normal track changes and pause/resume; seeks discard
+stale queued audio. The displayed track and processing chain remain stable during transitions.
+
 This is a live input: browser packet queues, DSP and FIFO add latency. File preprocessing cannot
 remove that delay. Processing must keep up in real time; shorten filters or reduce optional stages
 if Now playing reports sustained overload.
@@ -57,10 +66,10 @@ if Now playing reports sustained overload.
 | Symptom | What to try |
 | --- | --- |
 | Firefox is not found | Use **Browse…** to select an official installed `firefox.exe`. |
-| Apple Music plays but Direct input stays at zero | Click Play inside Apple Music once. Expand **Browser details** for input frames and any error. Optional graph diagnostics require Firefox's technical-data consent. |
+| Apple Music plays but Direct input stays at zero | Click Play inside Apple Music once. Open **Settings → Streaming → Browser details** for input frames and any error. Optional graph diagnostics require Firefox's technical-data consent. |
 | No audio despite increasing input frames | Check FUPlayer's selected output device, volume, active DSP load and any output error. |
 | The add-on was removed or disabled | Close the dedicated browser, then use **Install add-on…** with the signed FUPlayer `.xpi`, or reopen its Firefox add-on settings and enable it. |
-| Audio stops after a processing error | Close and reopen Apple Music to create a fresh local connection. Check DSP/FIFO and Network DSP settings before retrying. |
+| Audio stops after a processing error | Check the output device and displayed error first, then Stop and Play. Reopen Apple Music if the browser bridge remains disconnected. Check DSP/FIFO and Network DSP settings before retrying. |
 | A prompt blocks closing | Complete Firefox's pending prompt normally, then close again. |
 
 The settings folder contains the dedicated `browser/firefox` profile and private sign-ins. Keep it

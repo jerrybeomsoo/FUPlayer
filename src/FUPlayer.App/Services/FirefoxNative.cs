@@ -137,13 +137,68 @@ internal static class FirefoxNative
         return found;
     }
 
+    /// <summary>Only the dedicated setup main window; never the service popup or an installation/authentication dialog.</summary>
+    internal static void ParkSetup(int owner, string marker)
+    {
+        foreach (nint window in FindWindows(owner))
+        {
+            var name = new StringBuilder(128); GetClassName(window, name, name.Capacity);
+            var title = new StringBuilder(1024); GetWindowText(window, title, title.Capacity);
+            if (name.ToString() == "MozillaWindowClass" && !FirefoxLaunch.WindowTitleMatches(title.ToString(), marker))
+            {
+                // Keep the setup document running in a normal window, without a fullscreen flash or
+                // the focus-dependent initialisation of a minimised Firefox. Never move a service/dialog.
+                if (IsIconic(window)) ShowWindowAsync(window, 4);
+                SetWindowPos(window, 0, -32000, -32000, 320, 240, 0x14);
+            }
+        }
+    }
+
+    internal static bool SetCloaked(nint window, bool cloaked)
+    {
+        if (!IsWindow(window)) return false;
+        int value = cloaked ? 1 : 0;
+        if (cloaked) DwmSetWindowAttribute(window, 3, ref value, sizeof(int)); // Disable startup/restore animation.
+        return DwmSetWindowAttribute(window, 13, ref value, sizeof(int)) >= 0;
+    }
+
+    internal static void ObserveStartup(int owner, nint window, string marker, FirefoxStartupVisibility visibility)
+    {
+        if (owner == 0 || !IsWindow(window) || ((long)GetWindowLongPtr(window, Style) & Child) != 0) return;
+        var name = new StringBuilder(128); GetClassName(window, name, name.Capacity);
+        string className = name.ToString();
+        if (className is not ("MozillaWindowClass" or "MozillaDialogClass")) return;
+        GetWindowThreadProcessId(window, out uint process);
+        if (!IsOwnedProcess(owner, (int)process)) return;
+        var title = new StringBuilder(1024); GetWindowText(window, title, title.Capacity);
+        if (visibility.Observe(window, true, true, className, title.ToString())
+            && className == "MozillaWindowClass" && !FirefoxLaunch.WindowTitleMatches(title.ToString(), marker))
+        {
+            // Keep Gecko initialising in a normal composed window, without a desktop flash or focus.
+            SetWindowPos(window, 0, -32000, -32000, 320, 240, 0x4014); // ASYNCWINDOWPOS, NOZORDER, NOACTIVATE
+            if (!IsWindowVisible(window) || IsIconic(window)) ShowWindowAsync(window, 4);
+        }
+    }
+
+    internal static void ShowService(nint window)
+    {
+        if (IsIconic(window) || !IsWindowVisible(window)) ShowWindowAsync(window, 4);
+        SetCloaked(window, false);
+    }
+
     internal static int ProcessId(nint window)
     { GetWindowThreadProcessId(window, out uint process); return (int)process; }
 
     internal static Attachment Attach(nint window, nint parent)
     {
         GetWindowRect(window, out Rectangle bounds);
-        var attachment = new Attachment(window, GetParent(window), GetWindowLongPtr(window, Style), GetWindowLongPtr(window, ExtendedStyle), bounds);
+        bool minimized = IsIconic(window);
+        if (minimized)
+        {
+            var placement = new WindowPlacement { Length = (uint)Marshal.SizeOf<WindowPlacement>() };
+            if (GetWindowPlacement(window, ref placement)) bounds = placement.NormalPosition;
+        }
+        var attachment = new Attachment(window, GetParent(window), (nint)((long)GetWindowLongPtr(window, Style) & ~0x20000000L), GetWindowLongPtr(window, ExtendedStyle), bounds);
         try
         {
             SetWindowLongPtr(window, Style, (nint)(((long)attachment.Style & ~(Popup | Frame)) | Child));
@@ -151,6 +206,7 @@ internal static class FirefoxNative
             SetParent(window, parent);
             if (GetParent(window) != parent) throw new Win32Exception(Marshal.GetLastWin32Error());
             SetWindowPos(window, 0, 0, 0, 0, 0, 0x27); // Frame changed, without activation or z-order changes.
+            if (minimized) ShowWindowAsync(window, 4);
             Resize(window, parent);
             return attachment;
         }
@@ -186,6 +242,15 @@ internal static class FirefoxNative
         Rectangle r = attachment.Bounds;
         SetWindowPos(attachment.Window, 0, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top, 0x64);
     }
+
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsIconic(nint window);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowPlacement { public uint Length, Flags, ShowCommand; public Point MinPosition, MaxPosition; public Rectangle NormalPosition; }
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowPlacement(nint window, ref WindowPlacement placement);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ShowWindowAsync(nint window, int command);
+    [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(nint window, int attribute, ref int value, int size);
 
     internal static void Close(nint window) { if (IsWindow(window)) PostMessage(window, 0x10, 0, 0); }
 

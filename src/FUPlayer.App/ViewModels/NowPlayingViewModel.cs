@@ -124,6 +124,10 @@ public sealed partial class NowPlayingViewModel : ObservableObject
     /// <summary>The DSP server's processing time over the music's, while a server processes.</summary>
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasServerLoad))]
     private string _serverLoad = string.Empty;
+    [ObservableProperty] private double _clientFifoPercent;
+    [ObservableProperty] private double _serverFifoPercent;
+    [ObservableProperty] private string _clientFifoSize = string.Empty;
+    [ObservableProperty] private string _serverFifo = string.Empty;
     public bool HasServerLoad => ServerLoad.Length > 0;
 
     [ObservableProperty]
@@ -322,6 +326,13 @@ public sealed partial class NowPlayingViewModel : ObservableObject
         Device = status.BackendName is null ? string.Empty : $"{status.BackendName}  ·  {status.DeviceName}";
         DspLoad = IsActive ? Formatting.Percent(status.DspLoad) : "-";
         Buffer = IsActive ? Formatting.Percent(status.BufferFill) : "-";
+        ClientFifoPercent = IsActive ? Math.Clamp(status.BufferFill * 100, 0, 100) : 0;
+        ClientFifoSize = IsActive ? Loc.F("{0:0} / {1:0} ms", status.BufferFill * status.FifoSeconds * 1000, status.FifoSeconds * 1000) : "-";
+        ServerFifoPercent = status.ServerFifoCapacitySeconds is > 0 && status.ServerFifoQueuedSeconds is { } queued
+            ? Math.Clamp(queued / status.ServerFifoCapacitySeconds.Value * 100, 0, 100) : 0;
+        ServerFifo = status.ServerFifoQueuedSeconds is { } buffered && status.ServerFifoCapacitySeconds is { } capacity
+            ? Loc.F("{0:0} / {1:0} ms", buffered * 1000, capacity * 1000)
+            : Loc.T("Requires an updated server");
         Latency = IsActive ? Formatting.Milliseconds(status.PipelineLatencySeconds) : "-";
         BlockDelay = IsActive && status.FilterBlockSeconds > 0 ? Formatting.Milliseconds(status.FilterBlockSeconds) : "-";
         LimiterEvents = Formatting.Count(status.LimiterEvents);

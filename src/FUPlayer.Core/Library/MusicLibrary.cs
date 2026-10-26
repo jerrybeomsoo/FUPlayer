@@ -118,7 +118,11 @@ public sealed class MusicLibrary
             List<LibraryAlbum>? albums = await JsonSerializer.DeserializeAsync<List<LibraryAlbum>>(stream, JsonOptions, cancellation).ConfigureAwait(false);
             if (albums is not null)
             {
-                Publish(AlbumGrouping.Regroup(albums, BuildAlbum)); // caches written one album per folder are split here
+                // JSON permits null members even when the C# declarations are non-nullable.
+                var valid = albums.Where(a => a is not null && !string.IsNullOrWhiteSpace(a.Folder) && a.Tracks is not null)
+                    .Select(a => a with { Tracks = a.Tracks.Where(ValidCachedTrack).ToArray() })
+                    .Where(a => a.Tracks.Count > 0).ToArray();
+                Publish(AlbumGrouping.Regroup(valid, BuildAlbum)); // caches written one album per folder are split here
             }
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
@@ -126,6 +130,13 @@ public sealed class MusicLibrary
             // A damaged cache is rebuilt by the next scan.
         }
     }
+
+    private static bool ValidCachedTrack(LibraryTrack? track) => track is not null
+        && !string.IsNullOrWhiteSpace(track.Path) && track.Title is not null && track.Artist is not null
+        && track.Album is not null && track.AlbumArtist is not null && track.Genre is not null
+        && track.Composer is not null && track.Format is not null
+        && double.IsFinite(track.DurationSeconds) && track.DurationSeconds >= 0
+        && track.DurationSeconds < TimeSpan.MaxValue.TotalSeconds;
 
     /// <summary>Scans folder trees. Unchanged files are taken from the cache unless <paramref name="rescanAll"/> is set.</summary>
     public Task ScanAsync(IReadOnlyList<string> roots, bool rescanAll, IProgress<LibraryScanProgress>? progress, CancellationToken cancellation) =>
@@ -163,7 +174,7 @@ public sealed class MusicLibrary
         int tracks = 0;
         foreach (string root in roots.Where(Directory.Exists).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            foreach (string folder in EnumerateFolders(root, cancellation))
+            foreach (string folder in MediaScanner.EnumerateFolders(root, recursive: true, cancellation))
             {
                 cancellation.ThrowIfCancellationRequested();
                 folders++;
@@ -206,6 +217,7 @@ public sealed class MusicLibrary
             return artist != 0 ? artist : a.Year != b.Year ? a.Year.CompareTo(b.Year) : string.Compare(a.Title, b.Title, StringComparison.CurrentCultureIgnoreCase);
         });
 
+        cancellation.ThrowIfCancellationRequested();
         Publish(albums);
         progress?.Report(new LibraryScanProgress(folders, tracks, null));
         Save(albums);
@@ -229,34 +241,6 @@ public sealed class MusicLibrary
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // The in-memory library stays usable.
-        }
-    }
-
-    private static IEnumerable<string> EnumerateFolders(string root, CancellationToken cancellation)
-    {
-        var pending = new Stack<string>();
-        pending.Push(root);
-        while (pending.Count > 0)
-        {
-            cancellation.ThrowIfCancellationRequested();
-            string folder = pending.Pop();
-            yield return folder;
-
-            string[] children;
-            try
-            {
-                children = Directory.GetDirectories(folder);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                continue;
-            }
-
-            Array.Sort(children, MediaScanner.NaturalOrder);
-            for (int i = children.Length - 1; i >= 0; i--)
-            {
-                pending.Push(children[i]);
-            }
         }
     }
 

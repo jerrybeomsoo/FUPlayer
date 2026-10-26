@@ -22,12 +22,12 @@
     to keep.
 
 .EXAMPLE
-    pwsh build/package.ps1 -Version 0.7.0
+    pwsh build/package.ps1 -Version 0.7.1
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = "0.7.0",
-    [string]$Runtime = "win-x64",
+    [ValidatePattern('^\d+\.\d+\.\d+(-[A-Za-z0-9.-]+)?$')][string]$Version = "0.7.1",
+    [ValidatePattern('^[a-z0-9-]+$')][string]$Runtime = "win-x64",
     [switch]$FrameworkDependent,
     [switch]$IncludeFFmpeg
 )
@@ -35,7 +35,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$stage = [System.IO.Path]::GetFullPath((Join-Path $root "publish\FUPlayer"))
+$stage = [System.IO.Path]::GetFullPath((Join-Path $root "publish\package-$Version-$Runtime\FUPlayer"))
 $artifacts = Join-Path $root "artifacts"
 $zip = [System.IO.Path]::GetFullPath((Join-Path $artifacts "FUPlayer-$Version-$Runtime.zip"))
 
@@ -89,7 +89,7 @@ Copy-Item (Join-Path $root "licenses") (Join-Path $stage "licenses") -Recurse
 # Only public user guides belong in the offline package, never development reports.
 $guideDirectory = Join-Path $stage 'docs'
 New-Item -ItemType Directory -Path $guideDirectory -Force | Out-Null
-foreach ($guide in @('settings.md', 'dsp.md', 'library.md', 'network-dsp.md', 'neural-restorer.md', 'neural-upscaler.md', 'exciter.md', 'transient-aligned-filter.md', 'cli.md', 'building.md', 'building-ffmpeg.md', 'upnp-input.md', 'streaming.md', 'streaming-privacy.md', 'troubleshooting.md')) {
+foreach ($guide in @('settings.md', 'dsp.md', 'library.md', 'network-dsp.md', 'windows-dsp-controller.md', 'neural-restorer.md', 'neural-upscaler.md', 'exciter.md', 'transient-aligned-filter.md', 'cli.md', 'building.md', 'building-ffmpeg.md', 'upnp-input.md', 'streaming.md', 'streaming-privacy.md', 'troubleshooting.md')) {
     $guidePath = Join-Path $root "docs\$guide"
     if (Test-Path -LiteralPath $guidePath) { Copy-Item -LiteralPath $guidePath -Destination $guideDirectory }
 }

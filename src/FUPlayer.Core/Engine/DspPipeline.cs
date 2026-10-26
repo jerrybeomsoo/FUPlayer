@@ -90,6 +90,9 @@ internal sealed class DspPipeline : IDisposable
     private byte[] _pending = [];
     private int[] _dopFrames = [];
     private double[][]? _silentPcm;
+    private byte[][]? _silentDsdChannels;
+    private long _flushRemaining = -1;
+    private readonly byte[][] _dopChannels;
     private double _volume = 1.0;
     private double _replayGain = 1.0;
     private int _pendingOffset;
@@ -113,6 +116,7 @@ internal sealed class DspPipeline : IDisposable
 
     public DspPipeline(PlaybackPlan plan, PlayerSettings settings, ParallelWorkers workers, CancellationToken cancellation = default)
     {
+        _dopChannels = new byte[plan.Output.Channels][];
         _plan = plan;
         _workers = workers;
         _sourceChannels = plan.Source.Channels;
@@ -216,10 +220,14 @@ internal sealed class DspPipeline : IDisposable
             if (chosen.Length > 0)
             {
                 _remote = new DspRemoteSegment(plan, settings, _layout, remoteFirst, remoteLast, InputBlock * 2, cancellation);
+                if (_remote.Metadata.DsdOutput && _remote.Metadata.DsdMeterDivisor > 1)
+                    Meters = new MeterHub(_sourceChannels, meterRate, _outputChannels, plan.ProcessingRate / _remote.Metadata.DsdMeterDivisor);
                 RemoteStages = Enumerable.Range((int)remoteFirst, remoteLast - remoteFirst + 1).Select(i => (CoreStage)i).Where(_layout.Has).ToArray();
-                // Over the Internet the FIFO also has to ride out jitter that a simulation does not show: at least
-                // 0.6 s in flight's worth, which the engine makes a FIFO of 1.5 s.
-                NetworkBlockSeconds = _remote.RoundTripMilliseconds > 5 ? Math.Max(InFlightLimit(), 0.6) : InFlightLimit();
+                // Input queued at the server is a separate reserve. The client covers result delivery jitter,
+                // not a second copy of the server's entire input window.
+                NetworkBlockSeconds = _remote.Metadata.BufferedInput
+                    ? Math.Max(InputBlock / (double)_layout.RateBefore(remoteFirst), 2 * _remote.RoundTripMilliseconds / 1000)
+                    : _remote.RoundTripMilliseconds > 5 ? Math.Max(InFlightLimit(), .6) : InFlightLimit();
             }
 
             bool local(CoreStage stage) => _remote is null || stage < remoteFirst || stage > remoteLast;
@@ -324,7 +332,7 @@ internal sealed class DspPipeline : IDisposable
             _modulatorInputAlignment = _modulatorDoublesRate ? _modulatorAlignment / 2 : _modulatorAlignment;
             ResamplerChain? interpolator = plan.IsDsdOutput && !plan.PassThrough ? CreateModulatorInterpolator(plan, _modulatorDoublesRate) : null;
             _modulatorChain = interpolator;
-            NoiseTransferFunction? ntf = plan.Modulator is not null && !plan.PassThrough ? ModulatorCatalog.DesignNtf(plan.Modulator, plan.Output.DsdRate) : null;
+            NoiseTransferFunction? ntf = plan.Modulator is not null && !plan.PassThrough && _remote?.Metadata.DsdOutput != true ? ModulatorCatalog.DesignNtf(plan.Modulator, plan.Output.DsdRate) : null;
             (double[] gains, int[] delays) = ComputeSpeakerTrims(settings.Speakers, plan, _outputChannels);
             bool detectApodization = processing.ApodizationDetection && !plan.Source.IsDsd && plan.ConversionRate <= ApodizationDetector.MaximumSampleRate;
 
@@ -376,12 +384,12 @@ internal sealed class DspPipeline : IDisposable
 
                 tail.Limiter = plan.Limiter ? new SoftLimiter(plan.ProcessingRate) : null;
                 tail.Delay = delays[c] > 0 ? new DelayLine(delays[c]) : null;
-                if (plan.IsDsdOutput)
+                if (plan.IsDsdOutput && _remote?.Metadata.DsdOutput != true)
                 {
                     tail.ModulatorInterpolator = interpolator!.CreateState();
                     tail.Modulator = new DeltaSigmaModulator(ntf!);
                 }
-                else
+                else if (!plan.IsDsdOutput)
                 {
                     tail.Quantizer = new PcmQuantizer(plan.Dither!, plan.Output.ValidBits, plan.ProcessingRate, (ulong)(c + 1) * 0x9E3779B97F4A7C15UL);
                 }
@@ -440,6 +448,7 @@ internal sealed class DspPipeline : IDisposable
             _accelerationSummary = remoteResampling
                 ? Loc.F("Remote resampling: {0}", _remote!.Metadata.Acceleration)
                 : _accelerator?.Status ?? acceleration;
+            if (RemoteDsdOutput) _accelerationSummary += " " + Loc.T("DSD output conversion on server.");
         }
         catch
         {
@@ -571,10 +580,15 @@ internal sealed class DspPipeline : IDisposable
 
     /// <summary>The DSP server's processing time over the audio it processed; above one it cannot keep up.</summary>
     internal double? NetworkServerLoad => _remote?.ServerLoad;
+    internal DspTelemetry? ServerFifo => _remote?.Telemetry;
+    internal bool RemoteDsdOutput => _remote?.Metadata.DsdOutput == true;
+    /// <summary>Audio accepted but not yet committed to the output FIFO, including the remote input reserve.</summary>
+    internal double BufferedSeconds => Math.Max(0, Volatile.Read(ref _sourceSeconds) - Volatile.Read(ref _outputSeconds))
+        + Math.Max(0, Volatile.Read(ref _pendingLength) - Volatile.Read(ref _pendingOffset))
+        / (double)_plan.Output.CanonicalBytesPerFrame / _plan.Output.CanonicalFrameRate;
 
     /// <summary>
-    /// Audio kept in flight to the DSP server, which the FIFO has to be able to cover: enough for a few round trips
-    /// and the server's own block, at least 0.3 s, and 0.6 s over the Internet.
+    /// Result delivery interval/jitter to cover at the client, separate from the server's input reserve.
     /// </summary>
     internal double NetworkBlockSeconds { get; }
 
@@ -601,19 +615,19 @@ internal sealed class DspPipeline : IDisposable
         }
     }
 
-    public long LimiterEvents => _tails.Sum(tail => tail.Limiter?.Events ?? 0);
+    public long LimiterEvents => _remote?.Metadata.DsdOutput == true ? _remote.LimiterEvents : _tails.Sum(tail => tail.Limiter?.Events ?? 0);
 
     public long ApodizationEvents => _tails.Sum(tail => tail.Apodization?.Events ?? 0);
 
     public long ClippedSamples => _tails.Sum(tail => tail.Quantizer?.ClippedSamples ?? 0);
 
-    public long ModulatorResets => _tails.Sum(tail => tail.Modulator?.InstabilityResets ?? 0);
+    public long ModulatorResets => _remote?.Metadata.DsdOutput == true ? _remote.ModulatorResets : _tails.Sum(tail => tail.Modulator?.InstabilityResets ?? 0);
 
     /// <summary>Largest modulator input since the last call (1.0 = 100 % modulation).</summary>
-    public double TakePeakModulation() => _tails.Max(tail => tail.Modulator?.TakePeakModulation() ?? 0.0);
+    public double TakePeakModulation() => _remote?.Metadata.DsdOutput == true ? _remote.TakePeakModulation() : _tails.Max(tail => tail.Modulator?.TakePeakModulation() ?? 0.0);
 
     /// <summary>Lowest limiter gain since the last call.</summary>
-    public double TakeMinimumLimiterGain() => _tails.Min(tail => tail.Limiter?.TakeMinimumGain() ?? 1.0);
+    public double TakeMinimumLimiterGain() => _remote?.Metadata.DsdOutput == true ? _remote.TakeMinimumGain() : _tails.Min(tail => tail.Limiter?.TakeMinimumGain() ?? 1.0);
 
     public void SetVolume(double linear) => Volatile.Write(ref _volume, linear);
 
@@ -713,15 +727,21 @@ internal sealed class DspPipeline : IDisposable
         }
 
         double inputRate = _plan.Source.IsDsd ? _plan.Source.SampleRate / 8.0 : _plan.Source.SampleRate;
-        long remaining = (long)Math.Ceiling(LatencySeconds * inputRate) + InputBlock + _flushInputSamples;
-        while (remaining > 0)
+        if (_flushRemaining < 0)
+            _flushRemaining = (long)Math.Ceiling(LatencySeconds * inputRate) + InputBlock + _flushInputSamples;
+        while (_flushRemaining > 0)
         {
+            // The input is consumed even if its output write is interrupted. WritePending resumes that output.
+            _flushRemaining = Math.Max(0, _flushRemaining - InputBlock);
             bool ok;
             if (_plan.Source.IsDsd)
             {
-                var silent = new byte[_sourceChannels][];
-                Array.Fill(silent, _silentDsd);
-                ok = ProcessDsd(silent, InputBlock, writer);
+                if (_silentDsdChannels is null)
+                {
+                    _silentDsdChannels = new byte[_sourceChannels][];
+                    Array.Fill(_silentDsdChannels, _silentDsd);
+                }
+                ok = ProcessDsd(_silentDsdChannels, InputBlock, writer);
             }
             else
             {
@@ -741,8 +761,6 @@ internal sealed class DspPipeline : IDisposable
             {
                 return false;
             }
-
-            remaining -= InputBlock;
         }
 
         return DrainNetworkPrefetch(writer);
@@ -754,6 +772,7 @@ internal sealed class DspPipeline : IDisposable
     /// </summary>
     internal bool DrainNetworkPrefetch(OutputWriter writer)
     {
+        _remote?.Drain();
         if (!WriteOut(writer))
         {
             return false;
@@ -779,7 +798,8 @@ internal sealed class DspPipeline : IDisposable
     /// <summary>Clears all filter state (after a seek).</summary>
     public void Reset()
     {
-        _remote?.Reset();
+        _flushRemaining = -1;
+        _remote?.Reset(Volatile.Read(ref _volume) * _levelOffset);
         _inFlightEdges.Clear();
         _pendingOffset = 0;
         _pendingLength = 0;
@@ -815,7 +835,7 @@ internal sealed class DspPipeline : IDisposable
         }
 
         _prefix?.Run(block, _layout.Entry, _remote.First - 1);
-        _remote.Submit(block);
+        _remote.Submit(block, volume);
         _inFlightEdges.Enqueue((block.Gain, block.EdgeHz, block.TopHz, block.WallHz));
         Collect(writer, wait: true);
     }
@@ -830,7 +850,8 @@ internal sealed class DspPipeline : IDisposable
         DspRemoteSegment remote = _remote!;
         while (true)
         {
-            bool must = wait && remote.InFlight > 0 && (remote.InFlightSeconds > InFlightLimit() || remote.InFlight >= 256);
+            int maximumBlocks = Math.Max(256, (int)Math.Ceiling(InFlightLimit() * _layout.RateBefore(remote.First) / InputBlock) + 2);
+            bool must = wait && remote.InFlight > 0 && (remote.InFlightSeconds > InFlightLimit() || remote.InFlight >= maximumBlocks);
             long started = Stopwatch.GetTimestamp();
             bool taken = remote.TryTake(_result, must ? TimeSpan.FromMilliseconds(20) : TimeSpan.Zero);
             if (must)
@@ -858,12 +879,27 @@ internal sealed class DspPipeline : IDisposable
                 _suffix.Run(_result, remote.Last + 1, CoreStage.Filter);
             }
 
-            FinishBlock(_result, Volatile.Read(ref _volume) * _levelOffset);
+            if (remote.DsdOutput is { } dsd)
+            {
+                _outputSeconds += dsd[0].Length * 8.0 / _plan.Output.DsdRate;
+                for (int c = 0; c < _outputChannels; c++)
+                {
+                    Meters.QueueOutput(_outputSeconds, c, _result.Signal[c].AsSpan(0, _result.Counts[c]));
+                    _tails[c].DsdOutput = dsd[c]; _tails[c].OutputCount = dsd[c].Length;
+                }
+                AppendOutput();
+            }
+            else FinishBlock(_result, Volatile.Read(ref _volume) * _levelOffset);
         }
     }
 
-    /// <summary>Audio to keep in flight: six round trips and a tenth of a second, from 0.3 to 2 s.</summary>
-    private double InFlightLimit() => Math.Clamp(0.1 + (6 * (_remote?.RoundTripMilliseconds ?? 0) / 1000), 0.3, 2.0);
+    /// <summary>Leave room for the server reserve plus delivery, so a buffered server never waits on a blocked sender.</summary>
+    private double InFlightLimit() => _remote?.Metadata.BufferedInput == true
+        ? _remote.Metadata.ServerFifoMilliseconds / 1000.0 + Math.Max(2 * InputBlock / (double)_layout.RateBefore(_remote.First),
+            Math.Clamp(.05 + 6 * _remote.RoundTripMilliseconds / 1000, .05, 1))
+        : _remote?.Metadata.Telemetry == true
+        ? Math.Max(InputBlock / (double)_layout.RateBefore(_remote.First), _remote.Metadata.ServerFifoMilliseconds / 1000.0 * .8)
+        : Math.Clamp(0.1 + (6 * (_remote?.RoundTripMilliseconds ?? 0) / 1000), 0.3, 2.0);
 
     /// <summary>The output's own processing of a block that has been through the whole core, then interleaved for the FIFO.</summary>
     private void FinishBlock(CoreBlock block, double volume)
@@ -906,7 +942,7 @@ internal sealed class DspPipeline : IDisposable
     /// Half-band cascade from the processing rate up to the modulator. When the last doubling is folded into the
     /// modulator, the cascade stops one octave lower.
     /// </summary>
-    private static ResamplerChain CreateModulatorInterpolator(PlaybackPlan plan, bool foldLastStage)
+    internal static ResamplerChain CreateModulatorInterpolator(PlaybackPlan plan, bool foldLastStage)
     {
         int target = foldLastStage ? plan.Output.DsdRate / 2 : plan.Output.DsdRate;
         double band = Math.Min(Math.Min(plan.ConversionRate / 2.0, 100_000.0), plan.ProcessingRate * 0.2);
@@ -924,13 +960,13 @@ internal sealed class DspPipeline : IDisposable
     /// thousandth of the Nyquist frequency and linear interpolation leaves images about 120 dB down, while saving
     /// a filter pass and a buffer at the full DSD rate. At least one half-band stage must remain before it.
     /// </summary>
-    private static bool ShouldFoldLastInterpolation(PlaybackPlan plan) =>
+    internal static bool ShouldFoldLastInterpolation(PlaybackPlan plan) =>
         plan.IsDsdOutput
         && !plan.PassThrough
         && plan.Output.DsdRate >= 8_000_000
         && plan.ProcessingRate <= plan.Output.DsdRate / 4;
 
-    private static (double[] Gains, int[] Delays) ComputeSpeakerTrims(SpeakerSettings speakers, PlaybackPlan plan, int channels)
+    internal static (double[] Gains, int[] Delays) ComputeSpeakerTrims(SpeakerSettings speakers, PlaybackPlan plan, int channels)
     {
         double[] gains = Enumerable.Repeat(1.0, channels).ToArray();
         var delays = new int[channels];
@@ -1172,7 +1208,8 @@ internal sealed class DspPipeline : IDisposable
             {
                 int frameCount = count / 2;
                 EnsureCapacity(ref _dopFrames, frameCount * channels);
-                _dop.Encode(_tails.Select(t => t.DsdOutput).ToArray(), channels, frameCount * 2, _dopFrames);
+                for (int c = 0; c < channels; c++) _dopChannels[c] = _tails[c].DsdOutput;
+                _dop.Encode(_dopChannels, channels, frameCount * 2, _dopFrames);
                 MemoryMarshal.AsBytes(_dopFrames.AsSpan(0, frameCount * channels)).CopyTo(target);
                 break;
             }

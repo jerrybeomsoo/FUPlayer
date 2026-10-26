@@ -186,6 +186,12 @@ public sealed partial class GlossaryViewModel : ObservableObject
                 "A measure of how far one spectrum is from another, in dB: the smaller it is, the closer the result is to the original. The model descriptions give it before and after processing.")),
 
         Group("Connections and tools",
+            ("Network DSP",
+                "Selected audio processing runs on another computer. A compatible server can also finish DSD conversion. FUPlayer still sends the result to the DAC attached to this computer."),
+            ("Client and server FIFO",
+                "The client FIFO holds finished audio for the DAC. The server FIFO holds received audio waiting for processing. Network packets still travelling are separate. Larger buffers tolerate more jitter but delay control changes."),
+            ("Browser PCM",
+                "Decoded audio received directly from Firefox before Windows mixing. PCM alone does not identify the original service codec, so Automatic allows the enabled restorer. During streaming the volume knob controls the service; FUPlayer gain stays at 0 dB."),
             ("UPnP and DLNA",
                 "Network standards that let one device play to another. A controller (such as foobar2000 or a phone app) chooses what to play; a renderer (such as FUPlayer's UPnP input) receives the stream and plays it."),
             ("FFmpeg and LGPL",

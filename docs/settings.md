@@ -8,8 +8,9 @@ and to accept the selected format. ASIO and native DSD support depend on the man
 Use PCM initially, then try higher rates or DSD after ordinary playback works.
 
 Larger device buffers and an adequate playback FIFO give processing more time to meet each deadline.
-For Network DSP, the FIFO value is a minimum: the player raises it to cover the audio it keeps in flight to
-the server, to 0.75 s on a LAN and 1.5 s over the Internet.
+For Network DSP, the client output FIFO and the server input FIFO are separate controls and gauges.
+Set the server buffer in Settings → Network DSP; use the engine/output FIFO settings for the client.
+Low-latency mode trades buffering for faster response.
 See [load, latency and bandwidth](network-dsp.md#load-latency-and-bandwidth).
 Smaller buffers respond faster but can increase dropouts. A very long filter can add seconds of delay even
 when its DSP load is low. See [DSP studio](dsp.md) for the different delay sources.
@@ -38,6 +39,17 @@ enabled in DSP studio, and a stage between two selected ones runs on the server 
 For Internet access, paste the server's key in **Server access key**. It is masked on screen and saved in
 settings; keep that file private. Leave it empty only for a LAN-only server. See [Network DSP](network-dsp.md)
 for single-port forwarding, key generation and service setup.
+
+**DSD output conversion on server** moves final conversion to a compatible server when remote
+resampling is selected. The client still owns the DAC connection. Session controls also set server FIFO,
+thread budget and GPU use; the server's own resource limits remain in force. Now playing reports both FIFOs.
+
+## Streaming
+
+Browser selection, Open/Close, signed add-on installation, Show inside player and Browser details are
+under **Settings → Streaming**. The Apple Music page is reserved for the embedded service. During
+streaming the main volume control follows Apple Music; the internal player volume gain remains at 0 dB.
+See [Apple Music](streaming.md).
 
 ## Language, library and optional decoders
 

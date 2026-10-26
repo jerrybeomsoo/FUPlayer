@@ -100,13 +100,18 @@ public sealed record StreamMetadata
         if (parts.Length != 3
             || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int hours)
             || !int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int minutes)
-            || !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double seconds))
+            || !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double seconds)
+            || hours < 0 || minutes is < 0 or >= 60 || !double.IsFinite(seconds) || seconds is < 0 or >= 60)
         {
             return null;
         }
 
-        TimeSpan duration = new TimeSpan(hours, minutes, 0) + TimeSpan.FromSeconds(seconds);
-        return duration > TimeSpan.Zero ? duration : null;
+        try
+        {
+            TimeSpan duration = new TimeSpan(hours, minutes, 0) + TimeSpan.FromSeconds(seconds);
+            return duration > TimeSpan.Zero ? duration : null;
+        }
+        catch (Exception ex) when (ex is OverflowException or ArgumentOutOfRangeException) { return null; }
     }
 
     /// <summary>Writes a UPnP time, <c>H:MM:SS</c>.</summary>

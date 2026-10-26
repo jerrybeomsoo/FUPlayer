@@ -530,6 +530,7 @@ public sealed partial class DspStudioViewModel : ObservableObject
         ArgumentNullException.ThrowIfNull(status);
         string verdict = status.State == EngineState.Stopped || status.Plan is not { } plan
             ? string.Empty
+            : plan.SourceCodecUnknown ? Loc.T("Playing now: browser PCM; original codec unknown. Automatic allows restoration.")
             : Loc.F(plan.SourceCoded ? "Playing now: {0}read as lossy." : "Playing now: {0}read as lossless.", Codec(plan.SourceCodec));
         if (verdict == _sourceVerdict)
         {

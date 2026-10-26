@@ -21,6 +21,7 @@ internal sealed class DspRemoteSegment : IDisposable
     private readonly CancellationTokenSource _receiveStop = new();
     private readonly Task _receiving;
     private readonly int _maximumChannels;
+    private readonly int _outputChannels;
     private readonly int _maximumFrames;
     private readonly int _entryRate;
     private readonly Queue<double> _inFlight = new();
@@ -33,6 +34,15 @@ internal sealed class DspRemoteSegment : IDisposable
     private double _audioSeconds;
     private double _load;
     private int _disposed;
+    private double _outputGain = 1;
+    private DspTelemetry? _telemetry;
+    private double _minimumGain = 1, _peakModulation;
+    public byte[][]? DsdOutput { get; private set; }
+    public long LimiterEvents { get; private set; }
+    public long ModulatorResets { get; private set; }
+    public double TakeMinimumGain() => Interlocked.Exchange(ref _minimumGain, 1);
+    public double TakePeakModulation() => Interlocked.Exchange(ref _peakModulation, 0);
+    public DspTelemetry? Telemetry => Volatile.Read(ref _telemetry);
 
     /// <param name="first">The first stage the server runs.</param>
     /// <param name="last">The last stage it runs.</param>
@@ -45,6 +55,7 @@ internal sealed class DspRemoteSegment : IDisposable
         First = first;
         Last = last;
         _maximumChannels = Math.Max(layout.SourceChannels, layout.OutputChannels);
+        _outputChannels = layout.OutputChannels;
         _maximumFrames = (maximumFrames * 16) + 4096;
         _entryRate = layout.RateBefore(first);
         if (!string.IsNullOrWhiteSpace(settings.Processing.NetworkDspKey))
@@ -86,7 +97,11 @@ internal sealed class DspRemoteSegment : IDisposable
         try
         {
             using CancellationTokenRegistration registration = cancellation.Register(Abort);
-            var hello = new DspHello(DspProtocol.Version, plan, settings.Restoration, layout, first, last, maximumFrames, 0);
+            var hello = new DspHello(DspProtocol.Version, plan, settings.Restoration, layout, first, last, maximumFrames, 0,
+                Telemetry: true, ServerFifoMilliseconds: Math.Clamp(settings.Processing.ServerFifoMilliseconds, 100, 5000),
+                ServerThreads: Math.Clamp(settings.Processing.ServerThreads, 0, 64), ServerGpu: settings.Processing.ServerGpu,
+                DsdOutput: settings.Processing.RemoteDsdOutput && last == CoreStage.Filter && plan.IsDsdOutput,
+                Speakers: settings.Speakers, BufferedInput: true, DsdMeterDivisor: 8);
             _link.Send((byte)DspMessage.Hello, DspProtocol.Encode(hello), cancellation);
 
             // Designing a long filter and loading the networks can take a while; the link's pings show the server is alive.
@@ -105,6 +120,9 @@ internal sealed class DspRemoteSegment : IDisposable
             }
 
             Metadata = DspProtocol.Decode<DspReady>(reply.Body);
+            if (Metadata.DsdMeterDivisor is not (1 or 2 or 4 or 8)
+                || (!Metadata.DsdOutput && Metadata.DsdMeterDivisor != 1))
+                throw new InvalidDataException("Invalid DSP display rate.");
             _link.PingSoon();
         }
         catch (Exception ex) when (ex is not (OutOfMemoryException or AccessViolationException))
@@ -162,8 +180,13 @@ internal sealed class DspRemoteSegment : IDisposable
     public ExciterReport? Exciter { get; private set; }
 
     /// <summary>Sends a block as it stands in front of <see cref="First"/>.</summary>
-    public void Submit(CoreBlock block, CancellationToken cancellation = default)
+    public void Submit(CoreBlock block, double outputGain = 1, CancellationToken cancellation = default)
     {
+        if (Metadata.DsdOutput && _outputGain != outputGain)
+        {
+            _link.Send((byte)DspMessage.OutputGain, DspProtocol.Encode(outputGain), cancellation);
+            _outputGain = outputGain;
+        }
         double seconds = block.Counts[0] / (double)_entryRate;
         _link.Send((byte)DspMessage.Audio, DspProtocol.EncodeAudio(_epoch, _index++, block), cancellation);
         lock (_inFlight)
@@ -171,6 +194,12 @@ internal sealed class DspRemoteSegment : IDisposable
             _inFlight.Enqueue(seconds);
             _inFlightSeconds += seconds;
         }
+    }
+
+    /// <summary>Releases a negotiated input reserve without discarding its final samples.</summary>
+    internal void Drain()
+    {
+        if (Metadata.BufferedInput) _link.Send((byte)DspMessage.Drain, []);
     }
 
     /// <summary>
@@ -193,12 +222,26 @@ internal sealed class DspRemoteSegment : IDisposable
                 throw new IOException(Loc.F("DSP server {0}: {1}", Host, Encoding.UTF8.GetString(message.Body)));
             }
 
-            if (message.Type != (byte)DspMessage.Result)
+            if (message.Type == (byte)DspMessage.Telemetry && Metadata.Telemetry)
+            {
+                var telemetry = DspProtocol.Decode<DspTelemetry>(message.Body);
+                if (!double.IsFinite(telemetry.QueuedSeconds) || telemetry.QueuedSeconds < 0 || telemetry.QueuedSeconds > 60
+                    || !double.IsFinite(telemetry.CapacitySeconds) || telemetry.CapacitySeconds is < .1 or > 5)
+                    throw new InvalidDataException("Invalid server FIFO report.");
+                Volatile.Write(ref _telemetry, telemetry);
+                continue;
+            }
+            byte[] body = message.Body;
+            byte[][]? dsd = null;
+            DsdOutputReport? outputReport = null;
+            if (message.Type == (byte)DspMessage.DsdResult && Metadata.DsdOutput)
+                (body, dsd, outputReport) = DspProtocol.DecodeDsdResult(body, _outputChannels, 16 << 20);
+            else if (message.Type != (byte)DspMessage.Result || Metadata.DsdOutput)
             {
                 throw new InvalidDataException("The DSP server sent something else than a result.");
             }
 
-            (uint epoch, _, double compute, ExciterReport? exciter) = DspProtocol.DecodeResult(message.Body, into, _maximumChannels, _maximumFrames);
+            (uint epoch, _, double compute, ExciterReport? exciter) = DspProtocol.DecodeResult(body, into, _maximumChannels, _maximumFrames, allowMeterFloat: Metadata.DsdOutput);
             if (epoch != _epoch)
             {
                 continue;
@@ -211,6 +254,13 @@ internal sealed class DspRemoteSegment : IDisposable
                 _inFlightSeconds = Math.Max(0, _inFlightSeconds - seconds);
             }
 
+            DsdOutput = dsd;
+            if (outputReport is { } report)
+            {
+                LimiterEvents = report.LimiterEvents; ModulatorResets = report.ModulatorResets;
+                Volatile.Write(ref _minimumGain, Math.Min(Volatile.Read(ref _minimumGain), report.MinimumGain));
+                Volatile.Write(ref _peakModulation, Math.Max(Volatile.Read(ref _peakModulation), report.PeakModulation));
+            }
             Account(seconds, compute);
             Exciter = exciter ?? Exciter;
             return true;
@@ -218,17 +268,24 @@ internal sealed class DspRemoteSegment : IDisposable
     }
 
     /// <summary>Starts the server's stages again from silence; results of blocks sent before are dropped as they arrive.</summary>
-    public void Reset()
+    public void Reset(double outputGain)
     {
         _epoch++;
         _index = 0;
+        LimiterEvents = ModulatorResets = 0; DsdOutput = null;
+        _minimumGain = 1; _peakModulation = 0;
         lock (_inFlight)
         {
             _inFlight.Clear();
             _inFlightSeconds = 0;
         }
 
-        _link.Send((byte)DspMessage.Reset, DspProtocol.EncodeEpoch(_epoch));
+        if (Metadata.DsdOutput)
+        {
+            _outputGain = outputGain;
+            _link.Send((byte)DspMessage.DsdReset, DspProtocol.Encode(new DspOutputReset(_epoch, outputGain)));
+        }
+        else _link.Send((byte)DspMessage.Reset, DspProtocol.EncodeEpoch(_epoch));
     }
 
     /// <summary>Unblocks anything waiting on the session; used when playback stops while the server is busy.</summary>

@@ -67,3 +67,8 @@ For an Internet server, use its domain/URL and key file:
 ```
 
 Keep the key out of command arguments and shared logs; `--dsp-key-file` reads the private file.
+
+New servers can perform final DSD conversion when resampling is remote. Use `--client-dsd` to keep
+that conversion local. `--server-fifo <ms>` selects 100–5000 ms of server buffering (default 500),
+`--server-threads <n>` sets a total thread budget (0 keeps the server default), and `--server-cpu`
+disables the server GPU for that session. Consult `help` for the complete current option list.

@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
@@ -28,6 +29,9 @@ public sealed class BrowserAudioBridge : IDisposable
     private readonly Task _accept;
     private readonly object _gate = new();
     private readonly HashSet<TcpClient> _clients = [];
+    private readonly object _pcmGate = new();
+    private CancellationTokenSource _inputChanged = new();
+    private bool _holdAudio;
     private int _producer, _consumer;
     private long _frames, _consumedFrames;
     private volatile string? _error;
@@ -35,10 +39,12 @@ public sealed class BrowserAudioBridge : IDisposable
     private int _mediaState, _mediaStateVersion, _actions;
     private volatile BrowserAudioStatus? _audioStatus;
     private volatile BrowserTransport _transport = new();
+    private long _positionReportedAt;
     private long _discardBefore;
     private int _discontinuity;
     private volatile StreamMetadata? _metadata;
     private volatile bool _persistentAddon;
+    private volatile string? _addonVersion;
     // Reader state survives decoder replacement when live DSP settings change.
     private byte[]? _packet;
     private int _offset;
@@ -66,18 +72,32 @@ public sealed class BrowserAudioBridge : IDisposable
     public bool IsConnected => Volatile.Read(ref _producer) != 0;
     public long ReceivedFrames => Interlocked.Read(ref _frames);
     /// <summary>Includes the decoder's partial packet, so pausing cannot strand PCM ahead of a resume acknowledgement.</summary>
-    public long PendingFrames => Math.Max(0, ReceivedFrames - Interlocked.Read(ref _consumedFrames));
+    public long PendingFrames => Math.Max(0, ReceivedFrames - Math.Max(Interlocked.Read(ref _consumedFrames), Interlocked.Read(ref _discardBefore)));
     public BrowserAudioStatus? AudioStatus => _audioStatus;
     public BrowserTransport Transport => _transport;
+    /// <summary>Service position adjusted for elapsed report time and audio still waiting to reach the output.</summary>
+    public double PositionAtOutput(double bufferedSeconds)
+    {
+        BrowserTransport transport = _transport;
+        long reported = Volatile.Read(ref _positionReportedAt);
+        double elapsed = reported != 0 && IsMediaPlaying == true && AudioStatus?.Context is not ("suspended" or "closed")
+            ? Math.Min(1, Stopwatch.GetElapsedTime(reported).TotalSeconds) : 0;
+        return Math.Clamp(transport.Position + elapsed - Math.Max(0, bufferedSeconds), 0, transport.Duration);
+    }
     public int DiscontinuityVersion => Volatile.Read(ref _discontinuity);
     /// <summary>Only the service's published current-track metadata, without account or queue data.</summary>
     public StreamMetadata? Metadata => _metadata;
     /// <summary>True only after the connected add-on reports the native-messaging startup mode.</summary>
     public bool IsPersistentAddon => _persistentAddon;
+    public string? AddonVersion => _addonVersion;
     public string? Error => _error;
     public string? ControlError => _controlError;
     /// <summary>Normal page playback state, or null before the first media state report.</summary>
-    public bool? IsMediaPlaying => Volatile.Read(ref _mediaState) switch { 1 => true, 2 => false, _ => null };
+    public bool? IsMediaPlaying => Volatile.Read(ref _mediaState) switch { 1 => true, 2 or 3 => false, _ => null };
+    /// <summary>Opening an idle service must not allocate a DSP worker before playback actually starts.</summary>
+    public bool WantsPlayback => IsMediaPlaying == true || (IsMediaPlaying is null && PendingFrames > 0);
+    public bool IsMediaStopped => Volatile.Read(ref _mediaState) == 3;
+    public bool CanStop => (Volatile.Read(ref _actions) & 64) != 0;
     public int MediaStateVersion => Volatile.Read(ref _mediaStateVersion);
     public bool CanNext => (Volatile.Read(ref _actions) & 1) != 0;
     public bool CanPrevious => (Volatile.Read(ref _actions) & 2) != 0;
@@ -91,7 +111,7 @@ public sealed class BrowserAudioBridge : IDisposable
     {
         bool valid = action switch
         {
-            "play" or "pause" or "nexttrack" or "previoustrack" => value is null,
+            "play" or "pause" or "stop" or "nexttrack" or "previoustrack" => value is null,
             "seekto" => value is double time && double.IsFinite(time) && time is >= 0 and <= 604800,
             "volume" => value is double volume && double.IsFinite(volume) && volume is >= 0 and <= 1,
             "shuffle" => value is bool,
@@ -110,6 +130,28 @@ public sealed class BrowserAudioBridge : IDisposable
 
     /// <summary>Allows provider navigation only after the known-title browser window has been found and presented.</summary>
     public bool RequestWindowReady() => IsConnected && _controls.Writer.TryWrite("{\"action\":\"windowready\"}");
+
+    /// <summary>Discards previously received PCM at Stop without tearing down the browser transport.</summary>
+    public void DiscardBufferedAudio()
+    {
+        CancellationTokenSource previous;
+        lock (_pcmGate)
+        {
+            Interlocked.Exchange(ref _discardBefore, ReceivedFrames);
+            previous = _inputChanged;
+            _inputChanged = new CancellationTokenSource();
+        }
+        // A full queue must not strand pause/stop acknowledgement behind a blocked PCM write.
+        previous.Cancel();
+        previous.Dispose();
+    }
+
+    /// <summary>During intentional preparation/Stop, keep receiving control state without retaining stale PCM.</summary>
+    public void HoldAudio(bool hold)
+    {
+        lock (_pcmGate) _holdAudio = hold;
+        if (hold) DiscardBufferedAudio();
+    }
 
     /// <summary>Opens the single consumer; closing it permits a subsequent playback/settings restart.</summary>
     public IAudioDecoder OpenDecoder()
@@ -201,6 +243,7 @@ public sealed class BrowserAudioBridge : IDisposable
     private async Task Receive(WebSocket socket, CancellationToken cancel)
     {
         byte[] buffer = new byte[32768];
+        bool readerStalled = false;
         while (!_stop.IsCancellationRequested)
         {
             int used = 0;
@@ -218,14 +261,18 @@ public sealed class BrowserAudioBridge : IDisposable
                     if (body.ValueKind != JsonValueKind.Object) throw new InvalidDataException("Invalid browser status.");
                     if (body.TryGetProperty("addon", out var addon) && addon.ValueKind == JsonValueKind.Object
                         && addon.TryGetProperty("mode", out var modeValue) && modeValue.ValueKind == JsonValueKind.String)
+                    {
                         _persistentAddon = modeValue.GetString() == "persistent";
+                        if (addon.TryGetProperty("version", out var version) && version.ValueKind == JsonValueKind.String
+                            && version.GetString() is { Length: <= 32 } text && Version.TryParse(text, out _)) _addonVersion = text;
+                    }
                     if (body.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.String)
                     { _error = error.GetString()?[..Math.Min(240, error.GetString()!.Length)]; return; }
                     if (body.TryGetProperty("controlError", out error) && error.ValueKind == JsonValueKind.String)
                         _controlError = error.GetString()?[..Math.Min(240, error.GetString()!.Length)];
                     if (body.TryGetProperty("state", out var state) && state.ValueKind == JsonValueKind.String)
                     {
-                        int value = state.GetString() switch { "playing" => 1, "paused" => 2, _ => 0 };
+                        int value = state.GetString() switch { "playing" => 1, "paused" => 2, "stopped" => 3, _ => 0 };
                         if (value != 0 && Interlocked.Exchange(ref _mediaState, value) != value) Interlocked.Increment(ref _mediaStateVersion);
                     }
                     if (body.TryGetProperty("actions", out var actions) && actions.ValueKind == JsonValueKind.Array)
@@ -234,7 +281,7 @@ public sealed class BrowserAudioBridge : IDisposable
                         foreach (var action in actions.EnumerateArray())
                             if (action.ValueKind == JsonValueKind.String)
                                 flags |= action.GetString() switch
-                                { "nexttrack" => 1, "previoustrack" => 2, "seekto" => 4, "shuffle" => 8, "repeat" => 16, "volume" => 32, _ => 0 };
+                                { "nexttrack" => 1, "previoustrack" => 2, "seekto" => 4, "shuffle" => 8, "repeat" => 16, "volume" => 32, "stop" => 64, _ => 0 };
                         Volatile.Write(ref _actions, flags);
                     }
                     if (body.TryGetProperty("audio", out var audio) && audio.ValueKind == JsonValueKind.Object
@@ -255,6 +302,7 @@ public sealed class BrowserAudioBridge : IDisposable
                         string? repeat = transport.TryGetProperty("repeat", out var mode) && mode.ValueKind == JsonValueKind.String
                             && mode.GetString() is "off" or "all" or "one" ? mode.GetString() : current.Repeat;
                         _transport = new BrowserTransport(position, duration, volume, shuffle, repeat);
+                        if (Number(transport, "position", 604800) is not null) Volatile.Write(ref _positionReportedAt, Stopwatch.GetTimestamp());
                     }
                     if (body.TryGetProperty("discontinuity", out var discontinuity) && discontinuity.ValueKind == JsonValueKind.True)
                     {
@@ -281,16 +329,44 @@ public sealed class BrowserAudioBridge : IDisposable
                 if (!float.IsFinite(BinaryPrimitives.ReadSingleLittleEndian(buffer.AsSpan(i))))
                     throw new InvalidDataException("Non-finite browser PCM.");
             byte[] packet = buffer.AsSpan(0, used).ToArray();
-            // Backpressure retains samples while a pause/control reaches Firefox. Memory stays bounded.
-            if (!_pcm.Writer.TryWrite(packet))
+            // Normal playback retains every packet. Intentional holds discard only their stale PCM,
+            // and interrupt a full-queue wait so the same socket can still deliver control reports.
+            while (true)
             {
-                using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+                CancellationToken changed;
+                lock (_pcmGate)
+                {
+                    if (_holdAudio) break;
+                    changed = _inputChanged.Token;
+                    if (_pcm.Writer.TryWrite(packet))
+                    {
+                        Interlocked.Add(ref _frames, used / FrameBytes);
+                        readerStalled = false;
+                        break;
+                    }
+                    // Before the decoder opens, a later Playing report on this same socket may be
+                    // what starts it. Never wait for that reader while blocking its status message.
+                    // A timed-out reader also needs control reports to recover, not another closed socket.
+                    if (Volatile.Read(ref _consumer) == 0 || readerStalled)
+                    {
+                        Interlocked.Exchange(ref _discardBefore, ReceivedFrames);
+                        break;
+                    }
+                }
+                using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancel, changed);
                 wait.CancelAfter(TimeSpan.FromSeconds(5));
-                try { await _pcm.Writer.WriteAsync(packet, wait.Token); }
+                try { if (!await _pcm.Writer.WaitToWriteAsync(wait.Token)) return; }
+                catch (OperationCanceledException) when (changed.IsCancellationRequested && !cancel.IsCancellationRequested) { break; }
                 catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
-                { _error = "Browser audio reader did not resume within five seconds. Stop and reopen the browser."; return; }
+                {
+                    // Playback can retry after a slow driver, UI dispatch or DSP stall. Keep memory
+                    // bounded and discard the stale interval, then reset DSP on the existing session.
+                    DiscardBufferedAudio();
+                    Interlocked.Increment(ref _discontinuity);
+                    readerStalled = true;
+                    break;
+                }
             }
-            Interlocked.Add(ref _frames, used / FrameBytes);
         }
     }
 

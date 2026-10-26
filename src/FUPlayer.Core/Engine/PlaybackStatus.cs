@@ -43,6 +43,8 @@ public sealed record PlaybackStatus
     public TimeSpan Duration { get; init; }
 
     public PlaybackPlan? Plan { get; init; }
+    /// <summary>The current DSP chain has finished opening; false while a remote worker is released or opening.</summary>
+    public bool PipelineReady { get; init; }
 
     public string? ResamplerSummary { get; init; }
 
@@ -59,6 +61,12 @@ public sealed record PlaybackStatus
     public double? NetworkServerLoad { get; init; }
     /// <summary>LAN processing server while one or more selected stages run remotely.</summary>
     public string? NetworkServer { get; init; }
+    /// <summary>Actual received audio awaiting processing on a capable server; null on older servers.</summary>
+    public double? ServerFifoQueuedSeconds { get; init; }
+    public double? ServerFifoCapacitySeconds { get; init; }
+    public bool RemoteDsdOutput { get; init; }
+    /// <summary>Source time still inside DSP/network queues, excluding the device FIFO and filter delay.</summary>
+    public double DspBufferedSeconds { get; init; }
     /// <summary>Datagrams retransmitted to recover an incomplete exchange.</summary>
     public long NetworkRetransmits { get; init; }
 
@@ -92,7 +100,7 @@ public sealed record PlaybackStatus
 
     /// <summary>
     /// Bytes the engine FIFO holds: what the setting asked for, unless the device buffer or a block-based filter
-    /// needed more, and never more than the 256 MB ceiling. This is memory actually allocated.
+    /// needed more, and never more than the 256 MB ceiling. Physical storage may be rounded up separately.
     /// </summary>
     public int FifoBytes { get; init; }
 

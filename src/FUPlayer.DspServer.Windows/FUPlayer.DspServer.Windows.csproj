@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>$(FuPlayerTargetFramework)-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>FUPlayer-DspServer-Windows</AssemblyName>
+    <RootNamespace>FUPlayer.ServerController</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\FUPlayer.App\Assets\fuplayer.ico</ApplicationIcon>
+    <FuPlayerSkipFFmpegCopy>true</FuPlayerSkipFFmpegCopy>
+    <FuPlayerSkipModelCopy>true</FuPlayerSkipModelCopy>
+    <DebugType>embedded</DebugType>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\FUPlayer.Core\FUPlayer.Core.csproj" />
+    <ProjectReference Include="..\FUPlayer.DspModels\FUPlayer.DspModels.csproj" />
+    <PackageReference Include="TagLibSharp" ExcludeAssets="all" PrivateAssets="all" />
+    <Compile Include="..\FUPlayer.DspServer\ServerApplication.cs" Link="Server\ServerApplication.cs" />
+    <Compile Include="..\FUPlayer.DspServer\ControllerProtocol.cs" Link="Server\ControllerProtocol.cs" />
+    <EmbeddedResource Include="..\..\licenses\*" LogicalName="FUPlayer.Server.Licenses.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\LICENSE;..\..\THIRD-PARTY-NOTICES.md" LogicalName="FUPlayer.Server.Licenses.%(Filename)%(Extension)" />
+  </ItemGroup>
+  <Target Name="ExcludeNativeImportLibraries" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.lib'" />
+    </ItemGroup>
+  </Target>
+</Project>

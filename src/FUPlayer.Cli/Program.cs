@@ -94,6 +94,10 @@ internal static class Program
               --remote-restorer            Offload the neural restorer
               --remote-upscaler            Offload the neural upscaler
                                            If no stage flags are given, all three are selected.
+              --client-dsd                 Keep final DSD conversion on this computer
+              --server-fifo <ms>           Server input FIFO capacity (100..5000, default 500)
+              --server-threads <n>         Total server threads (0 = server default)
+              --server-cpu                 Do not use the server's GPU for this session
               apps                         List applications whose audio can be captured
               capture --app <name|pid>     Record one application's output to a WAV file
                       --seconds <n> --out <file>
@@ -921,7 +925,7 @@ internal static class Program
         private static readonly HashSet<string> Switches = new(StringComparer.Ordinal)
         {
             "dop", "dsd-48k", "pass-through", "remove-ultrasonics", "no-limiter",
-            "gpu", "gpu-fast", "gpu-force", "gpu-hold", "probe", "convolution-layered", "preprocess-files", "remote-resampling", "remote-restorer", "remote-upscaler",
+            "gpu", "gpu-fast", "gpu-force", "gpu-hold", "probe", "convolution-layered", "preprocess-files", "remote-resampling", "remote-restorer", "remote-upscaler", "client-dsd", "server-cpu",
             "neural-upscale", "neural-restore", "exciter", "no-exciter", "output-delta", "local-only", "private-msys2", "keep",
         };
 
@@ -1079,6 +1083,10 @@ internal static class Program
             settings.Processing.RemoteResampling = allRemote || Has("remote-resampling");
             settings.Processing.RemoteRestorer = allRemote || Has("remote-restorer");
             settings.Processing.RemoteUpscaler = allRemote || Has("remote-upscaler");
+            settings.Processing.RemoteDsdOutput = !Has("client-dsd");
+            settings.Processing.ServerFifoMilliseconds = Math.Clamp(GetInt("server-fifo") ?? 500, 100, 5000);
+            settings.Processing.ServerThreads = Math.Clamp(GetInt("server-threads") ?? 0, 0, 64);
+            settings.Processing.ServerGpu = !Has("server-cpu");
             settings.Processing.PreprocessFiles = Has("preprocess-files");
             settings.Volume.VolumeDb = double.TryParse(Get("volume"), NumberStyles.Float, CultureInfo.InvariantCulture, out double volume) ? volume : defaultVolume;
             return settings;

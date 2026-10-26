@@ -36,6 +36,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="FUPlayer.Core.Tests" />
+    <InternalsVisibleTo Include="FUPlayer.ReviewBenchmarks" />
   </ItemGroup>
 
   <!-- The interface's translations, one JSON object of English text to translated text per language. -->

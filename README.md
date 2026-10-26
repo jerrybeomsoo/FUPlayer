@@ -11,7 +11,7 @@ so your DAC's own oversampling filter and modulator never run.
 Now with Neural Restorer and Upscaler.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg?style=flat-square)](https://github.com/jerrybeomsoo/FUPlayer/releases/tag/v0.7.0)
+[![Version](https://img.shields.io/badge/version-0.7.1-blue.svg?style=flat-square)](https://github.com/jerrybeomsoo/FUPlayer/releases/tag/v0.7.1)
 
 <img src="docs/images/dsp-studio.png" alt="FUPlayer DSP studio" width="820">
 
@@ -23,7 +23,7 @@ Whether a DAC bypasses its internal processing depends on the device and its sel
 
 ## Download and first run
 
-1. Download **FUPlayer-0.7.0-win-x64.zip** from the [latest release](https://github.com/jerrybeomsoo/FUPlayer/releases/latest).
+1. Download **FUPlayer-0.7.1-win-x64.zip** from the [latest release](https://github.com/jerrybeomsoo/FUPlayer/releases/latest).
 2. Extract the whole ZIP to a writable folder. Start **FUPlayer.exe** inside it.
 3. On **Output**, choose your audio back-end and device. Start with a PCM rate your DAC supports.
 4. Add music folders in **Library**, or open files and add them to the queue.
@@ -55,11 +55,13 @@ Those libraries are built separately and are not included in the ZIP.
 
 The processing computer needs only the matching **FUPlayer-DspServer** executable, available separately for
 Windows x64 and Linux x64. It does not need the player, CLI, an audio device or a .NET installation.
-Linux users can install it as a boot service using the downloadable **install-dsp-server.sh**.
+Windows users can also choose the separate **FUPlayer-DspServer-Windows** portable Forms controller
+for Start/Stop, resource choices, status and a notification-area icon. Linux users can install the console
+server as a boot service using the downloadable **install-dsp-server.sh**.
 The server releases its active workers when playback stops or pauses.
 
 Start with the [network setup guide](docs/network-dsp.md), then enable **Settings → Network DSP** and choose
-the stages to process remotely. v0.7.0 retains protocol 4 from v0.6.3; existing v0.6.3 servers remain compatible. Versions through v0.6.2 use an older protocol. Internet servers use an access key and encrypted UDP, without TLS.
+the stages to process remotely. v0.7.1 retains protocol 4 from v0.6.3; existing v0.6.3 servers remain compatible. Versions through v0.6.2 use an older protocol. Internet servers use an access key and encrypted UDP, without TLS.
 LAN-only servers can retain plain UDP. Only the listener port needs forwarding; worker ports stay on loopback.
 
 ## Guides
@@ -68,7 +70,7 @@ LAN-only servers can retain plain UDP. Only the listener port needs forwarding; 
 | --- | --- |
 | Choose output, buffering, GPU and language settings | [Settings](docs/settings.md) |
 | Choose filters and understand delay | [DSP studio](docs/dsp.md) and [Transient-Aligned Filter](docs/transient-aligned-filter.md) |
-| Set up another computer for processing | [Network DSP](docs/network-dsp.md) |
+| Set up another computer for processing | [Network DSP](docs/network-dsp.md) and [Windows controller](docs/windows-dsp-controller.md) |
 | Organise albums, covers, tracks and the queue | [Library](docs/library.md) |
 | Try neural processing or the exciter | [Restorer](docs/neural-restorer.md), [upscaler](docs/neural-upscaler.md), [exciter](docs/exciter.md) |
 | Play Apple Music inside FUPlayer | [Apple Music streaming](docs/streaming.md) and [privacy](docs/streaming-privacy.md) |
@@ -77,9 +79,9 @@ LAN-only servers can retain plain UDP. Only the listener port needs forwarding; 
 | Render files or use the terminal | [Command line](docs/cli.md) |
 | Build the software | [Building](docs/building.md) |
 
-These guides are also in the ZIP's `docs` folder. [Changes in v0.7.0](CHANGELOG.md) add Apple Music
-inside FUPlayer, with automatic signed add-on loading, direct audio, service playback controls,
-synchronised volume and track artwork. Firefox is installed separately. Supported output rates and
+These guides are also in the ZIP's `docs` folder. [Changes in v0.7.1](CHANGELOG.md) add Apple Music
+playback fixes, server DSD conversion, separate client/server FIFO controls, and a Windows DSP server
+controller. The signed Apple Music add-on loads automatically after its first installation. Firefox is installed separately. Supported output rates and
 sustained DSP performance still depend on your hardware.
 
 ## Licence and contributions

@@ -26,9 +26,9 @@ public static partial class PlaylistFile
             foreach (string line in lines)
             {
                 Match match = PlsEntry().Match(line.Trim());
-                if (match.Success)
+                if (match.Success && int.TryParse(match.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out int number))
                 {
-                    entries[int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture)] = match.Groups[2].Value.Trim();
+                    entries[number] = match.Groups[2].Value.Trim();
                 }
             }
 

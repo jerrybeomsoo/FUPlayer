@@ -83,6 +83,9 @@ public sealed class CoverArtCache
 
     private Task<Bitmap?> Get(string key, int width, string? source, Func<Stream?> open)
     {
+        string? thumbnail = ThumbnailPath(key, source);
+        // The memory cache must invalidate changed artwork too, not only the disk thumbnail.
+        key = thumbnail ?? key;
         lock (_gate)
         {
             if (_map.TryGetValue(key, out LinkedListNode<KeyValuePair<string, Task<Bitmap?>>>? node))
@@ -92,7 +95,7 @@ public sealed class CoverArtCache
                 return node.Value.Value;
             }
 
-            Task<Bitmap?> task = LoadAsync(key, width, source, open);
+            Task<Bitmap?> task = LoadAsync(width, thumbnail, open);
             _map[key] = _order.AddFirst(new KeyValuePair<string, Task<Bitmap?>>(key, task));
             while (_order.Count > Capacity && _order.Last is { } last)
             {
@@ -104,14 +107,13 @@ public sealed class CoverArtCache
         }
     }
 
-    private async Task<Bitmap?> LoadAsync(string key, int width, string? source, Func<Stream?> open)
+    private async Task<Bitmap?> LoadAsync(int width, string? thumbnail, Func<Stream?> open)
     {
         await _slots.WaitAsync().ConfigureAwait(false);
         try
         {
             return await Task.Run(() =>
             {
-                string? thumbnail = ThumbnailPath(key, source);
                 if (thumbnail is not null && File.Exists(thumbnail))
                 {
                     try

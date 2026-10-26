@@ -28,6 +28,11 @@
         </StackPanel>
 
         <ListBox Grid.Row="1" Classes="nav" ItemsSource="{Binding Navigation}" SelectedItem="{Binding SelectedNav}">
+          <ListBox.Styles>
+            <Style Selector="ListBoxItem" x:DataType="vm:NavItem">
+              <Setter Property="IsEnabled" Value="{Binding IsSelectable}" />
+            </Style>
+          </ListBox.Styles>
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:NavItem">
               <StackPanel Classes="navrow" Classes.child="{Binding IsChild}" Orientation="Horizontal" Spacing="12">
@@ -65,16 +70,6 @@
             <controls:LineIcon Data="{x:Static controls:Icons.Warning}" Width="18" Height="18" Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center" />
             <TextBlock Grid.Column="1" Text="{Binding ErrorMessage}" TextWrapping="Wrap" Margin="12,0" VerticalAlignment="Center" />
             <Button Grid.Column="2" Classes="icon" Padding="6" Command="{Binding DismissErrorCommand}" ToolTip.Tip="Dismiss">
-              <controls:LineIcon Data="{x:Static controls:Icons.Close}" Width="14" Height="14" />
-            </Button>
-          </Grid>
-        </Border>
-        <Border IsVisible="{Binding HasOverloadWarning}" Background="{StaticResource WarningSoftBrush}" CornerRadius="10" Margin="24,14,24,0" Padding="14,8">
-          <Grid ColumnDefinitions="Auto,*,Auto,Auto">
-            <controls:LineIcon Data="{x:Static controls:Icons.Warning}" Width="18" Height="18" Foreground="{StaticResource WarningBrush}" VerticalAlignment="Center" />
-            <TextBlock Grid.Column="1" Text="{Binding OverloadMessage}" TextWrapping="Wrap" Margin="12,0" VerticalAlignment="Center" />
-            <Button Grid.Column="2" Classes="subtle" Content="Open DSP studio" Command="{Binding OpenDspStudioCommand}" VerticalAlignment="Center" />
-            <Button Grid.Column="3" Classes="icon" Padding="6" Margin="6,0,0,0" Command="{Binding DismissOverloadCommand}" ToolTip.Tip="Dismiss">
               <controls:LineIcon Data="{x:Static controls:Icons.Close}" Width="14" Height="14" />
             </Button>
           </Grid>
@@ -124,7 +119,7 @@
     <!-- Transport bar -->
     <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Background="{StaticResource SurfaceBrush}"
             BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="14,10,18,10">
-      <Grid ColumnDefinitions="300,*,Auto,Auto">
+      <Grid ColumnDefinitions="300,*,420,Auto">
         <Grid ColumnDefinitions="Auto,*" VerticalAlignment="Center">
           <Border Width="62" Height="62" CornerRadius="8" ClipToBounds="True" Background="{StaticResource SurfaceHighBrush}">
             <Panel>
@@ -177,29 +172,24 @@
         </StackPanel>
 
         <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="18,0">
-          <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasPlan}">
-            <Border Classes="badge">
-              <TextBlock Text="{Binding SourceText}" />
+          <Grid ColumnDefinitions="Auto,Auto,*,Auto,*,Auto,Auto" ColumnSpacing="6" IsVisible="{Binding HasPlan}">
+            <Border Classes="badge"><TextBlock Text="{Binding SourceText}" /></Border>
+            <TextBlock Grid.Column="1" Text="›" Classes="muted" VerticalAlignment="Center" />
+            <Border Grid.Column="2" Classes="badge" ToolTip.Tip="{Binding FilterText}">
+              <TextBlock Text="{Binding FilterText}" TextTrimming="CharacterEllipsis" />
             </Border>
-            <TextBlock Text="›" Classes="muted" VerticalAlignment="Center" />
-            <Border Classes="badge">
-              <TextBlock Text="{Binding FilterText}" MaxWidth="180" TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Column="3" Text="›" Classes="muted" VerticalAlignment="Center" />
+            <Border Grid.Column="4" Classes="badge" ToolTip.Tip="{Binding QuantizerText}">
+              <TextBlock Text="{Binding QuantizerText}" TextTrimming="CharacterEllipsis" />
             </Border>
-            <TextBlock Text="›" Classes="muted" VerticalAlignment="Center" />
-            <Border Classes="badge">
-              <TextBlock Text="{Binding QuantizerText}" MaxWidth="160" TextTrimming="CharacterEllipsis" />
-            </Border>
-            <TextBlock Text="›" Classes="muted" VerticalAlignment="Center" />
-            <Border Classes="badge accent" Classes.dsd="{Binding IsDsdOutput}">
+            <TextBlock Grid.Column="5" Text="›" Classes="muted" VerticalAlignment="Center" />
+            <Border Grid.Column="6" Classes="badge accent" Classes.dsd="{Binding IsDsdOutput}">
               <TextBlock Text="{Binding OutputText}" />
             </Border>
-          </StackPanel>
+          </Grid>
         </StackPanel>
 
         <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
-          <Border Classes="badge warning" IsVisible="{Binding IsLimiting}" ToolTip.Tip="The soft limiter is catching overs. Lower the volume for a clean signal.">
-            <TextBlock Text="LIMIT" FontSize="10" />
-          </Border>
           <Button Classes="tile" VerticalAlignment="Center" CornerRadius="6" IsVisible="{Binding IsMuted}" Command="{Binding UnmuteCommand}"
                   ToolTip.Tip="A UPnP controller muted the player. Click to unmute it here; the controller is told.">
             <Border Classes="badge warning">

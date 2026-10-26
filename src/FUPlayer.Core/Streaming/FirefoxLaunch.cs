@@ -8,6 +8,12 @@ public static class FirefoxLaunch
     // An XPI navigation opens Firefox's installer rather than becoming a document. The setup tab remains blank.
     public const string PersistentSetupAddress = "about:blank";
 
+    /// <summary>Keeps an installed add-on from closing Firefox's update confirmation before its replacement connects.</summary>
+    public static string PersistentSessionSetupAddress(bool installingAddon, bool reopenAfterInstall) =>
+        // This unmatched address is only native-session data, never a browser navigation. After the new version
+        // acknowledges, the player reopens Firefox normally so the service popup can consume its blank setup tab.
+        installingAddon && reopenAfterInstall ? "about:blank#fuplayer-addon-upgrade" : PersistentSetupAddress;
+
     /// <summary>Matches an owned window's marker without depending on Firefox's origin label or localised title format.</summary>
     public static bool WindowTitleMatches(string title, string marker) =>
         marker.Length > 0 && title.Contains(marker, StringComparison.Ordinal);
@@ -33,14 +39,20 @@ public static class FirefoxLaunch
     public static ProcessStartInfo StartInfo(string executable, string settingsDirectory, string address, bool audioBridgeSetup = false,
         bool persistentAddon = false, string? installAddon = null)
     {
-        var start = new ProcessStartInfo(Path.GetFullPath(executable)) { UseShellExecute = false };
+        var start = new ProcessStartInfo(Path.GetFullPath(executable))
+        {
+            UseShellExecute = false,
+            // A native visibility guard keeps routine setup running offscreen; confirmations stay accessible.
+            WindowStyle = persistentAddon && installAddon is null ? ProcessWindowStyle.Hidden : ProcessWindowStyle.Normal,
+        };
         start.ArgumentList.Add("--no-remote");
         // Firefox's Windows launcher otherwise exits before the browser it created. Waiting keeps the owned tree identifiable.
         start.ArgumentList.Add("--wait-for-browser");
         start.ArgumentList.Add("--profile");
         start.ArgumentList.Add(ProfileDirectory(settingsDirectory));
-        // Kiosk hides browser chrome while retaining the normal sandbox and service player.
-        start.ArgumentList.Add("--kiosk");
+        // Only setup prompts need kiosk. Routine startup hands over to the add-on's chromeless popup;
+        // its disposable setup window is parked without minimising Firefox's process at launch.
+        start.ArgumentList.Add(persistentAddon && installAddon is null ? "--new-window" : "--kiosk");
         Uri service = Address(address);
         if (installAddon is not null && (!persistentAddon || !Path.GetExtension(installAddon).Equals(".xpi", StringComparison.OrdinalIgnoreCase)))
             throw new ArgumentException("Choose a Firefox add-on package.");

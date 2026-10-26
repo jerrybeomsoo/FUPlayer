@@ -1,28 +1,32 @@
 # Network DSP
 
 Use another computer for resampling, neural restoration, neural upscaling, or any combination. Select
-stages in **Settings → Network DSP**; decoding, volume, limiting, DSD modulation and audio output stay
-on the player. **v0.7.0 retains protocol 4 from v0.6.3.** Existing v0.6.3 servers remain compatible.
+stages in **Settings → Network DSP**. Decoding and audio output stay on the player. With remote
+resampling enabled, **DSD output conversion on server** can also move final DSD conversion, volume
+and limiting to a capable server, reducing work on a slower client. **v0.7.1 retains protocol 4 from v0.6.3.** Existing v0.6.3 servers remain compatible.
 Versions through v0.6.2 use an older incompatible protocol; update those endpoints together.
 
 ## Download and start
 
 Download the standalone **Windows x64** or **Linux x64** server from the
-[release](https://github.com/jerrybeomsoo/FUPlayer/releases/tag/v0.7.0). It is one executable containing the
+[release](https://github.com/jerrybeomsoo/FUPlayer/releases/tag/v0.7.1). It is one executable containing the
 runtime, both models and licence texts. The processing computer needs no player, CLI or audio device.
 Normal host OS libraries and GPU drivers are still required; native libraries and models extract to a cache.
+On Windows, the separate **FUPlayer-DspServer-Windows-0.7.1-win-x64.exe** provides a portable Forms
+controller with connection settings, Start/Stop, GPU choices, status and tray operation. See the
+[Windows controller guide](windows-dsp-controller.md). It does not install a Windows service.
 
 For a LAN-only server, run it from PowerShell on Windows:
 
 ```powershell
-.\FUPlayer-DspServer-0.7.0-win-x64.exe --listen 0.0.0.0
+.\FUPlayer-DspServer-0.7.1-win-x64.exe --listen 0.0.0.0
 ```
 
 Or on Linux:
 
 ```bash
-chmod +x ./FUPlayer-DspServer-0.7.0-linux-x64
-./FUPlayer-DspServer-0.7.0-linux-x64 --listen 0.0.0.0
+chmod +x ./FUPlayer-DspServer-0.7.1-linux-x64
+./FUPlayer-DspServer-0.7.1-linux-x64 --listen 0.0.0.0
 ```
 
 Allow **UDP 58181** through the server firewall. Active workers bind loopback and their traffic is relayed
@@ -37,8 +41,8 @@ through this listener. They do not need separate firewall or router forwarding r
 3. Generate a random access key on the server and enable Internet mode. On Linux:
 
 ```bash
-./FUPlayer-DspServer-0.7.0-linux-x64 --generate-key-file ./dsp-access.key
-./FUPlayer-DspServer-0.7.0-linux-x64 --allow-internet --key-file ./dsp-access.key
+./FUPlayer-DspServer-0.7.1-linux-x64 --generate-key-file ./dsp-access.key
+./FUPlayer-DspServer-0.7.1-linux-x64 --allow-internet --key-file ./dsp-access.key
 ```
 
 On Windows, use the `.exe` name with the same options. Keep the key file private. The generate command
@@ -65,19 +69,19 @@ sharing diagnostics. IPv4 is supported; IPv6-only DNS records are not sufficient
 Download **install-dsp-server.sh** beside the binary. For a LAN service:
 
 ```bash
-sudo bash install-dsp-server.sh ./FUPlayer-DspServer-0.7.0-linux-x64
+sudo bash install-dsp-server.sh ./FUPlayer-DspServer-0.7.1-linux-x64
 ```
 
 For Internet mode, first generate the key as above, then:
 
 ```bash
-sudo bash install-dsp-server.sh ./FUPlayer-DspServer-0.7.0-linux-x64 --allow-internet --key-file ./dsp-access.key
+sudo bash install-dsp-server.sh ./FUPlayer-DspServer-0.7.1-linux-x64 --allow-internet --key-file ./dsp-access.key
 ```
 
 To update an installed Internet service to a new version and keep its key, give it the installed key:
 
 ```bash
-sudo bash install-dsp-server.sh ./FUPlayer-DspServer-0.7.0-linux-x64 --allow-internet --key-file /etc/fuplayer-dsp/access.key
+sudo bash install-dsp-server.sh ./FUPlayer-DspServer-0.7.1-linux-x64 --allow-internet --key-file /etc/fuplayer-dsp/access.key
 ```
 
 The system service runs as a dedicated account. The binary is installed under `/opt/fuplayer-dsp`, cache
@@ -105,34 +109,45 @@ and cannot show a unit installed only in another user's service manager.
 ## What runs where
 
 Remote checkboxes choose where an enabled stage runs. Enable neural stages in DSP studio too; Automatic
-source type normally leaves the restorer idle on lossless files. A stage between two selected ones runs on
+source type leaves the restorer idle on lossless files, while browser PCM can use the enabled restorer
+because its decoded sample format does not identify the original service codec. A stage between two selected ones runs on
 the server as well: with the restorer and resampling selected, the upscaler and the exciter go there too,
 since the audio crosses the network once each way. A remote stage's local **Runs on** selector becomes grey
 and its previous local choice is retained.
 
 The server runs the same processing code as the player, so the output is the player's own: identical to
 the bit without the neural networks, and within a few steps of a 32-bit sample with them. Output delta,
-ultrasonic removal and every stage combination work remotely. Final DSD modulation still uses the player's
-CPU, so higher DSD rates can need a faster client even when the server has spare resources.
+ultrasonic removal and every stage combination work remotely. With **DSD output conversion on server**
+enabled, a capable server returns packed DSD plus a reduced-rate display stream. The client still
+decodes input, handles transport and feeds the DAC. Older compatible servers can leave final DSD
+conversion on the client; both endpoints need the new optional capability to use packed server DSD.
 
 ## Load, latency and bandwidth
 
-The player keeps several hundred milliseconds of audio in flight to the server, so the server never waits
-for the network between blocks and a slow Internet connection costs latency, not throughput. In Now playing,
-**DSP load** is this computer's work, **Server load** is the server's processing time relative to the music,
-and **Network round trip** is the UDP echo time. The DSP figure in the top bar is the higher of the two loads.
-Above 100 % server load the server cannot keep up, whatever the network does, and the player says so.
+Now playing shows **client FIFO** and **server FIFO** separately. In **Settings → Network DSP**,
+set the server FIFO capacity, a session thread budget and whether to use the server GPU. The server
+reserves and fills the requested input buffer during playback. The client FIFO is controlled separately
+by the engine/output FIFO settings. Low-latency mode reduces buffering and therefore jitter tolerance.
+Start with 500 ms on each side for an uncertain Internet connection, then adjust while monitoring underruns.
+These buffers add delay; no buffer can make an overloaded DSP chain process faster.
 
-Tap-by-tap convolution costs one multiply-add per tap for every output sample. For DSD256 of the 48 kHz
-family the filter runs at 768 kHz, so 262,144 taps is 50 thousand million multiply-adds a second for two
-channels. Measured on an i5-8500 with a Radeon RX 6400, that plays at about 92 % server load; 524,288 taps
-needs about 155 % and cannot play. **Automatic convolution** gives the same samples to within rounding at a
-small fraction of the arithmetic, and is the choice for long filters.
+**DSP load** is this computer's work, **Server load** is the server's processing time relative to the
+music, and **Network round trip** is the UDP echo time. The top-bar DSP figure is the higher load.
+Sustained server load above 100% means the selected chain cannot keep up. Live input overload notices
+do not repeatedly resize the embedded browser.
 
-For Internet playback, start with **Fast FIFO off** and a **500 ms FIFO**; the player raises the FIFO to cover
-what it keeps in flight. The network carries 64-bit audio. A stereo 768 kHz intermediate stream, used by the
-48 kHz DSD rate family, needs about **98 Mbps of sample payload** before headers and recovery traffic. Check
-the server's upload as well as the client's download speed, and leave headroom for jitter.
+Tap-by-tap convolution is expensive. In a controlled encrypted 27 Mbps DSD128 test on an i5-8500/RX 6400,
+with both neural stages and the exciter, 131,072 taps ran below 77% peak server load without underruns;
+262,144 taps exceeded real time at about 107% median load. Actual results depend on rates and settings.
+**Automatic convolution** is recommended for long filters.
+
+Network payload depends on the path. Stereo float64 PCM at 768 kHz requires about **98 Mbps** before
+headers and recovery. New client/server pairs return packed DSD with reduced-rate monitoring audio:
+DSD128 needs about **16.9 Mbps** in the 44.1 kHz family or **18.4 Mbps** in the 48 kHz family, before
+overhead. The monitoring-rate reduction does not change the DSD output bits. Higher DSD rates need more
+bandwidth. Leave headroom for jitter, packet recovery, the upload stream and other traffic; the server's
+upload and client's download both matter. Protocol 4 is retained, but older servers do not offer every
+new optional capability. Upgrade both endpoints to use the newer offload and bandwidth options.
 
 ## Devices on the server
 

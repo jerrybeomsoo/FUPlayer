@@ -54,6 +54,7 @@ public sealed class PlaybackEngine : IDisposable
     private bool _nativeDsdRefused;
     private OutputWriter? _writer;
     private bool _streamStarted;
+    private long _streamStartedAt;
     private PendingTransition? _transition;
     private bool _draining;
     private bool _drainFlushed;
@@ -74,6 +75,7 @@ public sealed class PlaybackEngine : IDisposable
     private CancellationTokenSource? _openingPipeline;
     private volatile bool _networkStopRequested;
     private volatile PlaybackStatus? _networkPaused;
+    private int _networkPauseVersion;
     private volatile IAudioStream? _stream;
     private volatile RenderSource? _render;
     private volatile SpscByteRing? _ring;
@@ -199,21 +201,35 @@ public sealed class PlaybackEngine : IDisposable
 
         render.Paused = true;
         SetState(EngineState.Paused);
-        if (_settings.Processing.NetworkDsp) Post(new NetworkPauseCommand(), interrupt: true);
+        if (_settings.Processing.NetworkDsp)
+        {
+            int version = Interlocked.Increment(ref _networkPauseVersion);
+            if (_network?.DirectBrowserAudio == true) _ = ReleasePausedBrowserAsync(version);
+            else Post(new NetworkPauseCommand(version), interrupt: true);
+        }
+    }
+
+    private async Task ReleasePausedBrowserAsync(int version)
+    {
+        // Brief transport pauses retain warm models and the same live decoder. Long pauses release the server.
+        await Task.Delay(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        if (version == Volatile.Read(ref _networkPauseVersion)) Post(new NetworkPauseCommand(version), interrupt: true);
     }
 
     public void Resume()
     {
-        if (_state != EngineState.Paused || _render is not { } render)
+        if (_state != EngineState.Paused)
         {
             return;
         }
 
-        if (_settings.Processing.NetworkDsp)
+        Interlocked.Increment(ref _networkPauseVersion);
+        if (_networkPaused is not null || _settings.Processing.NetworkDsp)
         {
             Post(new NetworkResumeCommand(), interrupt: true);
             return;
         }
+        if (_render is not { } render) return;
         render.Paused = false;
         SetState(EngineState.Playing);
         _spaceAvailable.Set();
@@ -265,9 +281,9 @@ public sealed class PlaybackEngine : IDisposable
     }
 
     /// <summary>Stops an owned stream without stopping a file or another sender selected in the meantime.</summary>
-    public void StopNetworkStream(string uri) => Post(new StopNetworkStreamCommand(uri), interrupt: false);
+    public void StopNetworkStream(string uri) => Post(new StopNetworkStreamCommand(uri), interrupt: true);
 
-    /// <summary>Flushes a seek in the owned browser stream without reopening its decoder or losing source identity.</summary>
+    /// <summary>Clears seek history without reopening the browser decoder, DSP session or output device.</summary>
     public void ResetBrowserStream(string uri) => Post(new ResetBrowserStreamCommand(uri), interrupt: true);
 
     /// <summary>
@@ -303,7 +319,12 @@ public sealed class PlaybackEngine : IDisposable
 
     public PlaybackStatus GetStatus()
     {
-        if (_networkPaused is { } held) return held with { State = EngineState.Paused, DspLoad = 0 };
+        if (_networkPaused is { } held) return held with
+        {
+            State = EngineState.Paused, DspLoad = 0, NetworkServerLoad = 0,
+            PipelineReady = false,
+            ServerFifoQueuedSeconds = held.ServerFifoCapacitySeconds is null ? null : 0,
+        };
         (Marker? marker, TimeSpan position) = ComputePlayback();
 
         // Each read once: the engine thread closes the stream and swaps the pipeline while this runs on the UI's
@@ -359,10 +380,15 @@ public sealed class PlaybackEngine : IDisposable
             Position = position,
             Duration = marker is { Length: > 0 } ? TimeSpan.FromSeconds((double)marker.Length / marker.SampleRate) : TimeSpan.Zero,
             Plan = pipeline?.Plan,
+            PipelineReady = pipeline is not null,
             ResamplerSummary = pipeline?.ResamplerSummary,
             Acceleration = pipeline?.AccelerationSummary,
             NetworkRoundTripMilliseconds = pipeline?.NetworkRoundTripMilliseconds,
             NetworkServerLoad = pipeline?.NetworkServerLoad,
+            ServerFifoQueuedSeconds = pipeline?.ServerFifo?.QueuedSeconds,
+            ServerFifoCapacitySeconds = pipeline?.ServerFifo?.CapacitySeconds,
+            RemoteDsdOutput = pipeline?.RemoteDsdOutput == true,
+            DspBufferedSeconds = pipeline?.BufferedSeconds ?? 0,
             NetworkServer = pipeline?.NetworkServer,
             NetworkRetransmits = pipeline?.NetworkRetransmits ?? 0,
             Upscaler = pipeline?.UpscalerStatus,
@@ -483,14 +509,20 @@ public sealed class PlaybackEngine : IDisposable
 
     private bool ProcessCommands(bool wait)
     {
-        if (wait)
+        if (wait && !_commands.Reader.TryPeek(out _))
         {
-            _commands.Reader.WaitToReadAsync().AsTask().Wait(250);
+            // Post already signals this event. Timed-out asynchronous channel waits otherwise remain
+            // registered until the next command, allocating and accumulating throughout a long idle.
+            _spaceAvailable.WaitOne(250);
         }
 
         Interlocked.Exchange(ref _interrupts, 0);
         while (_commands.Reader.TryRead(out Command? command))
         {
+            // A rate/mode picker can post several complete settings snapshots. Build the last adjacent
+            // snapshot once, without moving it past transport or other commands.
+            while (command is SettingsCommand && _commands.Reader.TryPeek(out Command? next) && next is SettingsCommand
+                && _commands.Reader.TryRead(out Command? latest)) command = latest;
             if (command is ShutdownCommand)
             {
                 return false;
@@ -506,8 +538,8 @@ public sealed class PlaybackEngine : IDisposable
     {
         switch (command)
         {
-            case NetworkPauseCommand:
-                if (_state == EngineState.Paused && _pipeline?.NetworkServer is not null)
+            case NetworkPauseCommand pause:
+                if (pause.Version == Volatile.Read(ref _networkPauseVersion) && _state == EngineState.Paused && _pipeline?.NetworkServer is not null)
                 {
                     _networkPaused = GetStatus();
                     DisposeTransition();
@@ -564,8 +596,7 @@ public sealed class PlaybackEngine : IDisposable
                 if (_network?.Uri == stream.Uri) StopInternal();
                 break;
             case ResetBrowserStreamCommand reset:
-                if (_network is { DirectBrowserAudio: true } browser && browser.Uri == reset.Uri && _decoder is { } decoder)
-                    StartPipeline(-1, decoder, null, PlanFor(decoder), TimeSpan.Zero, keepPaused: _state == EngineState.Paused);
+                ResetBrowserStreamInternal(reset.Uri);
                 break;
         }
     }
@@ -719,7 +750,7 @@ public sealed class PlaybackEngine : IDisposable
         new(settings.Playback.SilenceCapturedApplication, settings.Output.BackendId, settings.Output.DeviceId);
 
     /// <summary>Re-opens a live capture, which is what a device or format change needs.</summary>
-    private void StartCapture(int processId)
+    private void StartCapture(int processId, bool keepPaused = false)
     {
         if (_capture is null || !_capture.IsSupported)
         {
@@ -730,14 +761,16 @@ public sealed class PlaybackEngine : IDisposable
         DisposeTransition();
         _draining = false;
         CloseDecoder();
+        IAudioDecoder? decoder = null;
         try
         {
-            IAudioDecoder decoder = _capture.Open(processId, _settings.Output.Channels, CaptureOptionsFor(_settings));
+            decoder = _capture.Open(processId, _settings.Output.Channels, CaptureOptionsFor(_settings));
             _captureProcessId = processId;
-            StartPipeline(_decoderIndex, decoder, null, PlanFor(decoder), TimeSpan.Zero, keepPaused: false);
+            StartPipeline(-1, decoder, null, PlanFor(decoder), TimeSpan.Zero, keepPaused);
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
+            if (!ReferenceEquals(_decoder, decoder)) decoder?.Dispose();
             if (!_networkStopRequested) ReportError(Loc.F("The capture could not restart: {0}", ex.Message));
             StopInternal();
         }
@@ -756,18 +789,17 @@ public sealed class PlaybackEngine : IDisposable
             decoder = request.OpenDecoder?.Invoke() ?? NetworkStreamDecoder.Open(request.Uri, request.Metadata?.ProtocolInfo);
             _network = request;
             _networkMetadata = request.Metadata;
-            StartPipeline(-1, decoder, null, PlanFor(decoder), TimeSpan.Zero, keepPaused: false);
+            StartStreamPipeline(decoder, paused: false);
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
             if (!ReferenceEquals(_decoder, decoder)) decoder?.Dispose();
-            _network = null;
             if (!_networkStopRequested) ReportError(Loc.F(NetworkStreamErrorFormat, request.Controller, ex.Message));
             StopInternal();
         }
     }
 
-    private void StartTestTone(TestToneMode mode)
+    private void StartTestTone(TestToneMode mode, bool keepPaused = false)
     {
         DisposeTransition();
         _draining = false;
@@ -777,10 +809,11 @@ public sealed class PlaybackEngine : IDisposable
         var decoder = new TestToneDecoder(_settings.Output.Channels, mode);
         try
         {
-            StartPipeline(-1, decoder, null, PlanFor(decoder), TimeSpan.Zero, keepPaused: false);
+            StartPipeline(-1, decoder, null, PlanFor(decoder), TimeSpan.Zero, keepPaused);
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
+            if (!ReferenceEquals(_decoder, decoder)) decoder.Dispose();
             if (!_networkStopRequested) ReportError(Loc.F("Test tone could not start: {0}", ex.Message));
             StopInternal();
         }
@@ -799,11 +832,37 @@ public sealed class PlaybackEngine : IDisposable
         finally { lock (_openingGate) _openingPipeline = null; }
     }
 
+    private void StartStreamPipeline(IAudioDecoder decoder, bool paused)
+    {
+        // Hold the provider before probing a driver or preparing DSP, which can take longer than a UI tick.
+        if (_network?.DirectBrowserAudio == true) _network.PreparingProcessing?.Invoke(!paused);
+        StartPipeline(-1, decoder, null, PlanFor(decoder), TimeSpan.Zero, keepPaused: paused);
+    }
+
+    private void ResetBrowserStreamInternal(string uri)
+    {
+        if (_network is not { DirectBrowserAudio: true } browser || browser.Uri != uri
+            || _decoder is not { } decoder || _pipeline is not { } pipeline) return;
+
+        // A seek changes sample history, not the format or DSP ownership. Reopening here pauses the
+        // provider and holds its input until another pause acknowledgement, which a track transition
+        // need not produce. Reset the existing server epoch and local histories while PCM keeps flowing.
+        pipeline.Reset();
+        ClearRing();
+        _draining = false;
+        _drainFlushed = false;
+        PrepareFileLookahead(decoder, pipeline);
+        if (_render is { } render) render.EndOfStream = false;
+        lock (_statusGate) _markers.Clear();
+        AttachDecoder(-1, decoder, null, pipeline);
+    }
+
     private void StartPipeline(int index, IAudioDecoder decoder, TrackMetadata? metadata, PlaybackPlan plan, TimeSpan start, bool keepPaused)
     {
         _networkPaused = null;
-        bool paused = keepPaused && _render is { Paused: true };
+        bool paused = keepPaused && _state == EngineState.Paused;
         bool prefill = !paused && _streamStarted && _render is { Paused: true };
+        NetworkStreamRequest? browser = _network?.DirectBrowserAudio == true ? _network : null;
         SetPipeline(null);
         EnsureWorkers();
         DspPipeline pipeline = CreatePipeline(plan);
@@ -817,9 +876,11 @@ public sealed class PlaybackEngine : IDisposable
             {
                 // Some drivers advertise native DSD but refuse it when a stream opens.
                 _nativeDsdRefused = true;
-                ReportError(Loc.F("Native DSD could not be started ({0}); sending DSD as DoP instead.", ex.Message));
                 pipeline.Dispose();
                 plan = PlanFor(decoder);
+                ReportError(plan.Output.Kind == OutputSampleKind.Dop
+                    ? Loc.F("Native DSD could not be started ({0}); sending DSD as DoP instead.", ex.Message)
+                    : Loc.F("Native DSD could not be started ({0}); playing PCM instead.", ex.Message));
                 pipeline = CreatePipeline(plan);
                 EnsureStream(plan, pipeline);
             }
@@ -850,8 +911,10 @@ public sealed class PlaybackEngine : IDisposable
         catch { pipeline.Dispose(); throw; }
         AttachDecoder(index, decoder, metadata, pipeline);
 
+        _lastError = null;
         SetState(paused ? EngineState.Paused : EngineState.Playing);
         UpdateCurrentIndex();
+        browser?.ProcessingReady?.Invoke();
     }
 
     private void AttachDecoder(int index, IAudioDecoder decoder, TrackMetadata? metadata, DspPipeline pipeline, QueueItem? item = null)
@@ -1118,7 +1181,7 @@ public sealed class PlaybackEngine : IDisposable
         }
 
         (Marker? marker, TimeSpan position) = ComputePlayback();
-        bool paused = _render is { Paused: true };
+        bool paused = _state == EngineState.Paused;
         if (_decoder is not null && _transition is null && !_draining && !outputChanged && !ProcessingOptionsChanged(previous, settings))
         {
             try
@@ -1144,11 +1207,11 @@ public sealed class PlaybackEngine : IDisposable
 
         if (marker?.IsTestTone == true)
         {
-            StartTestTone(_testToneMode);
+            StartTestTone(_testToneMode, paused);
         }
         else if (marker?.IsCapture == true && _captureProcessId > 0)
         {
-            StartCapture(_captureProcessId);
+            StartCapture(_captureProcessId, paused);
         }
         else if (marker?.IsStream == true && _decoder is { } stream && _network is not null)
         {
@@ -1156,7 +1219,7 @@ public sealed class PlaybackEngine : IDisposable
             // second stream, which a live one does not have.
             try
             {
-                StartPipeline(-1, stream, null, PlanFor(stream), TimeSpan.Zero, keepPaused: paused);
+                StartStreamPipeline(stream, paused);
             }
             catch (Exception ex) when (IsRecoverable(ex))
             {
@@ -1182,6 +1245,9 @@ public sealed class PlaybackEngine : IDisposable
         || a.Output.BufferMilliseconds != b.Output.BufferMilliseconds
         || a.Output.LowLatencyFifo != b.Output.LowLatencyFifo
         || a.Output.InstantPause != b.Output.InstantPause
+        // Releasing the driver also lets it probe DSD again after a DAC was disconnected or refused native DSD.
+        || a.Output.Mode != b.Output.Mode
+        || a.Output.DsdTransport != b.Output.DsdTransport
         || a.Output.FileOutputDirectory != b.Output.FileOutputDirectory
         || a.Processing.FifoMilliseconds != b.Processing.FifoMilliseconds;
 
@@ -1220,6 +1286,10 @@ public sealed class PlaybackEngine : IDisposable
             || a.Processing.NetworkDspPort != b.Processing.NetworkDspPort
             || a.Processing.RemoteResampling != b.Processing.RemoteResampling
             || a.Processing.RemoteRestorer != b.Processing.RemoteRestorer
+            || a.Processing.RemoteDsdOutput != b.Processing.RemoteDsdOutput
+            || a.Processing.ServerFifoMilliseconds != b.Processing.ServerFifoMilliseconds
+            || a.Processing.ServerThreads != b.Processing.ServerThreads
+            || a.Processing.ServerGpu != b.Processing.ServerGpu
             || a.Processing.RemoteUpscaler != b.Processing.RemoteUpscaler
             || a.Processing.PreprocessFiles != b.Processing.PreprocessFiles
             || a.Speakers.Enabled != b.Speakers.Enabled)
@@ -1264,12 +1334,17 @@ public sealed class PlaybackEngine : IDisposable
 
     private void StopInternal()
     {
+        Interlocked.Increment(ref _networkPauseVersion);
         _networkPaused = null;
         _prefillPausedStream = false;
         DisposeTransition();
         CloseDecoder();
         SetPipeline(null);
         CloseStream();
+        // The next playback may use a newly connected DAC with the same driver/device identifier.
+        _capabilities = null;
+        _capabilitiesKey = null;
+        _nativeDsdRefused = false;
         _draining = false;
         lock (_statusGate)
         {
@@ -1347,17 +1422,18 @@ public sealed class PlaybackEngine : IDisposable
     /// 40 kHz on a PCM output, or push a 9th-order modulator unstable on a DSD one. The limiter does
     /// nothing below full scale, so on a file with no overs this changes nothing at all.
     /// </summary>
-    private PlaybackPlan PlanFor(IAudioDecoder decoder) => ApplySource(PlanFor(decoder.Format), decoder.CodecName, _settings);
+    private PlaybackPlan PlanFor(IAudioDecoder decoder) => ApplySource(PlanFor(decoder.Format), decoder.CodecName, _settings, _network?.DirectBrowserAudio == true);
 
     /// <summary>
     /// The limiter on for a lossy codec; the neural upscaler told whether the source is lossy; and the upscaler
     /// dropped for a lossless source at an output below twice its rate, where there is neither a passband to
     /// correct nor room for the band above it.
     /// </summary>
-    internal static PlaybackPlan ApplySource(PlaybackPlan plan, string? codecName, PlayerSettings settings)
+    internal static PlaybackPlan ApplySource(PlaybackPlan plan, string? codecName, PlayerSettings settings, bool browserSource = false)
     {
-        bool coded = LossyCodecs.IsLossy(codecName);
-        plan = plan with { SourceCoded = coded, SourceCodec = codecName };
+        // Browser PCM describes the transport, not the provider codec. Automatic must not assume lossless.
+        bool coded = browserSource || LossyCodecs.IsLossy(codecName);
+        plan = plan with { SourceCoded = coded, SourceCodec = codecName, SourceCodecUnknown = browserSource };
         if (!plan.Limiter && coded)
         {
             plan = plan with { Limiter = true };
@@ -1418,7 +1494,7 @@ public sealed class PlaybackEngine : IDisposable
 
         DeviceCapabilities probed = _capabilities!;
         DeviceCapabilities capabilities = _nativeDsdRefused
-            ? new DeviceCapabilities { MaxChannels = probed.MaxChannels, PcmRates = probed.PcmRates, ContainerBits = probed.ContainerBits, Notes = probed.Notes }
+            ? new DeviceCapabilities { MaxChannels = probed.MaxChannels, PcmRates = probed.PcmRates, ContainerBits = probed.ContainerBits, CarriesDop = probed.CarriesDop, Notes = probed.Notes }
             : probed;
         return OutputPlanner.Plan(format, _settings, backend, capabilities);
     }
@@ -1449,7 +1525,7 @@ public sealed class PlaybackEngine : IDisposable
             (int)Math.Ceiling(Math.Max(_settings.Processing.NetworkDsp ? 0.032 : 0,
                 2.5 * Math.Max(pipeline.FilterBlockSeconds, pipeline.NetworkBlockSeconds)) * 1000.0));
 
-        if (_stream is not null && _stream.Format == format && _streamFailure is null && _fifoMilliseconds >= fifoMilliseconds)
+        if (_stream is not null && _stream.Format == format && _streamFailure is null && _fifoMilliseconds == fifoMilliseconds)
         {
             return;
         }
@@ -1460,7 +1536,7 @@ public sealed class PlaybackEngine : IDisposable
         // rates with a long buffer, and in int arithmetic that wraps to a negative, giving a ring of no size.
         long fifoBytes = (long)Math.Ceiling((double)format.CanonicalFrameRate * fifoMilliseconds / 1000.0)
             * format.CanonicalBytesPerFrame;
-        var ring = new SpscByteRing((int)Math.Min(fifoBytes, 256L << 20));
+        var ring = new SpscByteRing((int)Math.Min(fifoBytes, 256L << 20), exactCapacity: true);
         var render = new RenderSource(ring, format, _spaceAvailable, _settings.Output.InstantPause);
         var options = new AudioStreamOptions(_settings.Output.BufferMilliseconds, _settings.Output.FirstChannel, WindowHandle);
 
@@ -1539,15 +1615,22 @@ public sealed class PlaybackEngine : IDisposable
     /// <summary>Starts a newly opened device once the FIFO is primed, or when the writer would have to wait.</summary>
     private void StartStream()
     {
-        if (_prefillPausedStream && _render is { } render)
+        if (_prefillPausedStream && _state != EngineState.Paused && _render is { } render)
         {
             _prefillPausedStream = false;
             render.Paused = false;
         }
         if (!_streamStarted && _stream is { } stream)
         {
+            _streamStartedAt = Stopwatch.GetTimestamp();
             stream.Start();
             _streamStarted = true;
+        }
+        if (_streamStarted && _stream?.IsRealtime == true && _render is { } output)
+        {
+            long last = Math.Max(_streamStartedAt, output.LastCallback);
+            if (Stopwatch.GetElapsedTime(last).TotalSeconds > 3)
+                throw new IOException(Loc.T("The audio device is not requesting output. Retry playback or reconnect the device."));
         }
     }
 
@@ -1572,10 +1655,8 @@ public sealed class PlaybackEngine : IDisposable
             Thread.Sleep(1);
         }
 
-        if (ring.IsClearPending)
-        {
-            ring.ClearNow();
-        }
+        // A slow device acknowledges the saved boundary on its next callback. ClearNow here would race
+        // that consumer's read position and could discard the new pipeline's output or replay old audio.
     }
 
     private void AllocateBlocks(StreamFormat format, int block)
@@ -1604,9 +1685,12 @@ public sealed class PlaybackEngine : IDisposable
 
     private void CloseDecoder()
     {
-        _decoder?.Dispose();
+        IAudioDecoder? decoder = _decoder;
+        NetworkStreamRequest? browser = _network?.DirectBrowserAudio == true ? _network : null;
         _decoder = null;
         _network = null;
+        try { browser?.ProcessingStopped?.Invoke(); }
+        finally { decoder?.Dispose(); }
     }
 
     private void DisposeTransition()
@@ -1794,6 +1878,6 @@ public sealed class PlaybackEngine : IDisposable
     private sealed record ResetBrowserStreamCommand(string Uri) : Command;
 
     private sealed record ShutdownCommand : Command;
-    private sealed record NetworkPauseCommand : Command;
+    private sealed record NetworkPauseCommand(int Version) : Command;
     private sealed record NetworkResumeCommand : Command;
 }
