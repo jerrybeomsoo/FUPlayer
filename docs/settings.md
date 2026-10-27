@@ -1,5 +1,11 @@
 # Settings and output
 
+## Update FUPlayer
+
+Select **Update FUPlayer** to check and download the latest stable GitHub release. A verified update
+offers **Install and restart**; playback stops at that step. Preferences, Firefox sign-in and optional
+FFmpeg files are retained. See [updating](updating.md) for writable-folder requirements and recovery.
+
 ## Audio output
 
 On **Output**, select the back-end and device before choosing the sample rate.

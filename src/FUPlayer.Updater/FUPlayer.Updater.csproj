@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>FUPlayer.Updater</AssemblyName>
+    <ApplicationIcon>../FUPlayer.App/Assets/fuplayer.ico</ApplicationIcon>
+    <ApplicationManifest>../FUPlayer.App/app.manifest</ApplicationManifest>
+    <FuPlayerDirectML>false</FuPlayerDirectML>
+    <FuPlayerSkipModelCopy>true</FuPlayerSkipModelCopy>
+    <FuPlayerSkipFFmpegCopy>true</FuPlayerSkipFFmpegCopy>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+  <ItemGroup><ProjectReference Include="../FUPlayer.Update/FUPlayer.Update.csproj" /></ItemGroup>
+</Project>

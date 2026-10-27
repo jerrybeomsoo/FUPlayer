@@ -1,6 +1,6 @@
 <# Builds the player, standalone servers, Windows controller and release checksums. #>
 [CmdletBinding()]
-param([ValidatePattern('^\d+\.\d+\.\d+(-[A-Za-z0-9.-]+)?$')][string]$Version = '0.7.1')
+param([ValidatePattern('^\d+\.\d+\.\d+(-[A-Za-z0-9.-]+)?$')][string]$Version = '0.7.2')
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 $taskAssets = Join-Path $taskRoot "artifacts\release-$Version"

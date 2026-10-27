@@ -13,10 +13,10 @@ dotnet run --project .\src\FUPlayer.App -c Release
 To produce the same six files as a release, including self-contained Windows/Linux x64 servers:
 
 ```powershell
-pwsh .\build\release.ps1 -Version 0.7.1
+pwsh .\build\release.ps1 -Version 0.7.2
 ```
 
-The files appear in `artifacts\release-0.7.1`. The Windows ZIP includes both models and user guides.
+The files appear in `artifacts\release-0.7.2`. The Windows ZIP includes both models and user guides.
 FFmpeg and the DirectML redistributable are excluded. The player uses the DirectML library supplied by
 Windows. Keep [licences and notices](../THIRD-PARTY-NOTICES.md) with redistributed builds.
 
@@ -30,3 +30,8 @@ The Windows player includes the project's Mozilla-signed streaming add-on as an 
 It does not include Firefox or a browser profile. The extension source is under
 `src/FUPlayer.App/StreamingAddon`; `build/firefox-addon.ps1` copies its readable source into a signing ZIP.
 Changing the extension requires a new Mozilla-signed version before replacing the bundled XPI.
+
+The player ZIP also includes `FUPlayer.Updater.exe`, a self-contained helper published by
+`build/package.ps1`. `FUPlayer.Update` contains release validation and transactional file replacement;
+the helper runs from temporary staging so it can replace the closed player's files. No additional
+third-party package or separately installed runtime is required for updates.

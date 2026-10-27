@@ -226,6 +226,34 @@ internal static class FirefoxNative
         }
     }
 
+    internal static void FocusBrowser(nint window, nint parent)
+    {
+        if (!IsInteractiveHost(window, parent)) return;
+        // Do not steal focus from another program, a player control, or a separate Firefox dialog.
+        nint root = GetAncestor(parent, 2);
+        if (root == 0 || GetForegroundWindow() != root) return;
+        nint focus = GetFocus();
+        if (focus == window || IsChild(window, focus)) return;
+        // SetParent joins the native input queues. Use Windows focus rather than forwarding text/keys,
+        // so Firefox retains its normal editing, shortcuts and IME composition handling.
+        SetFocus(window);
+    }
+
+    internal static bool BrowserHasFocus(nint window, nint parent)
+    {
+        if (!IsInteractiveHost(window, parent)) return false;
+        nint root = GetAncestor(parent, 2);
+        if (root == 0 || GetForegroundWindow() != root) return false;
+        nint focus = GetFocus();
+        return focus == window || IsChild(window, focus);
+    }
+
+    private static bool IsInteractiveHost(nint window, nint parent) => parent != 0 && IsWindow(window)
+        && GetParent(window) == parent && IsWindowVisible(window) && IsWindowEnabled(window);
+
+    internal static bool PostActivation(nint window, uint message, nint wparam, nint lparam) =>
+        IsWindow(window) && PostMessage(window, message, wparam, lparam);
+
     internal static (int Width, int Height) Viewport(nint window, nint parent)
     {
         if (parent == 0 || !GetClientRect(parent, out Rectangle bounds)) return default;
@@ -257,11 +285,17 @@ internal static class FirefoxNative
     [DllImport("user32.dll")] private static extern bool EnumWindows(WindowCallback callback, nint parameter);
     [DllImport("user32.dll")] internal static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindowEnabled(nint window);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint process);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(nint window, StringBuilder name, int count);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(nint window, StringBuilder name, int count);
     [DllImport("user32.dll", SetLastError = true)] private static extern nint SetParent(nint window, nint parent);
     [DllImport("user32.dll")] private static extern nint GetParent(nint window);
+    [DllImport("user32.dll")] private static extern nint GetAncestor(nint window, uint flags);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern nint GetFocus();
+    [DllImport("user32.dll")] private static extern nint SetFocus(nint window);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsChild(nint parent, nint child);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint window, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern nint SetWindowLongPtr(nint window, int index, nint value);
     [DllImport("user32.dll")] private static extern bool GetClientRect(nint window, out Rectangle rectangle);

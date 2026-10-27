@@ -14,6 +14,7 @@ namespace FUPlayer.App.ViewModels;
 /// <summary>The Settings page: playback behaviour, processing resources and information about the build.</summary>
 public sealed partial class SettingsViewModel : ObservableObject
 {
+    public UpdateViewModel Updates { get; }
     public StreamingViewModel Streaming { get; init; } = null!;
 
     private readonly PlayerServices _services;
@@ -118,6 +119,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     public SettingsViewModel(PlayerServices services)
     {
         _services = services;
+        Updates = new(services.Store.SettingsDirectory);
         PlayerSettings settings = services.Settings;
         Gapless = settings.Playback.Gapless;
         SelectedReplayGain = Choice.Find(ReplayGainChoices, settings.Playback.ReplayGain);

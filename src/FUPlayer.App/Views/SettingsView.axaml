@@ -13,6 +13,20 @@
       </StackPanel>
 
       <Border Classes="card">
+        <StackPanel Spacing="10" DataContext="{Binding Updates}" x:DataType="vm:UpdateViewModel">
+          <TextBlock Classes="h3" Text="Update FUPlayer" />
+          <TextBlock Classes="secondary" TextWrapping="Wrap" Text="{Binding Status}" />
+          <TextBlock Classes="muted small" TextWrapping="Wrap" Text="Settings, Firefox sign-in and optional FFmpeg files are kept. Playback stops only when you choose Install and restart." />
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <Button Content="Update FUPlayer" Classes="primary" Command="{Binding UpdateFuPlayerCommand}" IsEnabled="{Binding !IsBusy}" IsVisible="{Binding !IsReady}" />
+            <Button Content="Install and restart" Classes="primary" Command="{Binding InstallUpdateCommand}" IsEnabled="{Binding !IsBusy}" IsVisible="{Binding IsReady}" />
+            <Button Content="Cancel download" Command="{Binding CancelUpdateCommand}" IsVisible="{Binding IsDownloading}" />
+          </StackPanel>
+          <ProgressBar Minimum="0" Maximum="1" Value="{Binding Progress}" IsVisible="{Binding IsDownloading}" Height="4" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
         <views:StreamingSettingsView DataContext="{Binding Streaming}" />
       </Border>
 

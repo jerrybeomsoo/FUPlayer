@@ -12,6 +12,7 @@ public sealed class FirefoxSession(string settingsDirectory) : IDisposable
     private Process? _process;
     private FileStream? _profileLease;
     private FirefoxNative.Attachment? _attachment;
+    private FirefoxKeyboardActivation? _keyboardActivation;
     private nint _window, _host;
     private bool _servicePopup, _minimizeSetup;
     private FirefoxStartupVisibility? _startupVisibility;
@@ -117,13 +118,19 @@ public sealed class FirefoxSession(string settingsDirectory) : IDisposable
                     FirefoxNative.ObserveStartup(_process.Id, window, WindowTitleMarker, visibility);
             if (_minimizeSetup) FirefoxNative.ParkSetup(_process!.Id, WindowTitleMarker);
             _attachment = null;
+            _keyboardActivation = null;
             _window = FirefoxNative.FindWindows(_process!.Id, _servicePopup ? WindowTitleMarker : null, visibleOnly: !_servicePopup).FirstOrDefault();
             CaptureProcessId = _window == 0 ? 0 : FirefoxNative.ProcessId(_window);
         }
         if (_window == 0) return;
         if (!embed) { Detach(); PresentService(); }
-        else if (_host != 0 && _attachment is null) _attachment = FirefoxNative.Attach(_window, _host);
-        if (_attachment is not null) { FirefoxNative.Resize(_window, _host); PresentService(); }
+        else if (_host != 0 && _attachment is null)
+        {
+            _attachment = FirefoxNative.Attach(_window, _host);
+            nint attached = _window;
+            _keyboardActivation = new((message, wparam, lparam) => FirefoxNative.PostActivation(attached, message, wparam, lparam));
+        }
+        if (_attachment is not null) { FirefoxNative.Resize(_window, _host); PresentService(); UpdateKeyboardActivation(); }
     }
 
     private void PresentService()
@@ -132,6 +139,19 @@ public sealed class FirefoxSession(string settingsDirectory) : IDisposable
         _startupVisibility?.Present(_window);
         _startupVisibility = null;
         FirefoxNative.ShowService(_window);
+    }
+
+    /// <summary>User-initiated focus only; never called by the playback or browser status timer.</summary>
+    internal void FocusBrowser()
+    {
+        if (_attachment is not null && _host != 0) FirefoxNative.FocusBrowser(_window, _host);
+        UpdateKeyboardActivation();
+    }
+
+    private void UpdateKeyboardActivation()
+    {
+        // Observation only: status updates never call SetFocus or change the foreground window.
+        _keyboardActivation?.SetFocused(_attachment is not null && FirefoxNative.BrowserHasFocus(_window, _host));
     }
 
     private void EndStartup(bool reveal)
@@ -157,6 +177,7 @@ public sealed class FirefoxSession(string settingsDirectory) : IDisposable
     private void Detach()
     {
         if (_attachment is not null) { FirefoxNative.Detach(_attachment); _attachment = null; }
+        _keyboardActivation = null; // A standalone Firefox window owns its normal activation again.
     }
 
     private void ReleaseExited()

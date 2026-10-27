@@ -3,7 +3,7 @@ param(
     [ValidateSet('win-x64')][string]$Runtime = 'win-x64',
     [string]$OutputDirectory,
     [string]$ArtifactsDirectory,
-    [string]$Version = '0.7.1'
+    [string]$Version = '0.7.2'
 )
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot

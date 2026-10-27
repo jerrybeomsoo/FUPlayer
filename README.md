@@ -11,7 +11,7 @@ so your DAC's own oversampling filter and modulator never run.
 Now with Neural Restorer and Upscaler.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.1-blue.svg?style=flat-square)](https://github.com/jerrybeomsoo/FUPlayer/releases/tag/v0.7.1)
+[![Version](https://img.shields.io/badge/version-0.7.2-blue.svg?style=flat-square)](https://github.com/jerrybeomsoo/FUPlayer/releases/tag/v0.7.2)
 
 <img src="docs/images/dsp-studio.png" alt="FUPlayer DSP studio" width="820">
 
@@ -23,7 +23,7 @@ Whether a DAC bypasses its internal processing depends on the device and its sel
 
 ## Download and first run
 
-1. Download **FUPlayer-0.7.1-win-x64.zip** from the [latest release](https://github.com/jerrybeomsoo/FUPlayer/releases/latest).
+1. Download **FUPlayer-0.7.2-win-x64.zip** from the [latest release](https://github.com/jerrybeomsoo/FUPlayer/releases/latest).
 2. Extract the whole ZIP to a writable folder. Start **FUPlayer.exe** inside it.
 3. On **Output**, choose your audio back-end and device. Start with a PCM rate your DAC supports.
 4. Add music folders in **Library**, or open files and add them to the queue.
@@ -32,6 +32,8 @@ Whether a DAC bypasses its internal processing depends on the device and its sel
 The player requires **64-bit Windows 10 or 11**. The ZIP includes the .NET runtime and both neural models;
 no separate .NET installation is needed. ASIO needs your device's driver. GPU processing needs a working GPU driver.
 Keep the files and the `models` folder beside the executables when moving the installation.
+From v0.7.2, use **Settings → Update FUPlayer** for later stable releases, then **Install and restart**.
+See [updating](docs/updating.md). Earlier versions need one manual ZIP upgrade.
 Settings and the library cache are stored separately in `%APPDATA%\FUPlayer` and survive an upgrade.
 Close the old player before replacing it; extracting a new release into a new folder also works.
 
@@ -61,7 +63,7 @@ server as a boot service using the downloadable **install-dsp-server.sh**.
 The server releases its active workers when playback stops or pauses.
 
 Start with the [network setup guide](docs/network-dsp.md), then enable **Settings → Network DSP** and choose
-the stages to process remotely. v0.7.1 retains protocol 4 from v0.6.3; existing v0.6.3 servers remain compatible. Versions through v0.6.2 use an older protocol. Internet servers use an access key and encrypted UDP, without TLS.
+the stages to process remotely. v0.7.2 retains protocol 4 from v0.6.3; existing v0.6.3 servers remain compatible. Versions through v0.6.2 use an older protocol. Internet servers use an access key and encrypted UDP, without TLS.
 LAN-only servers can retain plain UDP. Only the listener port needs forwarding; worker ports stay on loopback.
 
 ## Guides
@@ -77,12 +79,13 @@ LAN-only servers can retain plain UDP. Only the listener port needs forwarding; 
 | Play from a UPnP controller | [UPnP input](docs/upnp-input.md) |
 | Fix dropouts or report a problem | [Troubleshooting](docs/troubleshooting.md) |
 | Render files or use the terminal | [Command line](docs/cli.md) |
+| Install an update | [Updating FUPlayer](docs/updating.md) |
 | Build the software | [Building](docs/building.md) |
 
-These guides are also in the ZIP's `docs` folder. [Changes in v0.7.1](CHANGELOG.md) add Apple Music
-playback fixes, server DSD conversion, separate client/server FIFO controls, and a Windows DSP server
-controller. The signed Apple Music add-on loads automatically after its first installation. Firefox is installed separately. Supported output rates and
-sustained DSP performance still depend on your hardware.
+These guides are also in the ZIP's `docs` folder. [Changes in v0.7.2](CHANGELOG.md) add in-app release
+updates and fix keyboard input and caret display in embedded Apple Music. The signed add-on loads
+automatically after its first installation. Firefox is installed separately. Supported output rates
+and sustained DSP performance depend on your hardware.
 
 ## Licence and contributions
 

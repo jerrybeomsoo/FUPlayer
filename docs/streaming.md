@@ -75,3 +75,7 @@ if Now playing reports sustained overload.
 The settings folder contains the dedicated `browser/firefox` profile and private sign-ins. Keep it
 private and out of shared archives. Never copy a browser profile into a bug report or a release.
 Read [streaming privacy](streaming-privacy.md) for the data exchanged with local FUPlayer.
+
+Embedded Apple Music accepts normal keyboard input from v0.7.2. Click a text field or use Tab;
+its caret/selection follows browser focus. Player controls and other applications can take focus
+normally. This change does not require a new signed add-on.

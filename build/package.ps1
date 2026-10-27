@@ -22,11 +22,11 @@
     to keep.
 
 .EXAMPLE
-    pwsh build/package.ps1 -Version 0.7.1
+    pwsh build/package.ps1 -Version 0.7.2
 #>
 [CmdletBinding()]
 param(
-    [ValidatePattern('^\d+\.\d+\.\d+(-[A-Za-z0-9.-]+)?$')][string]$Version = "0.7.1",
+    [ValidatePattern('^\d+\.\d+\.\d+(-[A-Za-z0-9.-]+)?$')][string]$Version = "0.7.2",
     [ValidatePattern('^[a-z0-9-]+$')][string]$Runtime = "win-x64",
     [switch]$FrameworkDependent,
     [switch]$IncludeFFmpeg
@@ -72,6 +72,14 @@ foreach ($project in @("src\FUPlayer.App\FUPlayer.App.csproj", "src\FUPlayer.Cli
 Get-ChildItem $stage -Filter *.pdb | Remove-Item -Force
 Get-ChildItem $stage -Filter *.lib | Remove-Item -Force
 
+# The updater must run outside the installation while these executables are replaced.
+# One self-contained helper avoids depending on a separately installed .NET runtime.
+$updaterStage = Join-Path $root "artifacts\updater\$Runtime"
+dotnet publish (Join-Path $root 'src\FUPlayer.Updater\FUPlayer.Updater.csproj') -c Release -r $Runtime --self-contained true `
+    --artifacts-path (Join-Path $root 'artifacts\updater-build') -o $updaterStage --nologo -p:Version=$Version -p:DebugSymbols=false
+if ($LASTEXITCODE -ne 0) { throw 'Updater publish failed.' }
+Copy-Item -LiteralPath (Join-Path $updaterStage 'FUPlayer.Updater.exe') -Destination $stage
+
 # The neural restorer and upscaler, beside the executables, which is the first
 # place the player looks for models.
 $models = Get-ChildItem (Join-Path $root "models\*") -Include *.onnx, *.json -File
@@ -89,7 +97,7 @@ Copy-Item (Join-Path $root "licenses") (Join-Path $stage "licenses") -Recurse
 # Only public user guides belong in the offline package, never development reports.
 $guideDirectory = Join-Path $stage 'docs'
 New-Item -ItemType Directory -Path $guideDirectory -Force | Out-Null
-foreach ($guide in @('settings.md', 'dsp.md', 'library.md', 'network-dsp.md', 'windows-dsp-controller.md', 'neural-restorer.md', 'neural-upscaler.md', 'exciter.md', 'transient-aligned-filter.md', 'cli.md', 'building.md', 'building-ffmpeg.md', 'upnp-input.md', 'streaming.md', 'streaming-privacy.md', 'troubleshooting.md')) {
+foreach ($guide in @('settings.md', 'updating.md', 'dsp.md', 'library.md', 'network-dsp.md', 'windows-dsp-controller.md', 'neural-restorer.md', 'neural-upscaler.md', 'exciter.md', 'transient-aligned-filter.md', 'cli.md', 'building.md', 'building-ffmpeg.md', 'upnp-input.md', 'streaming.md', 'streaming-privacy.md', 'troubleshooting.md')) {
     $guidePath = Join-Path $root "docs\$guide"
     if (Test-Path -LiteralPath $guidePath) { Copy-Item -LiteralPath $guidePath -Destination $guideDirectory }
 }

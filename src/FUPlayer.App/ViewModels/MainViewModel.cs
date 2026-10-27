@@ -311,6 +311,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         _timer.Stop();
         General.CancelFfmpegBuildOnExit();
+        General.Updates.Dispose();
         Library.Dispose();
         Streaming.Dispose();
     }

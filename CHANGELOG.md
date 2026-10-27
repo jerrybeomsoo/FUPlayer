@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.7.2 — 2026-10-27
+
+### Added
+
+- **Settings → Update FUPlayer.** Check and download the latest stable Windows release directly
+  from GitHub, with progress and cancellation. After verification, **Install and restart** closes
+  playback normally and applies the update with a separate bundled helper. Settings, queue,
+  Firefox sign-in and optional FFmpeg files are preserved.
+- **Verified, recoverable installation.** Release SHA-256/digest checks, bounded ZIP extraction,
+  destination checks, file backup and rollback protect the update process. The helper waits for
+  the old player and briefly retries file locks; it never kills another application or requests elevation.
+  [Update guide](https://github.com/jerrybeomsoo/FUPlayer/blob/v0.7.2/docs/updating.md).
+
+### Fixed
+
+- **Typing in embedded Apple Music.** Clicking or tabbing into Firefox now hands native keyboard
+  focus to the owned browser. Normal text editing works while the service remains embedded.
+- **Missing text caret after the typing fix.** The browser's activation state now follows actual
+  keyboard/foreground focus. Ordered activation/focus notifications restore the caret and selection
+  visuals without repeatedly resetting them on status ticks. Hover, resizing and player controls
+  do not pull keyboard focus into Firefox. The existing signed add-on 0.3.1 is unchanged.
+
+### Upgrade
+
+- Users on v0.7.1 or earlier must download and extract this ZIP once; the new update button handles
+  later stable releases. Keep `FUPlayer.Updater.exe` beside the player.
+- The player updater does not deploy or restart standalone DSP servers. Their release downloads and
+  Linux installer remain separate. All six release assets have a SHA-256 manifest.
+
 ## 0.7.1 — 2026-10-27
 
 ### Added

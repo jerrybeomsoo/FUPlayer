@@ -1308,5 +1308,17 @@
   "UDP listener port": "UDP 수신 포트",
   "Use 64-bit GPU arithmetic": "GPU 64비트 연산 사용",
   "Use GPU even when its timing is slower": "처리가 느려도 GPU 사용",
-  "Worker ports (local only)": "작업 포트 (로컬 전용)"
+  "Worker ports (local only)": "작업 포트 (로컬 전용)",
+  "Update FUPlayer": "FUPlayer 업데이트",
+  "Check the latest stable release on GitHub. Updates are downloaded only when requested.": "GitHub의 최신 안정 버전을 확인합니다. 업데이트는 요청할 때만 다운로드합니다.",
+  "Checking GitHub releases…": "GitHub 릴리스를 확인하는 중…",
+  "FUPlayer {0} is up to date.": "FUPlayer {0}은(는) 최신 버전입니다.",
+  "Downloading FUPlayer {0}…": "FUPlayer {0} 다운로드 중…",
+  "FUPlayer {0} is verified and ready. Install and restart when you are ready to stop playback.": "FUPlayer {0}의 검증을 마쳤습니다. 재생을 중지할 준비가 되면 설치 후 다시 시작을 누르세요.",
+  "Update download cancelled.": "업데이트 다운로드를 취소했습니다.",
+  "Update failed: {0}": "업데이트 실패: {0}",
+  "Preparing the update. FUPlayer will close and restart after its files are ready.": "업데이트를 준비하는 중입니다. 파일 준비가 끝나면 FUPlayer를 종료하고 다시 시작합니다.",
+  "Settings, Firefox sign-in and optional FFmpeg files are kept. Playback stops only when you choose Install and restart.": "설정, Firefox 로그인 및 선택 설치한 FFmpeg 파일은 유지됩니다. 설치 후 다시 시작을 선택할 때만 재생을 중지합니다.",
+  "Install and restart": "설치 후 다시 시작",
+  "Cancel download": "다운로드 취소"
 }
